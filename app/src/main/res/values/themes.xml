@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="arcade_night">#FF120A24</color>
+    <color name="icon_background">#FF1B0F3A</color>
+
+    <style name="Theme.PocketArcade" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/arcade_night</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

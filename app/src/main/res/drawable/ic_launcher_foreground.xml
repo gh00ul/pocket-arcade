@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A pixel-art arcade cabinet, drawn as 4-unit squares inside the adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Marquee -->
+    <path android:fillColor="#FF3FA4" android:pathData="M30,22h48v12h-48z" />
+    <path android:fillColor="#FFE14D" android:pathData="M34,26h4v4h-4z M42,26h4v4h-4z M50,26h4v4h-4z M58,26h4v4h-4z M66,26h4v4h-4z" />
+    <!-- Body -->
+    <path android:fillColor="#7B3FE4" android:pathData="M30,34h48v52h-48z" />
+    <path android:fillColor="#5224A8" android:pathData="M30,34h4v52h-4z M74,34h4v52h-4z" />
+    <!-- Screen -->
+    <path android:fillColor="#1A1030" android:pathData="M34,38h40v24h-40z" />
+    <path android:fillColor="#0B2A3A" android:pathData="M38,42h32v16h-32z" />
+    <path android:fillColor="#3DF5FF" android:pathData="M47,42h2v2h-2z M59,42h2v2h-2z M49,44h2v2h-2z M57,44h2v2h-2z M47,46h14v2h-14z M45,48h4v2h-4z M51,48h6v2h-6z M59,48h4v2h-4z M43,50h22v2h-22z M43,52h2v2h-2z M47,52h14v2h-14z M63,52h2v2h-2z M43,54h2v2h-2z M47,54h2v2h-2z M59,54h2v2h-2z M63,54h2v2h-2z M49,56h4v2h-4z M55,56h4v2h-4z" />
+    <!-- Control panel -->
+    <path android:fillColor="#3A1A7A" android:pathData="M26,62h56v8h-56z" />
+    <path android:fillColor="#101010" android:pathData="M40,64h2v4h-2z" />
+    <path android:fillColor="#FF4D4D" android:pathData="M38,59h6v6h-6z" />
+    <path android:fillColor="#FFE14D" android:pathData="M54,64h4v4h-4z" />
+    <path android:fillColor="#3DF5FF" android:pathData="M62,64h4v4h-4z" />
+    <!-- Coin door and base -->
+    <path android:fillColor="#2A1460" android:pathData="M46,70h16v12h-16z M30,82h48v4h-48z" />
+    <path android:fillColor="#FFC83D" android:pathData="M52,73h4v6h-4z" />
+</vector>
