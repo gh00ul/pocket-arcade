@@ -49,3 +49,11 @@ class Vec2(var x: Float = 0f, var y: Float = 0f) {
         x = nx; y = ny; return this
     }
 }
+
+/** Hash-based value noise in 0..1 for deterministic procedural detail. */
+fun hash01(x: Int, y: Int, seed: Int = 0): Float {
+    var h = x * 374761393 + y * 668265263 + seed * 1274126177
+    h = (h xor (h ushr 13)) * 1103515245
+    h = h xor (h ushr 16)
+    return (h and 0xFFFF) / 65535f
+}

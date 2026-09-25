@@ -5,7 +5,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
-import com.pocketarcade.engine.PixelFont
+import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.Spring
 import com.pocketarcade.engine.TouchType
@@ -26,6 +26,7 @@ import com.pocketarcade.engine.r3d.Xform
 import com.pocketarcade.engine.range
 import com.pocketarcade.games.BaseMiniGame
 import com.pocketarcade.games.CabinetLook
+import com.pocketarcade.games.CabinetShape
 import com.pocketarcade.games.GAME_H
 import com.pocketarcade.games.GAME_W
 import kotlin.math.PI
@@ -67,7 +68,7 @@ class WhackAMoleGame : BaseMiniGame() {
         "HITS IN A ROW BUILD A COMBO",
         "IT GETS FASTER...",
     )
-    override val look = CabinetLook(body = Pal.GREEN, trim = Pal.BROWN, glow = Pal.LIME)
+    override val look = CabinetLook(body = Pal.GREEN, trim = Pal.BROWN, glow = Pal.LIME, shape = CabinetShape.WHACK)
     override val roundSeconds = WhackTuning.ROUND_SECONDS
 
     private enum class Kind { NORMAL, GOLD, BOMB }
@@ -93,7 +94,6 @@ class WhackAMoleGame : BaseMiniGame() {
         const val RIM_W = 9f
         const val RIM_H = 5f
         const val WELL_DEPTH = 110f
-        const val MOLE_W = 80f
         /** Height of the mole that shows above the rim when fully up. */
         const val MOLE_H = 92f
         /** Extra body below the rim, so the bottom of the sprite never shows down the hole. */
@@ -309,7 +309,7 @@ class WhackAMoleGame : BaseMiniGame() {
      * The table in 3D. Holes sit on a 3×3 grid of world positions; their on-screen positions
      * (for hit tests, particles and popups) come from projecting them through the fixed camera.
      */
-    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt(), "whack").apply {
+    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt()).apply {
         look(180f, 560f, 560f, 180f, 0f, 190f, fovDeg = 52f, centerYFrac = 0.625f)
     }
     private val pt = FloatArray(3)
@@ -408,9 +408,9 @@ class WhackAMoleGame : BaseMiniGame() {
         drawBulbs(r)
         for (i in moles.indices) drawMole(r, i)
         drawMallet(r)
-        stage.present(scope)
+        stage.present()
         if (stunT > 0f) {
-            PixelFont.drawCentered(scope, "STUNNED!", GAME_W / 2f, 600f, 3f, Color(Pal.RED), 0.5f + 0.5f * abs(sin(time * 20f)))
+            ArcadeFont.drawCentered(scope, "STUNNED!", GAME_W / 2f, 600f, 3f, Color(Pal.RED), 0.5f + 0.5f * abs(sin(time * 20f)))
         }
     }
 
@@ -449,30 +449,31 @@ class WhackAMoleGame : BaseMiniGame() {
         for (i in 0 until 14) {
             val x = TABLE_L - 7f + i * (TABLE_R - TABLE_L + 14f) / 13f
             val on = ((time * 5f).toInt() + i) % 2 == 0
-            r.sprite(x, BACK_H + 10f, TABLE_BACK + 3f, 7f, 7f, white, emissive = 1.2f, tint = if (on) Pal.YELLOW else Pal.shade(Pal.YELLOW, 0.35f))
+            r.sprite(x, BACK_H + 10f, TABLE_BACK + 3f, 7f, 7f, TexKit.dot.full, emissive = 1.2f, tint = if (on) Pal.YELLOW else Pal.shade(Pal.YELLOW, 0.35f))
             if (on) r.sprite(x, BACK_H + 10f, TABLE_BACK + 4f, 26f, 26f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.5f, tint = Pal.GOLD)
         }
     }
+
+    private val moleXf = Xform()
 
     private fun drawMole(r: Renderer3D, i: Int) {
         val m = moles[i]
         if (m.phase == Phase.HIDDEN || m.rise <= 0.01f) return
         val bonked = m.phase == Phase.BONKED
-        val tex = WhackArt.sprites[
-            when (m.kind) {
-                Kind.NORMAL -> if (bonked) 1 else 0
-                Kind.GOLD -> if (bonked) 3 else 2
-                Kind.BOMB -> if (bonked) 5 else 4
-            },
-        ]
+        val model = when (m.kind) {
+            Kind.NORMAL -> if (bonked) Moles.normalBonked else Moles.normal
+            Kind.GOLD -> if (bonked) Moles.goldBonked else Moles.gold
+            Kind.BOMB -> if (bonked) Moles.bombHit else Moles.bomb
+        }
         val sq = m.squash.value
-        val w = MOLE_W * (2f - sq)
         val h = (MOLE_H + MOLE_BELOW) * sq
         val x = worldX(i)
         val z = worldZ(i)
         // Below the table the mole is only visible through its hole.
         val base = moleBase(m.rise) - MOLE_BELOW * sq
-        r.billboard(x, base, z, w, h, tex.full, lean = 0.35f, depthBias = 1f)
+        // Tipped back a touch so the face looks up at the player.
+        moleXf.set(x, base, z, pitch = -0.1f).stretch(2f - sq, sq, 2f - sq)
+        model.draw(r, xf = moleXf)
         if (m.kind == Kind.GOLD && !bonked) {
             r.sprite(x, base + h * 0.6f, z + 4f, 110f, 110f, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = 0.35f * m.rise, tint = Pal.GOLD)
         }

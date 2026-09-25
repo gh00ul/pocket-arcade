@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -32,6 +33,7 @@ import com.pocketarcade.data.SaveState
 import com.pocketarcade.engine.AudioSynth
 import com.pocketarcade.engine.Haptics
 import com.pocketarcade.engine.Pal
+import com.pocketarcade.engine.gl.GlSurface
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.games.GameRegistry
 import com.pocketarcade.hub.HubScreen
@@ -40,7 +42,8 @@ import com.pocketarcade.hub.Spot
 import com.pocketarcade.hub.SpotType
 import com.pocketarcade.ui.GameHostScreen
 import com.pocketarcade.ui.Hud
-import com.pocketarcade.ui.PixelText
+import com.pocketarcade.ui.ArcadeText
+import com.pocketarcade.ui.GlassBox
 import com.pocketarcade.ui.PrizeCounterScreen
 import com.pocketarcade.ui.ProfileScreen
 import com.pocketarcade.ui.TitleScreen
@@ -184,6 +187,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     }
 
     Box(Modifier.fillMaxSize().background(Color(Pal.NIGHT))) {
+        // Every 3D picture is drawn by the GPU on this surface, under the interface.
+        GlSurface(Modifier.fillMaxSize())
         when (screen) {
             Screen.TITLE -> TitleScreen(save, games) {
                 if (!busy) {
@@ -247,12 +252,11 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                 Modifier
                     .align(Alignment.TopCenter)
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(top = 84.dp, start = 12.dp, end = 12.dp)
-                    .background(Color(Pal.NIGHT))
-                    .border(3.dp, Color(Pal.YELLOW))
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(top = 84.dp, start = 12.dp, end = 12.dp),
             ) {
-                PixelText(text, pixel = 2.dp, color = Color(Pal.YELLOW), centered = true)
+                GlassBox(Modifier.background(Color(0xE6120C22), RoundedCornerShape(16.dp)), highlight = Color(Pal.YELLOW)) {
+                    ArcadeText(text, unit = 2.2.dp, color = Color(Pal.YELLOW), centered = true)
+                }
             }
         }
 

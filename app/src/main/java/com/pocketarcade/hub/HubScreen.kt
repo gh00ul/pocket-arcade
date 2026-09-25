@@ -14,6 +14,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onSizeChanged
 import com.pocketarcade.data.SaveState
+import com.pocketarcade.engine.gl.Gfx
 import com.pocketarcade.engine.rememberGameLoop
 
 /**
@@ -37,7 +38,10 @@ fun HubScreen(
     val frame = rememberGameLoop(world) { dt -> world.update(dt) }
 
     DisposableEffect(world) {
-        onDispose { world.cancelInput() }
+        onDispose {
+            world.cancelInput()
+            Gfx.remove(HubRenderer.SLOT)
+        }
     }
 
     Canvas(

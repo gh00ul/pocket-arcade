@@ -5,7 +5,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
-import com.pocketarcade.engine.PixelFont
+import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.clamp01
@@ -65,7 +65,7 @@ class AirHockeyGame : BaseMiniGame() {
         "GOALS IN A ROW SCORE MORE",
         "FIRST TO 7 WINS!",
     )
-    override val look = CabinetLook(body = Pal.SKY, trim = Pal.WHITE, glow = Pal.CYAN, shape = CabinetShape.TABLE)
+    override val look = CabinetLook(body = Pal.SKY, trim = Pal.WHITE, glow = Pal.CYAN, shape = CabinetShape.AIR_HOCKEY)
     override val roundSeconds = HockeyTuning.ROUND_SECONDS
 
     private companion object {
@@ -408,7 +408,7 @@ class AirHockeyGame : BaseMiniGame() {
 
     // ---------------------------------------------------------------- 3D presentation
 
-    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt(), "hockey").apply {
+    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt()).apply {
         look(CX, 560f, 800f, CX, 0f, 320f, fovDeg = 50f)
     }
     private val pt = FloatArray(3)
@@ -531,11 +531,11 @@ class AirHockeyGame : BaseMiniGame() {
             val blink = 0.5f + 0.5f * sin(time * 12f)
             r.flat(puck.x, puck.y, 1f, 60f, 60f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.4f * blink, tint = Pal.WHITE)
         }
-        stage.present(scope)
+        stage.present()
 
         if (dragging < 0 && !timeUp && time < 4f) {
             val a = 0.5f + 0.5f * sin(time * 6f)
-            PixelFont.drawCentered(scope, "DRAG YOUR MALLET", GAME_W / 2f, 612f, 2f, Color.White, a)
+            ArcadeFont.drawCentered(scope, "DRAG YOUR MALLET", GAME_W / 2f, 612f, 2f, Color.White, a)
         }
     }
 

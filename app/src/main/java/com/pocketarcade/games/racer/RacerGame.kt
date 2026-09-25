@@ -7,7 +7,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
-import com.pocketarcade.engine.PixelFont
+import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.approach
@@ -26,6 +26,7 @@ import com.pocketarcade.engine.r3d.Xform
 import com.pocketarcade.engine.range
 import com.pocketarcade.games.BaseMiniGame
 import com.pocketarcade.games.CabinetLook
+import com.pocketarcade.games.CabinetShape
 import com.pocketarcade.games.GAME_H
 import com.pocketarcade.games.GAME_W
 import kotlin.math.PI
@@ -68,7 +69,7 @@ class RacerGame : BaseMiniGame() {
         "SKIM PAST CARS FOR MORE",
         "STAY ON THE ROAD!",
     )
-    override val look = CabinetLook(body = Pal.DARKRED, trim = Pal.WHITE, glow = Pal.RED)
+    override val look = CabinetLook(body = Pal.DARKRED, trim = Pal.WHITE, glow = Pal.RED, shape = CabinetShape.RACER)
     override val roundSeconds = RacerTuning.ROUND_SECONDS
 
     private companion object {
@@ -315,7 +316,7 @@ class RacerGame : BaseMiniGame() {
 
     // ---------------------------------------------------------------- 3D presentation
 
-    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt(), "racer")
+    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt())
     private val pt = FloatArray(3)
     private val xf = Xform()
     // Segment start points, indexed from BEHIND segments behind the car to VIEW ahead.
@@ -380,7 +381,7 @@ class RacerGame : BaseMiniGame() {
         drawTraffic(r)
         drawTokens(r)
         drawPlayer(r)
-        stage.present(scope)
+        stage.present()
         drawHud(scope)
     }
 
@@ -527,16 +528,16 @@ class RacerGame : BaseMiniGame() {
         with(scope) {
             drawRect(Color.Black, Offset(20f, 596f), Size(150f, 28f), alpha = 0.55f)
             drawRect(Color(if (frac > 0.9f) Pal.CYAN else Pal.PINK), Offset(24f, 616f), Size(142f * frac, 5f))
-            PixelFont.draw(this, "$kmh KM/H", 26f, 600f, 2f, Color.White)
+            ArcadeFont.draw(this, "$kmh KM/H", 26f, 600f, 2f, Color.White)
             drawRect(Color.Black, Offset(250f, 596f), Size(90f, 28f), alpha = 0.55f)
             drawCircle(Color(Pal.ORANGE), 8f, Offset(266f, 610f))
             drawCircle(Color(Pal.GOLD), 6f, Offset(266f, 610f))
-            PixelFont.draw(this, "x$tokensGot", 280f, 602f, 2f, Color(Pal.GOLD))
+            ArcadeFont.draw(this, "x$tokensGot", 280f, 602f, 2f, Color(Pal.GOLD))
             if (time < 3f) {
-                PixelFont.drawCentered(this, "DRAG TO STEER", GAME_W / 2f, 520f, 2f, Color.White, 0.5f + 0.5f * sin(time * 6f))
+                ArcadeFont.drawCentered(this, "DRAG TO STEER", GAME_W / 2f, 520f, 2f, Color.White, 0.5f + 0.5f * sin(time * 6f))
             }
             if (abs(px) > ROAD_HALF && !timeUp) {
-                PixelFont.drawCentered(this, "OFF ROAD!", GAME_W / 2f, 470f, 3f, Color(Pal.ORANGE), 0.5f + 0.5f * sin(time * 12f))
+                ArcadeFont.drawCentered(this, "OFF ROAD!", GAME_W / 2f, 470f, 3f, Color(Pal.ORANGE), 0.5f + 0.5f * sin(time * 12f))
             }
         }
     }

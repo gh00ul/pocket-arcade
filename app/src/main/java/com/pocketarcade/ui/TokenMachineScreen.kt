@@ -1,13 +1,9 @@
 package com.pocketarcade.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -25,7 +21,7 @@ import com.pocketarcade.ArcadeServices
 import com.pocketarcade.data.ArcadeRepository
 import com.pocketarcade.data.SaveState
 import com.pocketarcade.engine.Pal
-import com.pocketarcade.engine.PixelFont
+import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Sfx
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -62,30 +58,30 @@ fun TokenMachineScreen(save: SaveState, services: ArcadeServices, onClose: () ->
 
     ArcadePanel("TOKEN MACHINE", Color(Pal.GOLD), onClose) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            PixelImage(UiIcons.token, 6.dp)
+            TokenIcon(56.dp)
             Spacer(Modifier.width(12.dp))
-            PixelText("${save.tokens}", pixel = 7.dp, color = Color(Pal.GOLD))
+            ArcadeText("${save.tokens}", unit = 7.dp, color = Color(0xFFFFD35A))
         }
         Spacer(Modifier.height(6.dp))
-        PixelText("TOKENS", pixel = 3.dp, color = Color(Pal.YELLOW))
+        ArcadeText("TOKENS", unit = 3.dp, color = Color(Pal.YELLOW))
         Spacer(Modifier.height(16.dp))
 
-        InfoBox {
-            PixelText("DAILY BONUS", pixel = 3.dp, color = Color(Pal.LIME))
+        GlassBox(Modifier.fillMaxWidth()) {
+            ArcadeText("DAILY BONUS", unit = 3.dp, color = Color(Pal.LIME))
             Spacer(Modifier.height(6.dp))
-            PixelText("+${ArcadeRepository.DAILY_TOKENS} FREE TOKENS EVERY DAY", pixel = 2.dp, tiny = true, color = Color.White)
+            ArcadeText("+${ArcadeRepository.DAILY_TOKENS} FREE TOKENS EVERY DAY", unit = 2.dp, tiny = true, color = Color.White)
             Spacer(Modifier.height(6.dp))
-            PixelText("NEXT REFILL IN ${formatDuration(untilRefill)}", pixel = 2.dp, tiny = true, color = Color(Pal.LAVENDER))
+            ArcadeText("NEXT REFILL IN ${formatDuration(untilRefill)}", unit = 2.dp, tiny = true, color = Color(Pal.LAVENDER))
         }
         Spacer(Modifier.height(12.dp))
 
-        InfoBox {
-            PixelText("TRADE TICKETS", pixel = 3.dp, color = Color(Pal.ORANGE))
+        GlassBox(Modifier.fillMaxWidth()) {
+            ArcadeText("TRADE TICKETS", unit = 3.dp, color = Color(Pal.ORANGE))
             Spacer(Modifier.height(6.dp))
-            PixelText("YOU HAVE ${PixelFont.TICKET}${save.tickets}", pixel = 2.dp, tiny = true, color = Color.White)
+            ArcadeText("YOU HAVE ${ArcadeFont.TICKET}${save.tickets}", unit = 2.dp, tiny = true, color = Color.White)
             Spacer(Modifier.height(8.dp))
             ArcadeButton(
-                "1 TOKEN FOR ${PixelFont.TICKET}${ArcadeRepository.TICKETS_PER_TOKEN}",
+                "1 TOKEN FOR ${ArcadeFont.TICKET}${ArcadeRepository.TICKETS_PER_TOKEN}",
                 {
                     scope.launch {
                         if (services.repo.exchangeTicketsForToken()) {
@@ -100,18 +96,18 @@ fun TokenMachineScreen(save: SaveState, services: ArcadeServices, onClose: () ->
                 },
                 color = Color(Pal.ORANGE),
                 enabled = save.tickets >= ArcadeRepository.TICKETS_PER_TOKEN,
-                pixel = 2.dp,
+                unit = 2.dp,
             )
         }
 
         if (save.tokens == 0) {
             Spacer(Modifier.height(12.dp))
-            InfoBox {
+            GlassBox(Modifier.fillMaxWidth()) {
                 val ready = now >= save.spareTokenAt
-                PixelText("OUT OF TOKENS?", pixel = 3.dp, color = Color(Pal.CYAN))
+                ArcadeText("OUT OF TOKENS?", unit = 3.dp, color = Color(Pal.CYAN))
                 Spacer(Modifier.height(6.dp))
                 if (ready) {
-                    PixelText("SOMETHING SHINY UNDER\nTHE MACHINE...", pixel = 2.dp, tiny = true, centered = true)
+                    ArcadeText("SOMETHING SHINY UNDER\nTHE MACHINE...", unit = 2.dp, tiny = true, centered = true)
                     Spacer(Modifier.height(8.dp))
                     ArcadeButton(
                         "GRAB IT!",
@@ -127,32 +123,18 @@ fun TokenMachineScreen(save: SaveState, services: ArcadeServices, onClose: () ->
                         },
                         color = Color(Pal.CYAN),
                         textColor = Color(Pal.NAVY),
-                        pixel = 2.dp,
+                        unit = 2.dp,
                     )
                 } else {
-                    PixelText("NEXT SPARE TOKEN IN ${formatDuration(save.spareTokenAt - now)}", pixel = 2.dp, tiny = true, color = Color(Pal.LAVENDER))
+                    ArcadeText("NEXT SPARE TOKEN IN ${formatDuration(save.spareTokenAt - now)}", unit = 2.dp, tiny = true, color = Color(Pal.LAVENDER))
                 }
             }
         }
 
         if (message.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
-            PixelText(message, pixel = 3.dp, color = Color(Pal.YELLOW))
+            ArcadeText(message, unit = 3.dp, color = Color(Pal.YELLOW))
         }
         Spacer(Modifier.height(8.dp))
-    }
-}
-
-@Composable
-private fun InfoBox(content: @Composable () -> Unit) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(Color(Pal.DEEP))
-            .border(2.dp, Color(Pal.PLUM))
-            .padding(12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        content()
     }
 }

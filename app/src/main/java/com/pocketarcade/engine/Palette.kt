@@ -3,9 +3,8 @@ package com.pocketarcade.engine
 import androidx.compose.ui.graphics.Color
 
 /**
- * The one retro palette every sprite, tile, effect and menu draws from.
- * Values are ARGB ints so they can go straight into [PixelCanvas] rasters;
- * use [Pal.c] to get a Compose [Color].
+ * The one palette every texture, effect and menu draws from. Values are ARGB ints so they
+ * can go straight into painted textures; use [Pal.c] to get a Compose [Color].
  */
 object Pal {
     val NIGHT = 0xFF120A24.toInt()

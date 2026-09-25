@@ -107,7 +107,7 @@ class FloatingTexts(capacity: Int = 24) {
             val pop = if (age < 0.15f) easeOutBack(age / 0.15f) else 1f
             val alpha = if (it.life < 0.3f) it.life / 0.3f else 1f
             val scale = it.size * unit * (0.6f + 0.4f * pop)
-            PixelFont.drawCentered(scope, it.text, originX + it.x * unit, originY + it.y * unit, scale, it.color, alpha)
+            ArcadeFont.drawCentered(scope, it.text, originX + it.x * unit, originY + it.y * unit, scale, it.color, alpha)
         }
     }
 }

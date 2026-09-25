@@ -1,25 +1,42 @@
 package com.pocketarcade.engine.r3d
 
-import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.pocketarcade.engine.gl.Gfx
 import kotlin.math.roundToInt
 
 /**
- * A mini-game's 3D view. The game aims the camera once with [look]; the stage renders into a
- * framebuffer covering the whole [fieldW] × [fieldH] play field and maps between field units
- * (touches, particles, score popups) and the 3D world. The framebuffer starts at one pixel per
- * field unit and gets coarser on its own when a phone can't keep up.
+ * Where the game field currently sits on the window, set by the game host every frame so a
+ * game's 3D picture lines up with the interface drawn over it.
+ */
+object GameViewport {
+    /** Top-left of the field in window pixels, and window pixels per field unit. */
+    var x = 0f
+    var y = 0f
+    var scale = 1f
+    /** Screen-shake offset in field units, applied while a game draws. */
+    var shakeX = 0f
+    var shakeY = 0f
+    /** The field's clip rectangle in window pixels. */
+    var clipX0 = 0
+    var clipY0 = 0
+    var clipX1 = 0
+    var clipY1 = 0
+    /** Slot the game's picture is submitted to. */
+    const val SLOT = "game"
+}
+
+/**
+ * A mini-game's 3D view. The game aims the camera with [look]; each frame [begin] starts a
+ * picture covering the whole [fieldW] × [fieldH] play field and [present] hands it to the GPU.
+ * It also maps between field units (touches, particles, score popups) and the 3D world.
  *
  * Projection and touch helpers are plain math, so games can use them in headless tests too.
  */
-class Stage3D(val fieldW: Int, val fieldH: Int, name: String, budgetMs: Float = 7f) {
-    val r = Renderer3D(1, 1)
+class Stage3D(val fieldW: Int, val fieldH: Int) {
+    val r = Renderer3D(fieldW, fieldH)
 
-    /** The camera in field units; [begin] copies it to the renderer at framebuffer size. */
+    /** The camera in field units; [begin] copies it to the renderer. */
     val cam = Camera3D()
 
-    private val frame = FrameImage()
-    private val budget = FrameBudget(budgetMs, name)
-    private var density = 1f
     private var eyeX = 0f
     private var eyeY = 0f
     private var eyeZ = 1f
@@ -50,20 +67,24 @@ class Stage3D(val fieldW: Int, val fieldH: Int, name: String, budgetMs: Float = 
     fun touchToPlane(fx: Float, fy: Float, planeY: Float, out: FloatArray): Boolean =
         cam.rayToPlaneY(fx, fy, planeY, out)
 
-    /** Sizes the framebuffer, sets the camera and starts timing. Draw into the returned renderer. */
+    /** Starts a frame with the camera set. Draw into the returned renderer. */
     fun begin(): Renderer3D {
-        val w = (fieldW * density).roundToInt().coerceAtLeast(16)
-        val h = (fieldH * density).roundToInt().coerceAtLeast(16)
-        r.resize(w, h)
+        r.startFrame()
+        r.resize(fieldW, fieldH)
         r.camera.near = cam.near
-        r.camera.lookAt(eyeX, eyeY, eyeZ, tgtX, tgtY, tgtZ, fov, w, h, centerY)
-        budget.begin()
+        r.camera.lookAt(eyeX, eyeY, eyeZ, tgtX, tgtY, tgtZ, fov, fieldW, fieldH, centerY)
         return r
     }
 
-    /** Ends timing and draws the frame over the field (0, 0)–(fieldW, fieldH). */
-    fun present(scope: DrawScope) {
-        if (budget.end() && density > 0.5f) density = (density - 0.25f).coerceAtLeast(0.5f)
-        frame.draw(scope, r, 0f, 0f, fieldW.toFloat(), fieldH.toFloat())
+    /** Hands the frame to the GPU, placed over the field wherever the host has put it. */
+    fun present() {
+        val v = GameViewport
+        val x = v.x + v.shakeX * v.scale
+        val y = v.y + v.shakeY * v.scale
+        val pass = r.finishFrame(
+            x.roundToInt(), y.roundToInt(), (fieldW * v.scale).roundToInt(), (fieldH * v.scale).roundToInt(),
+            v.clipX0, v.clipY0, v.clipX1, v.clipY1, clip = true,
+        )
+        Gfx.submit(GameViewport.SLOT, pass)
     }
 }

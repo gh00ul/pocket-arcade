@@ -31,8 +31,9 @@ android {
 
     buildTypes {
         debug {
-            // The software 3D renderer needs ART's fully optimising compiler, which debuggable
-            // builds don't get. The APK is still the debug build type, signed with the shared key.
+            // Recording each 3D frame (culling, packing vertices, painting live cabinet screens)
+            // needs ART's fully optimising compiler, which debuggable builds don't get. The APK
+            // is still the debug build type, signed with the shared key.
             isDebuggable = false
         }
         release {

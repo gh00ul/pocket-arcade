@@ -19,7 +19,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -30,9 +32,12 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -48,11 +53,13 @@ import com.pocketarcade.ArcadeServices
 import com.pocketarcade.data.SaveState
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
-import com.pocketarcade.engine.PixelFont
+import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.ScreenShake
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.clamp01
+import com.pocketarcade.engine.gl.Gfx
+import com.pocketarcade.engine.r3d.GameViewport
 import com.pocketarcade.engine.easeOutBack
 import com.pocketarcade.engine.rememberGameLoop
 import com.pocketarcade.games.GAME_H
@@ -185,6 +192,10 @@ fun GameHostScreen(
 
     BackHandler { onExitPressed() }
 
+    DisposableEffect(game) {
+        onDispose { Gfx.remove(GameViewport.SLOT) }
+    }
+
     LaunchedEffect(appPaused) {
         if (appPaused) pause()
     }
@@ -313,7 +324,7 @@ fun GameHostScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(8.dp),
         ) {
-            ArcadeButton("×", { onExitPressed() }, color = Color(Pal.RED))
+            RoundButton(UiIcon.CLOSE, { onExitPressed() }, Color(Pal.RED), size = 44.dp)
         }
 
         when (state.phase) {
@@ -334,7 +345,7 @@ fun GameHostScreen(
                         .padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    CurrencyRow(save.tokens, save.tickets, Modifier.background(Color(Pal.NIGHT)).padding(8.dp))
+                    GlassBox { CurrencyRow(save.tokens, save.tickets) }
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         ArcadeButton(
@@ -370,31 +381,35 @@ private fun IntroCard(game: MiniGame, best: Int, onStart: () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color(0xAA08060F))
+            .background(Color(0xAA07050E))
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
         contentAlignment = Alignment.Center,
     ) {
+        val shape = RoundedCornerShape(24.dp)
+        val glow = Color(game.look.glow)
         Column(
             Modifier
                 .padding(20.dp)
                 .fillMaxWidth()
-                .background(Color(Pal.NIGHT))
-                .border(3.dp, Color(game.look.glow))
-                .padding(18.dp),
+                .shadow(24.dp, shape, ambientColor = glow, spotColor = glow)
+                .clip(shape)
+                .background(Brush.verticalGradient(listOf(UiColors.cardTop, UiColors.cardBottom)))
+                .border(2.dp, Brush.verticalGradient(listOf(glow, glow.shade(0.45f))), shape)
+                .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            PixelText(game.title, pixel = 4.dp, color = Color(game.look.glow))
+            ArcadeText(game.title, unit = 4.dp, color = Color(game.look.glow))
             Spacer(Modifier.height(16.dp))
             for (line in game.instructions) {
-                PixelText(line, pixel = 2.dp, color = Color.White, centered = true)
+                ArcadeText(line, unit = 2.dp, color = Color.White, centered = true)
                 Spacer(Modifier.height(8.dp))
             }
             Spacer(Modifier.height(8.dp))
-            PixelText("${game.roundSeconds.toInt()} SECOND ROUND", pixel = 2.dp, color = Color(Pal.LAVENDER))
+            ArcadeText("${game.roundSeconds.toInt()} SECOND ROUND", unit = 2.dp, color = Color(Pal.LAVENDER))
             Spacer(Modifier.height(6.dp))
-            PixelText("BEST: $best", pixel = 3.dp, color = Color(Pal.YELLOW))
+            ArcadeText("BEST: $best", unit = 3.dp, color = Color(Pal.YELLOW))
             Spacer(Modifier.height(18.dp))
-            ArcadeButton("${PixelFont.PLAY} START", onStart, color = Color(Pal.GREEN), pixel = 4.dp)
+            ArcadeButton("${ArcadeFont.PLAY} START", onStart, color = Color(Pal.GREEN), unit = 4.dp)
         }
     }
 }
@@ -409,13 +424,13 @@ private fun PauseCard(onResume: () -> Unit, onQuit: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            PixelText("PAUSED", pixel = 6.dp, color = Color(Pal.YELLOW))
+            ArcadeText("PAUSED", unit = 6.dp, color = Color(Pal.YELLOW))
             Spacer(Modifier.height(24.dp))
-            ArcadeButton("${PixelFont.PLAY} RESUME", onResume, color = Color(Pal.GREEN), pixel = 4.dp)
+            ArcadeButton("${ArcadeFont.PLAY} RESUME", onResume, color = Color(Pal.GREEN), unit = 4.dp)
             Spacer(Modifier.height(16.dp))
-            ArcadeButton("QUIT ROUND", onQuit, color = Color(Pal.RED), pixel = 3.dp)
+            ArcadeButton("QUIT ROUND", onQuit, color = Color(Pal.RED), unit = 3.dp)
             Spacer(Modifier.height(10.dp))
-            PixelText("QUITTING FORFEITS THIS ROUND", pixel = 2.dp, tiny = true, color = Color(Pal.GRAY))
+            ArcadeText("QUITTING FORFEITS THIS ROUND", unit = 2.dp, tiny = true, color = Color(Pal.GRAY))
             Spacer(Modifier.width(1.dp))
         }
     }
@@ -441,8 +456,19 @@ private fun drawHost(scope: DrawScope, state: HostState, game: MiniGame, topInse
         val look = game.look
         val t = state.hostTime
 
-        // Cabinet bezel.
-        drawRect(Color(Pal.shade(look.body, 0.28f)), Offset.Zero, size)
+        // Cabinet bezel around the field (the field itself shows the GPU picture underneath).
+        val bezel = Color(Pal.shade(look.body, 0.28f))
+        drawRect(bezel, Offset.Zero, Size(w, gy))
+        drawRect(bezel, Offset(0f, gy + gh), Size(w, h - gy - gh))
+        drawRect(bezel, Offset(0f, gy), Size(gx, gh))
+        drawRect(bezel, Offset(gx + gw, gy), Size(w - gx - gw, gh))
+        GameViewport.x = gx + state.shake.offsetX * gs
+        GameViewport.y = gy + state.shake.offsetY * gs
+        GameViewport.scale = gs
+        GameViewport.clipX0 = gx.toInt()
+        GameViewport.clipY0 = gy.toInt()
+        GameViewport.clipX1 = (gx + gw).toInt()
+        GameViewport.clipY1 = (gy + gh).toInt()
         for (i in 0 until 20) {
             val y = barH + i * (h - barH) / 20f
             val on = ((t * 5f).toInt() + i) % 4 == 0
@@ -473,18 +499,18 @@ private fun drawHost(scope: DrawScope, state: HostState, game: MiniGame, topInse
         val labelY = topInset + unit * 6f
         val valueY = labelY + unit * 10f
         val scoreX = w * 0.40f
-        PixelFont.drawCentered(this, "SCORE", scoreX, labelY, unit, Color(Pal.LAVENDER))
-        PixelFont.drawCentered(this, game.score.toString(), scoreX, valueY, unit * 2.5f, Color.White)
+        ArcadeFont.drawCentered(this, "SCORE", scoreX, labelY, unit, Color(Pal.LAVENDER))
+        ArcadeFont.drawCentered(this, game.score.toString(), scoreX, valueY, unit * 2.5f, Color.White)
         val timeX = w * 0.66f
         val secs = ceil(state.timeLeft).toInt()
         val low = secs <= 10 && state.phase == HostPhase.PLAYING
         val timeAlpha = if (low && (t * 4f).toInt() % 2 == 0) 0.4f else 1f
-        PixelFont.drawCentered(this, "TIME", timeX, labelY, unit, Color(Pal.LAVENDER))
-        PixelFont.drawCentered(this, secs.toString(), timeX, valueY, unit * 2.5f, Color(if (low) Pal.RED else Pal.CYAN), timeAlpha)
+        ArcadeFont.drawCentered(this, "TIME", timeX, labelY, unit, Color(Pal.LAVENDER))
+        ArcadeFont.drawCentered(this, secs.toString(), timeX, valueY, unit * 2.5f, Color(if (low) Pal.RED else Pal.CYAN), timeAlpha)
         val bestX = w * 0.88f
         val liveBest = maxOf(state.best, if (state.phase == HostPhase.RESULTS) state.resultScore else 0)
-        PixelFont.drawCentered(this, "BEST", bestX, labelY, unit, Color(Pal.LAVENDER))
-        PixelFont.drawCentered(this, liveBest.toString(), bestX, valueY + unit * 2f, unit * 1.5f, Color(Pal.YELLOW))
+        ArcadeFont.drawCentered(this, "BEST", bestX, labelY, unit, Color(Pal.LAVENDER))
+        ArcadeFont.drawCentered(this, liveBest.toString(), bestX, valueY + unit * 2f, unit * 1.5f, Color(Pal.YELLOW))
         // Time bar.
         val frac = clamp01(state.timeLeft / game.roundSeconds)
         drawRect(Color(Pal.DEEP), Offset(w * 0.27f, barH - unit * 6f), Size(w * 0.7f, unit * 2f))
@@ -503,18 +529,18 @@ private fun drawOverlays(scope: DrawScope, state: HostState, game: MiniGame) {
                 val pop = easeOutBack(clamp01(frac / 0.35f))
                 drawRect(Color.Black, Offset(0f, 0f), Size(GAME_W, GAME_H), alpha = 0.35f)
                 val label = (3 - step).toString()
-                PixelFont.drawCentered(this, label, cx, 250f - 28f * pop, 16f * pop, Color(Pal.YELLOW), 1f - frac * 0.3f)
-                PixelFont.drawCentered(this, "GET READY", cx, 380f, 3f, Color.White)
+                ArcadeFont.drawCentered(this, label, cx, 250f - 28f * pop, 16f * pop, Color(Pal.YELLOW), 1f - frac * 0.3f)
+                ArcadeFont.drawCentered(this, "GET READY", cx, 380f, 3f, Color.White)
             }
             HostPhase.PLAYING -> if (state.goT < 0.7f) {
                 val a = 1f - state.goT / 0.7f
                 val s = 12f + state.goT * 10f
-                PixelFont.drawCentered(this, "GO!", cx, 260f - s * 3.5f, s, Color(Pal.LIME), a)
+                ArcadeFont.drawCentered(this, "GO!", cx, 260f - s * 3.5f, s, Color(Pal.LIME), a)
             }
             HostPhase.ENDING -> {
                 val pop = easeOutBack(clamp01(state.phaseT / 0.3f))
                 drawRect(Color.Black, Offset.Zero, Size(GAME_W, GAME_H), alpha = 0.4f * clamp01(state.phaseT / 0.3f))
-                PixelFont.drawCentered(this, if (state.endedEarly) "ALL DONE!" else "TIME'S UP!", cx, 280f, 6f * pop, Color(Pal.YELLOW))
+                ArcadeFont.drawCentered(this, if (state.endedEarly) "ALL DONE!" else "TIME'S UP!", cx, 280f, 6f * pop, Color(Pal.YELLOW))
             }
             HostPhase.RESULTS -> drawResults(this, state, game)
             else -> Unit
@@ -532,22 +558,22 @@ private fun drawResults(scope: DrawScope, state: HostState, game: MiniGame) {
         val top = 36f - (1f - slide) * 300f
         drawRoundRect(Color(Pal.NIGHT), Offset(24f, top), Size(312f, 232f), CornerRadius(10f, 10f))
         drawRoundRect(Color(look.trim), Offset(24f, top), Size(312f, 232f), CornerRadius(10f, 10f), style = Stroke(4f))
-        PixelFont.drawCentered(this, "ROUND OVER", cx, top + 14f, 3f, Color(look.glow))
-        PixelFont.drawCentered(this, "SCORE", cx, top + 48f, 2f, Color(Pal.LAVENDER))
+        ArcadeFont.drawCentered(this, "ROUND OVER", cx, top + 14f, 3f, Color(look.glow))
+        ArcadeFont.drawCentered(this, "SCORE", cx, top + 48f, 2f, Color(Pal.LAVENDER))
         val shown = (state.resultScore * clamp01(t / 0.7f)).toInt()
-        PixelFont.drawCentered(this, shown.toString(), cx, top + 66f, 6f, Color.White)
+        ArcadeFont.drawCentered(this, shown.toString(), cx, top + 66f, 6f, Color.White)
         if (state.newHigh) {
             val rainbow = intArrayOf(Pal.PINK, Pal.YELLOW, Pal.CYAN, Pal.LIME, Pal.ORANGE)
             val c = rainbow[((state.hostTime * 10f).toInt()) % rainbow.size]
             val pulse = 1f + 0.08f * sin(state.hostTime * 10f)
-            PixelFont.drawCentered(this, "${PixelFont.STAR} NEW HIGH SCORE! ${PixelFont.STAR}", cx, top + 124f, 2.5f * pulse, Color(c))
+            ArcadeFont.drawCentered(this, "${ArcadeFont.STAR} NEW HIGH SCORE! ${ArcadeFont.STAR}", cx, top + 124f, 2.5f * pulse, Color(c))
         } else {
-            PixelFont.drawCentered(this, "BEST ${state.best}", cx, top + 124f, 2f, Color(Pal.GRAY))
+            ArcadeFont.drawCentered(this, "BEST ${state.best}", cx, top + 124f, 2f, Color(Pal.GRAY))
         }
-        PixelFont.drawCentered(this, "TICKETS", cx, top + 156f, 2f, Color(Pal.LAVENDER))
-        PixelFont.drawCentered(this, "${PixelFont.TICKET} ${state.printed}", cx, top + 174f, 5f, Color(Pal.ORANGE))
+        ArcadeFont.drawCentered(this, "TICKETS", cx, top + 156f, 2f, Color(Pal.LAVENDER))
+        ArcadeFont.drawCentered(this, "${ArcadeFont.TICKET} ${state.printed}", cx, top + 174f, 5f, Color(Pal.ORANGE))
         if (game.bonusTickets > 0) {
-            PixelFont.drawCentered(this, "INCLUDES +${game.bonusTickets} BONUS", cx, top + 214f, 2f, Color(Pal.YELLOW))
+            ArcadeFont.drawCentered(this, "INCLUDES +${game.bonusTickets} BONUS", cx, top + 214f, 2f, Color(Pal.YELLOW))
         }
 
         // Ticket printer with the strip feeding out of it.
@@ -572,9 +598,9 @@ private fun drawResults(scope: DrawScope, state: HostState, game: MiniGame) {
         drawRect(Color(Pal.BLACK), Offset(cx - 38f, slotY - 4f), Size(76f, 6f))
         val lampOn = printing && (state.hostTime * 10f).toInt() % 2 == 0
         drawCircle(Color(if (lampOn) Pal.LIME else Pal.DARKGREEN), 5f, Offset(cx + 64f, slotY - 12f))
-        PixelFont.drawCentered(this, "TICKETS", cx - 10f, slotY - 20f, 2f, Color(Pal.LIGHTGRAY), shadow = false)
+        ArcadeFont.drawCentered(this, "TICKETS", cx - 10f, slotY - 20f, 2f, Color(Pal.LIGHTGRAY), shadow = false)
         if (printing) {
-            PixelFont.drawCentered(this, "TAP TO SKIP", cx, 610f, 2f, Color.White, 0.5f + 0.5f * sin(state.hostTime * 6f))
+            ArcadeFont.drawCentered(this, "TAP TO SKIP", cx, 610f, 2f, Color.White, 0.5f + 0.5f * sin(state.hostTime * 6f))
         }
     }
 }
@@ -586,6 +612,6 @@ private fun ticket(scope: DrawScope, x: Float, y: Float, w: Float, h: Float) {
         drawRect(Color(Pal.NIGHT), Offset(x - 2f, y + h / 2f - 4f), Size(5f, 6f))
         drawRect(Color(Pal.NIGHT), Offset(x + w - 3f, y + h / 2f - 4f), Size(5f, 6f))
         for (i in 0 until 6) drawRect(Color(Pal.shade(Pal.ORANGE, 0.6f)), Offset(x + 3f + i * 10f, y + h - 3f), Size(5f, 2f))
-        PixelFont.drawCentered(this, "${PixelFont.STAR}", x + w / 2f, y + 6f, 1.6f, Color(Pal.DARKRED), shadow = false)
+        ArcadeFont.drawCentered(this, "${ArcadeFont.STAR}", x + w / 2f, y + 6f, 1.6f, Color(Pal.DARKRED), shadow = false)
     }
 }

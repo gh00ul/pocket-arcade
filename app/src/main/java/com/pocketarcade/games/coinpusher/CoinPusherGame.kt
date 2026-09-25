@@ -8,7 +8,7 @@ import com.pocketarcade.engine.FIXED_DT
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
-import com.pocketarcade.engine.PixelFont
+import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Segment
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.TAU
@@ -78,7 +78,7 @@ class CoinPusherGame : BaseMiniGame() {
         "SCORE! SIDE GUTTERS DON'T.",
         "GRAB GEMS, STARS & TICKETS",
     )
-    override val look = CabinetLook(body = Pal.ORANGE, trim = Pal.GOLD, glow = Pal.YELLOW, shape = CabinetShape.WIDE)
+    override val look = CabinetLook(body = Pal.ORANGE, trim = Pal.GOLD, glow = Pal.YELLOW, shape = CabinetShape.PUSHER)
     override val roundSeconds = PusherTuning.ROUND_SECONDS
 
     private companion object {
@@ -405,7 +405,7 @@ class CoinPusherGame : BaseMiniGame() {
      * The machine in 3D, seen from where you'd stand. The deck simulation is top-down, so its
      * x and y become the world's x and depth; items lie on the deck at height 0.
      */
-    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt(), "pusher").apply {
+    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt()).apply {
         look(180f, 520f, 900f, 180f, 0f, 330f, fovDeg = 50f)
     }
     private val pt = FloatArray(3)
@@ -491,12 +491,12 @@ class CoinPusherGame : BaseMiniGame() {
         for (x in floatArrayOf(PF_L - GUTTER_W, PF_R + GUTTER_W)) {
             r.quad(x, 10f + GLASS_H, BACK_Z, x, 10f + GLASS_H, GUTTER_TOP, x, 10f, GUTTER_TOP, x, 10f, BACK_Z, glass, 1f, 0f, 0f, blend = Blend.ALPHA, cull = false)
         }
-        stage.present(scope)
+        stage.present()
 
         val cl = coinsLeft.coerceAtLeast(0)
         if (cl > 0 && !timeUp) {
             val a = 0.4f + 0.4f * sin(time * 6f)
-            PixelFont.drawCentered(scope, "TAP TO DROP ${PixelFont.DOWN}", GAME_W / 2f, 150f, 2f, Color.White, a)
+            ArcadeFont.drawCentered(scope, "TAP TO DROP ${ArcadeFont.DOWN}", GAME_W / 2f, 150f, 2f, Color.White, a)
         }
     }
 
@@ -520,7 +520,7 @@ class CoinPusherGame : BaseMiniGame() {
         for (i in 0 until 6) {
             val on = ((time * 4f).toInt() + i) % 2 == 0
             val x = PF_L + 25f + i * (PF_R - PF_L - 50f) / 5f
-            r.sprite(x, SHELF_H + 3f, front - 8f, 7f, 7f, white, emissive = 1.2f, tint = if (on) Pal.CYAN else Pal.TEAL)
+            r.sprite(x, SHELF_H + 3f, front - 8f, 7f, 7f, TexKit.dot.full, emissive = 1.2f, tint = if (on) Pal.CYAN else Pal.TEAL)
             if (on) r.sprite(x, SHELF_H + 3f, front - 7f, 24f, 24f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.5f, tint = Pal.CYAN)
         }
     }
@@ -543,7 +543,7 @@ class CoinPusherGame : BaseMiniGame() {
             for (i in 0 until 12) {
                 val z = BACK_Z + 20f + i * (TRAY_FRONT - BACK_Z - 40f) / 11f
                 val on = ((time * 8f).toInt() - i) % 4 == 0
-                r.sprite(x, SIDE_H + 4f, z, 7f, 7f, white, emissive = 1.2f, tint = if (on) Pal.YELLOW else Pal.shade(Pal.GOLD, 0.4f))
+                r.sprite(x, SIDE_H + 4f, z, 7f, 7f, TexKit.dot.full, emissive = 1.2f, tint = if (on) Pal.YELLOW else Pal.shade(Pal.GOLD, 0.4f))
                 if (on) r.sprite(x, SIDE_H + 5f, z, 26f, 26f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.55f, tint = Pal.GOLD)
             }
         }

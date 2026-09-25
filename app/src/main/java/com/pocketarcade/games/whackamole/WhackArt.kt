@@ -1,249 +1,189 @@
 package com.pocketarcade.games.whackamole
 
 import com.pocketarcade.engine.Pal
-import com.pocketarcade.engine.PixelCanvas
-import com.pocketarcade.engine.SpriteFX
 import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.r3d.TexKit
+import com.pocketarcade.engine.r3d.TexPaint
 import com.pocketarcade.engine.r3d.Texture
-import com.pocketarcade.engine.r3d.bigText
-import com.pocketarcade.engine.r3d.bigTextCentered
-import com.pocketarcade.engine.r3d.bigTextWidth
-import com.pocketarcade.engine.r3d.vgrad
-import kotlin.math.sqrt
+import com.pocketarcade.engine.r3d.paintTexture
+import kotlin.math.sin
 
-/** Procedural art for the 3D whack-a-mole table. */
+/** Painted art for the 3D whack-a-mole table. */
 internal object WhackArt {
-    /**
-     * The playfield: grassy felt with a painted border, and the holes cut out (fully
-     * transparent texels, which the renderer's alpha test skips) so moles can rise through them.
-     */
-    fun table(w: Int, h: Int, holes: List<FloatArray>, holeR: Float): Texture {
-        val c = PixelCanvas(w, h)
-        c.vgrad(0, 0, w, h, Pal.shade(Pal.GREEN, 0.9f), Pal.shade(Pal.GREEN, 0.75f))
-        // Mown stripes and tufts.
-        for (y in 0 until h step 40) c.fill(0, y, w, 20, Pal.shade(Pal.GREEN, 0.84f))
-        for (i in 0 until 500) {
-            val x = (hash01(i, 11) * w).toInt()
-            val y = (hash01(i, 12) * h).toInt()
-            val col = if (i % 3 == 0) Pal.LIME else Pal.DARKGREEN
-            c.fill(x, y, 1, 3, Pal.shade(col, 0.9f))
-            c.set(x + 1, y + 1, Pal.shade(col, 0.8f))
+    /** Wood with a few long grain streaks across a [w] × [h] area. */
+    private fun TexPaint.woodGrain(x: Float, y: Float, w: Float, h: Float, base: Int, seed: Int) {
+        vgrad(x, y, w, h, base, Pal.shade(base, 0.8f))
+        val lines = (w * h / 90f).toInt().coerceAtLeast(3)
+        for (i in 0 until lines) {
+            val gx = x + hash01(i, seed) * w
+            val gy = y + hash01(i, seed + 1) * h
+            val len = 6f + hash01(i, seed + 2) * 18f
+            line(gx, gy, (gx + len).coerceAtMost(x + w), gy + 0.3f, 0.45f, Pal.withAlpha(Pal.shade(base, 0.6f), 0.5f))
         }
-        for (i in 0 until 26) {
-            val x = (hash01(i, 13) * w).toInt()
-            val y = (hash01(i, 14) * h).toInt()
+    }
+
+    /**
+     * The playfield: mown grass with flowers inside a wooden border, earthy rings round the holes
+     * and the holes themselves cut out (transparent) so moles can rise through them.
+     */
+    fun table(w: Int, h: Int, holes: List<FloatArray>, holeR: Float): Texture = paintTexture(w, h, 2) {
+        vgrad(0f, 0f, w.toFloat(), h.toFloat(), Pal.shade(Pal.GREEN, 0.9f), Pal.shade(Pal.GREEN, 0.74f))
+        // Mown stripes, blade tufts and little flowers.
+        for (y in 0 until h step 40) rect(0f, y.toFloat(), w.toFloat(), 20f, Pal.withAlpha(Pal.shade(Pal.GREEN, 0.7f), 0.35f))
+        for (i in 0 until 900) {
+            val x = hash01(i, 11) * w
+            val y = hash01(i, 12) * h
+            val col = if (i % 3 == 0) Pal.LIME else Pal.DARKGREEN
+            val lean = (hash01(i, 15) - 0.5f) * 2f
+            line(x, y, x + lean, y - 2.6f, 0.6f, Pal.withAlpha(Pal.shade(col, 0.9f), 0.8f))
+        }
+        for (i in 0 until 30) {
+            val x = hash01(i, 13) * w
+            val y = hash01(i, 14) * h
             val col = when (i % 3) {
                 0 -> Pal.YELLOW
                 1 -> Pal.WHITE
                 else -> Pal.HOTPINK
             }
-            c.disc(x.toFloat(), y.toFloat(), 1.6f, col)
-            c.set(x, y, Pal.ORANGE)
+            for (k in 0 until 5) {
+                val a = k * 1.2566f
+                circle(x + kotlin.math.cos(a) * 1.3f, y + kotlin.math.sin(a) * 1.3f, 1f, col)
+            }
+            circle(x, y, 0.8f, Pal.ORANGE)
+        }
+        // Soft earth round each hole.
+        for (hc in holes) {
+            radial(hc[0], hc[1] + 2f, holeR + 20f, Pal.withAlpha(Pal.shade(Pal.GREEN, 0.45f), 0.9f), 0)
+            circle(hc[0], hc[1] + 3f, holeR + 11f, Pal.shade(Pal.BROWN, 0.78f))
+            ring(hc[0], hc[1] + 3f, holeR + 10f, 2f, Pal.shade(Pal.BROWN, 0.6f))
         }
         // Wooden border.
-        val b = 18
-        c.fill(0, 0, w, b, Pal.WOOD)
-        c.fill(0, h - b, w, b, Pal.WOOD)
-        c.fill(0, 0, b, h, Pal.WOOD)
-        c.fill(w - b, 0, b, h, Pal.WOOD)
-        c.rect(b - 2, b - 2, w - 2 * b + 4, h - 2 * b + 4, Pal.shade(Pal.WOOD, 0.6f))
-        c.rect(0, 0, w, h, Pal.shade(Pal.WOOD, 0.55f))
-        // Soft dirt around each hole, then the hole itself.
-        for (hc in holes) {
-            c.disc(hc[0], hc[1], holeR + 16f, Pal.shade(Pal.GREEN, 0.62f))
-            c.disc(hc[0], hc[1] + 3f, holeR + 12f, Pal.shade(Pal.BROWN, 0.8f))
-        }
-        for (hc in holes) {
-            for (y in (hc[1] - holeR - 1).toInt()..(hc[1] + holeR + 1).toInt()) {
-                for (x in (hc[0] - holeR - 1).toInt()..(hc[0] + holeR + 1).toInt()) {
-                    val dx = x + 0.5f - hc[0]
-                    val dy = y + 0.5f - hc[1]
-                    if (sqrt(dx * dx + dy * dy) < holeR) c.set(x, y, 0)
-                }
-            }
-        }
-        return Texture.of(c)
+        val b = 18f
+        woodGrain(0f, 0f, w.toFloat(), b, Pal.WOOD, 21)
+        woodGrain(0f, h - b, w.toFloat(), b, Pal.WOOD, 22)
+        woodGrain(0f, 0f, b, h.toFloat(), Pal.WOOD, 23)
+        woodGrain(w - b, 0f, b, h.toFloat(), Pal.WOOD, 24)
+        strokeRound(b - 1f, b - 1f, w - 2 * b + 2f, h - 2 * b + 2f, 3f, 2f, Pal.shade(Pal.WOOD, 0.55f))
+        strokeRound(0.5f, 0.5f, w - 1f, h - 1f, 2f, 1f, Pal.shade(Pal.WOOD, 0.5f))
+        for (hc in holes) punch(hc[0], hc[1], holeR)
     }
 
     /** Front of the cabinet under the table. */
     val front: Texture by lazy {
-        val c = PixelCanvas(210, 100)
-        c.vgrad(0, 0, c.w, c.h, Pal.shade(Pal.GREEN, 0.7f), Pal.shade(Pal.DARKGREEN, 0.6f))
-        for (x in 0 until c.w step 30) c.fill(x, 12, 14, c.h - 12, Pal.shade(Pal.DARKGREEN, 0.75f))
-        c.fill(0, 0, c.w, 8, Pal.WOOD)
-        c.fill(0, 8, c.w, 2, Pal.shade(Pal.WOOD, 0.5f))
-        c.fill(0, c.h - 6, c.w, 6, Pal.shade(Pal.BROWN, 0.6f))
-        Texture.of(c)
-    }
-
-    /** Backboard: wooden frame, a painted meadow and the title. */
-    val backboard: Texture by lazy {
-        val c = PixelCanvas(210, 140)
-        c.vgrad(0, 0, c.w, c.h, Pal.SKY, Pal.shade(Pal.SKY, 0.7f))
-        // Rolling hills.
-        for (x in 0 until c.w) {
-            val h1 = 96 + (kotlin.math.sin(x / 17f) * 6f + kotlin.math.sin(x / 7f) * 2f).toInt()
-            c.fill(x, h1, 1, c.h - h1, Pal.shade(Pal.GREEN, 0.85f))
-            val h2 = 112 + (kotlin.math.sin(x / 11f + 2f) * 5f).toInt()
-            c.fill(x, h2, 1, c.h - h2, Pal.DARKGREEN)
+        paintTexture(210, 100) {
+            vgrad(0f, 0f, 210f, 100f, Pal.shade(Pal.GREEN, 0.7f), Pal.shade(Pal.DARKGREEN, 0.6f))
+            for (x in 0 until 210 step 30) roundGrad(x + 2f, 14f, 22f, 78f, 4f, Pal.shade(Pal.DARKGREEN, 0.85f), Pal.shade(Pal.DARKGREEN, 0.6f))
+            woodGrain(0f, 0f, 210f, 8f, Pal.WOOD, 31)
+            rect(0f, 8f, 210f, 1.5f, Pal.shade(Pal.WOOD, 0.45f))
+            rect(0f, 94f, 210f, 6f, Pal.shade(Pal.BROWN, 0.55f))
         }
-        c.disc(178f, 30f, 12f, Pal.YELLOW)
-        c.disc(178f, 30f, 9f, Pal.CREAM)
-        for (i in 0 until 3) c.ellipse(30f + i * 55f, 22f + (i % 2) * 10f, 14f, 5f, Pal.WHITE)
-        val text = "WHACK-A-MOLE"
-        val s = 2
-        val tw = bigTextWidth(text, s)
-        val x = (c.w - tw) / 2
-        c.fill(x - 8, 42, tw + 16, 24, Pal.shade(Pal.BROWN, 0.7f))
-        c.rect(x - 8, 42, tw + 16, 24, Pal.GOLD)
-        c.bigText(text, x + 1, 48, Pal.BLACK, s)
-        c.bigText(text, x, 47, Pal.YELLOW, s)
-        c.fill(0, 0, c.w, 6, Pal.WOOD)
-        c.fill(0, 0, 6, c.h, Pal.WOOD)
-        c.fill(c.w - 6, 0, 6, c.h, Pal.WOOD)
-        c.rect(6, 6, c.w - 12, c.h - 6, Pal.shade(Pal.WOOD, 0.6f))
-        Texture.of(c)
     }
 
-    val wood: Texture by lazy {
-        val c = PixelCanvas(32, 16)
-        c.vgrad(0, 0, c.w, c.h, Pal.WOOD, Pal.shade(Pal.WOOD, 0.7f))
-        for (i in 0 until 10) c.fill((hash01(i, 5) * 30).toInt(), (hash01(i, 6) * 15).toInt(), 6, 1, Pal.shade(Pal.WOOD, 0.8f))
-        Texture.of(c)
+    /** Backboard: wooden frame, a painted meadow under a sunny sky, and the title plaque. */
+    val backboard: Texture by lazy {
+        paintTexture(210, 140) {
+            vgrad(0f, 0f, 210f, 140f, Pal.mix(Pal.SKY, Pal.WHITE, 0.15f), Pal.shade(Pal.SKY, 0.72f))
+            radial(178f, 30f, 30f, Pal.withAlpha(Pal.YELLOW, 0.55f), 0)
+            circle(178f, 30f, 11f, Pal.YELLOW)
+            circle(178f, 30f, 8.5f, Pal.CREAM)
+            for (i in 0 until 3) {
+                val cx = 30f + i * 55f
+                val cy = 22f + (i % 2) * 10f
+                oval(cx, cy + 1f, 15f, 5f, Pal.withAlpha(Pal.shade(Pal.SKY, 0.8f), 0.5f))
+                oval(cx, cy, 14f, 5f, Pal.WHITE)
+                circle(cx - 5f, cy - 3f, 5f, Pal.WHITE)
+                circle(cx + 4f, cy - 4f, 6f, Pal.WHITE)
+            }
+            // Rolling hills.
+            fun hill(base: Float, amp1: Float, f1: Float, amp2: Float, f2: Float, phase: Float, color: Int) {
+                val pts = ArrayList<Float>()
+                pts += 0f; pts += 140f
+                var x = 0f
+                while (x <= 210f) {
+                    pts += x; pts += base + sin(x / f1 + phase) * amp1 + sin(x / f2) * amp2
+                    x += 3f
+                }
+                pts += 210f; pts += 140f
+                polygon(pts.toFloatArray(), color)
+            }
+            hill(96f, 6f, 17f, 2f, 7f, 0f, Pal.shade(Pal.GREEN, 0.85f))
+            hill(112f, 5f, 11f, 1f, 5f, 2f, Pal.DARKGREEN)
+            // Title plaque.
+            val text = "WHACK-A-MOLE"
+            roundGrad(24f, 42f, 162f, 26f, 5f, Pal.shade(Pal.BROWN, 0.85f), Pal.shade(Pal.BROWN, 0.6f))
+            strokeRound(24f, 42f, 162f, 26f, 5f, 1.6f, Pal.GOLD)
+            label(text, 105f, 48f, 14f, Pal.YELLOW, shadow = Pal.BLACK)
+            // Frame.
+            woodGrain(0f, 0f, 210f, 6f, Pal.WOOD, 41)
+            woodGrain(0f, 0f, 6f, 140f, Pal.WOOD, 42)
+            woodGrain(204f, 0f, 6f, 140f, Pal.WOOD, 43)
+            strokeRound(6f, 6f, 198f, 140f, 1f, 1f, Pal.shade(Pal.WOOD, 0.55f))
+        }
     }
+
+    val wood: Texture by lazy { paintTexture(32, 16) { woodGrain(0f, 0f, 32f, 16f, Pal.WOOD, 5) } }
 
     /** Dark soil inside the holes, darker towards the bottom. */
     val well: Texture by lazy {
-        val c = PixelCanvas(16, 32)
-        c.vgrad(0, 0, c.w, c.h, Pal.shade(Pal.DARKBROWN, 0.7f), Pal.BLACK)
-        for (i in 0 until 12) c.set((hash01(i, 7) * 16).toInt(), (hash01(i, 8) * 20).toInt(), Pal.shade(Pal.BROWN, 0.6f))
-        Texture.of(c)
+        paintTexture(16, 32) {
+            vgrad(0f, 0f, 16f, 32f, Pal.shade(Pal.DARKBROWN, 0.7f), Pal.BLACK)
+            for (i in 0 until 14) circle(hash01(i, 7) * 16f, hash01(i, 8) * 20f, 0.5f, Pal.shade(Pal.BROWN, 0.55f))
+        }
     }
     val wellBottom: Texture by lazy { TexKit.solid(8, 8, Pal.BLACK) }
 
     /** Rubber hole rim: a light top edge fading down. */
     val rim: Texture by lazy {
-        val c = PixelCanvas(32, 8)
-        c.vgrad(0, 0, c.w, c.h, Pal.shade(Pal.DARKGREEN, 1.25f), Pal.shade(Pal.DARKGREEN, 0.7f))
-        c.fill(0, 0, c.w, 2, Pal.LIME)
-        Texture.of(c)
+        paintTexture(32, 8) {
+            vgrad(0f, 0f, 32f, 8f, Pal.shade(Pal.DARKGREEN, 1.25f), Pal.shade(Pal.DARKGREEN, 0.7f))
+            vgrad(0f, 0f, 32f, 2.5f, Pal.LIME, Pal.withAlpha(Pal.LIME, 0f))
+        }
     }
 
-    /** The score display panel. Repainted in place, so the texture shares these pixels. */
-    val panel = PixelCanvas(128, 24)
-    val panelTex: Texture = Texture.of(panel)
+    /** The score display panel, repainted whenever its message changes. */
+    private val panelPaint by lazy { TexPaint(128 * 4, 24 * 4).also { it.useUnits(4f) } }
+    val panelTex: Texture = Texture(128, 24, IntArray(128 * 4 * 24 * 4), 4)
 
     fun paintPanel(text: String, color: Int) {
-        panel.fill(0, 0, panel.w, panel.h, Pal.BLACK)
-        for (y in 0 until panel.h step 2) panel.fill(0, y, panel.w, 1, Pal.shade(Pal.NIGHT, 1.2f))
-        panel.rect(0, 0, panel.w, panel.h, Pal.shade(Pal.GRAY, 0.6f))
-        panel.bigTextCentered(text, panel.w / 2, 6, color, 2, Pal.shade(color, 0.3f))
+        with(panelPaint) {
+            fill(0xFF06040A.toInt())
+            for (y in 0 until 24 step 2) rect(0f, y.toFloat(), 128f, 0.6f, Pal.withAlpha(Pal.NIGHT, 0.6f))
+            strokeRound(0.5f, 0.5f, 127f, 23f, 2f, 1f, Pal.shade(Pal.GRAY, 0.6f))
+            glow(2f, Pal.withAlpha(color, 0.8f)) { label(text, 64f, 6f, 12f, -1) }
+            label(text, 64f, 6f, 12f, Pal.mix(color, Pal.WHITE, 0.25f))
+            update(panelTex)
+        }
     }
 
     val malletHead: Texture by lazy {
-        val c = PixelCanvas(32, 16)
-        c.vgrad(0, 0, c.w, c.h, Pal.RED, Pal.DARKRED)
-        c.fill(0, 0, 4, c.h, Pal.CREAM)
-        c.fill(c.w - 4, 0, 4, c.h, Pal.CREAM)
-        c.fill(0, 3, c.w, 2, Pal.mix(Pal.RED, Pal.WHITE, 0.4f))
-        Texture.of(c)
+        paintTexture(32, 16) {
+            vgrad(0f, 0f, 32f, 16f, Pal.RED, Pal.DARKRED)
+            rect(0f, 0f, 4f, 16f, Pal.CREAM)
+            rect(28f, 0f, 4f, 16f, Pal.CREAM)
+            vgrad(0f, 2.5f, 32f, 3f, Pal.mix(Pal.RED, Pal.WHITE, 0.45f), Pal.withAlpha(Pal.RED, 0f))
+        }
     }
     val malletCap: Texture by lazy {
-        val c = PixelCanvas(16, 16)
-        c.disc(8f, 8f, 8f, Pal.CREAM)
-        c.ring(8f, 8f, 7f, 1.5f, Pal.shade(Pal.CREAM, 0.7f))
-        Texture.of(c)
+        paintTexture(16, 16) {
+            fill(Pal.CREAM)
+            ring(8f, 8f, 6.5f, 1.2f, Pal.shade(Pal.CREAM, 0.7f))
+        }
     }
     val handle: Texture by lazy {
-        val c = PixelCanvas(8, 32)
-        c.vgrad(0, 0, c.w, c.h, Pal.TAN, Pal.shade(Pal.TAN, 0.75f))
-        c.fill(0, 0, c.w, 6, Pal.shade(Pal.DARKRED, 0.8f))
-        Texture.of(c)
+        paintTexture(8, 32) {
+            vgrad(0f, 0f, 8f, 32f, Pal.TAN, Pal.shade(Pal.TAN, 0.75f))
+            rect(0f, 0f, 8f, 6f, Pal.shade(Pal.DARKRED, 0.8f))
+            for (y in 1 until 6 step 2) rect(0f, y.toFloat(), 8f, 0.5f, Pal.shade(Pal.DARKRED, 0.6f))
+        }
     }
 
+    /** The dizzy stars that circle a bonked mole. */
     val star: Texture by lazy {
-        val c = PixelCanvas(9, 9)
-        val rows = arrayOf(
-            "....#....",
-            "....#....",
-            "...###...",
-            "#########",
-            ".#######.",
-            "..#####..",
-            ".###.###.",
-            ".##...##.",
-            "#.......#",
-        )
-        c.sprite(rows, 0, 0, mapOf('#' to Pal.YELLOW))
-        c.set(4, 3, Pal.WHITE)
-        Texture.of(SpriteFX.hd(c, Pal.ORANGE, bevel = true))
-    }
-
-    // ------------------------------------------------------------------ characters
-
-    fun mole(body: Int, face: Int, bonked: Boolean, sparkle: Boolean): PixelCanvas {
-        val c = PixelCanvas(22, 38)
-        c.disc(11f, 10f, 9f, body)
-        c.fill(2, 10, 18, 28, body)
-        c.ellipse(11f, 13f, 6.5f, 5.5f, face)
-        // Belly.
-        c.ellipse(11f, 22f, 6f, 4f, Pal.mix(face, Pal.WHITE, 0.2f))
-        if (bonked) {
-            for (d in 0..2) {
-                c.set(6 + d, 7 + d, Pal.BLACK); c.set(8 - d, 7 + d, Pal.BLACK)
-                c.set(13 + d, 7 + d, Pal.BLACK); c.set(15 - d, 7 + d, Pal.BLACK)
-            }
-            c.fill(9, 15, 4, 2, Pal.DARKRED)
-        } else {
-            c.fill(7, 8, 2, 3, Pal.BLACK); c.fill(13, 8, 2, 3, Pal.BLACK)
-            c.set(7, 8, Pal.WHITE); c.set(13, 8, Pal.WHITE)
-            c.fill(10, 15, 1, 2, Pal.WHITE); c.fill(11, 15, 1, 2, Pal.WHITE)
+        paintTexture(9, 9, 12) {
+            clear(0)
+            glow(0.8f, Pal.withAlpha(Pal.ORANGE, 0.9f)) { star(4.5f, 4.7f, 4.2f, -1) }
+            star(4.5f, 4.7f, 4f, Pal.YELLOW)
+            star(4.2f, 4.3f, 2f, Pal.mix(Pal.YELLOW, Pal.WHITE, 0.6f))
         }
-        c.ellipse(11f, 12.5f, 2.4f, 1.5f, Pal.HOTPINK)
-        c.set(10, 12, Pal.WHITE)
-        c.disc(4f, 19f, 2.4f, face); c.disc(18f, 19f, 2.4f, face)
-        c.set(3, 17, Pal.WHITE); c.set(5, 17, Pal.WHITE); c.set(17, 17, Pal.WHITE); c.set(19, 17, Pal.WHITE)
-        if (sparkle) {
-            c.set(3, 3, Pal.WHITE); c.set(18, 2, Pal.WHITE); c.set(20, 12, Pal.WHITE)
-        }
-        return c
-    }
-
-    fun bomb(bonked: Boolean): PixelCanvas {
-        val c = PixelCanvas(22, 38)
-        c.fill(10, 0, 2, 4, Pal.TAN)
-        c.fill(8, 3, 6, 2, Pal.GRAY)
-        // A round bomb on a jack-in-the-box spring.
-        for (y in 20 until 38) {
-            val x = if ((y / 3) % 2 == 0) 8 else 10
-            c.fill(x, y, 5, 2, if (y % 3 == 0) Pal.LIGHTGRAY else Pal.GRAY)
-        }
-        c.disc(11f, 13f, 9.5f, Pal.DARKGRAY)
-        c.disc(8f, 9f, 2.5f, Pal.GRAY)
-        c.set(7, 8, Pal.WHITE)
-        if (bonked) {
-            c.disc(11f, 13f, 6f, Pal.ORANGE)
-            c.disc(11f, 13f, 3.5f, Pal.YELLOW)
-        } else {
-            c.hline(5, 9, 10, Pal.RED); c.hline(13, 17, 10, Pal.RED)
-            c.set(5, 9, Pal.RED); c.set(17, 9, Pal.RED)
-            c.fill(7, 11, 2, 2, Pal.RED); c.fill(14, 11, 2, 2, Pal.RED)
-            c.hline(8, 14, 17, Pal.BLACK)
-            c.set(9, 16, Pal.WHITE); c.set(13, 16, Pal.WHITE)
-        }
-        return c
-    }
-
-    /** HD sprite textures: normal, bonked, gold, gold bonked, bomb, bomb hit. */
-    val sprites: Array<Texture> by lazy {
-        arrayOf(
-            mole(Pal.BROWN, Pal.TAN, bonked = false, sparkle = false),
-            mole(Pal.BROWN, Pal.TAN, bonked = true, sparkle = false),
-            mole(Pal.GOLD, Pal.YELLOW, bonked = false, sparkle = true),
-            mole(Pal.GOLD, Pal.YELLOW, bonked = true, sparkle = true),
-            bomb(false),
-            bomb(true),
-        ).map { Texture.of(SpriteFX.hd(it)) }.toTypedArray()
     }
 }

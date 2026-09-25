@@ -11,8 +11,9 @@ import com.pocketarcade.engine.Body
 import com.pocketarcade.engine.CircleWorld
 import com.pocketarcade.engine.FIXED_DT
 import com.pocketarcade.engine.Pal
+import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.Particles
-import com.pocketarcade.engine.PixelFont
+import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Segment
 import com.pocketarcade.engine.Sfx
@@ -84,13 +85,13 @@ class ClawMachineGame : BaseMiniGame() {
     override val title = "CLAW MACHINE"
     override val marquee = "CLAW"
     override val instructions = listOf(
-        "HOLD ${PixelFont.LEFT} ${PixelFont.RIGHT} TO MOVE THE CLAW",
+        "HOLD ${ArcadeFont.LEFT} ${ArcadeFont.RIGHT} TO MOVE THE CLAW",
         "TAP DROP TO GRAB",
         "CENTER THE GRAB FOR",
         "A STRONGER GRIP",
         "WATCH THE SWING!",
     )
-    override val look = CabinetLook(body = Pal.PINK, trim = Pal.YELLOW, glow = Pal.HOTPINK, shape = CabinetShape.WIDE)
+    override val look = CabinetLook(body = Pal.PINK, trim = Pal.YELLOW, glow = Pal.HOTPINK, shape = CabinetShape.CLAW)
     override val roundSeconds = ClawTuning.ROUND_SECONDS
 
     private enum class State { IDLE, DROPPING, CLOSING, LIFTING, CARRYING, RELEASING }
@@ -584,7 +585,7 @@ class ClawMachineGame : BaseMiniGame() {
      * (x across, y down); the world keeps x, turns y into height above the prize floor and
      * gives each prize a little depth so the pile looks full.
      */
-    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt(), "claw").apply {
+    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt()).apply {
         look(180f, 340f, 860f, 180f, 215f, 0f, fovDeg = 46f, centerYFrac = 0.40f)
     }
     private val pt = FloatArray(3)
@@ -663,6 +664,8 @@ class ClawMachineGame : BaseMiniGame() {
     private val chuteLight = PointLight(CHUTE_X, 60f, 20f, 1f, 0.9f, 0.3f, 220f, 0f)
     private val luckyLight = PointLight(0f, 0f, 30f, 1f, 0.8f, 0.3f, 160f, 0f)
 
+    private val plushXf = Xform()
+
     override fun render(scope: DrawScope) {
         val r = stage.begin()
         val l = r.lighting
@@ -683,11 +686,14 @@ class ClawMachineGame : BaseMiniGame() {
         cabinet.draw(r)
         marqueeFront.draw(r)
 
-        for (b in world.bodies) {
+        for ((i, b) in world.bodies.withIndex()) {
             val p = b.data as? Plush ?: continue
             val z = if (b === held) 0f else depthOf(b)
-            val size = b.r * 2.3f
-            r.sprite(b.x, wy(b.y), z, size, size, PlushArt.texture(p).full, roll = -b.angle)
+            val (model, radius) = Plush3D.centred(p)
+            // A little turn each so the pile doesn't look stamped out.
+            val turn = (hash01(i, 71) - 0.5f) * 0.9f
+            plushXf.set(b.x, wy(b.y), z, yaw = turn, roll = -b.angle, scale = b.r * 1.12f / radius)
+            model.draw(r, xf = plushXf)
         }
         drawClaw(r)
         drawBulbs(r)
@@ -716,14 +722,14 @@ class ClawMachineGame : BaseMiniGame() {
         r.quad(BOX_LEFT, wy(BOX_TOP) + 70f, BOX_D - 1f, BOX_RIGHT, wy(BOX_TOP) + 70f, BOX_D - 1f, BOX_RIGHT, wy(BOX_TOP) + 30f, BOX_D - 1f, BOX_LEFT, wy(BOX_TOP) + 30f, BOX_D - 1f, glow, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1f, alpha = 0.25f * neonA, tint = Pal.HOTPINK)
         r.quad(BOX_LEFT, wy(BOX_TOP) + 60f, BOX_D, BOX_RIGHT, wy(BOX_TOP) + 60f, BOX_D, BOX_RIGHT, 0f, BOX_D, BOX_LEFT, 0f, BOX_D, ClawArt.glass.full, 0f, 0f, 1f, blend = Blend.ALPHA)
         r.quad(BOX_LEFT, wy(BOX_TOP) + 60f, BOX_D + 0.5f, BOX_RIGHT, wy(BOX_TOP) + 60f, BOX_D + 0.5f, BOX_RIGHT, 0f, BOX_D + 0.5f, BOX_LEFT, 0f, BOX_D + 0.5f, ClawArt.glare.full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1f, alpha = 0.3f)
-        stage.present(scope)
+        stage.present()
 
         if (bannerT > 0f) {
             val a = clamp01(bannerT / 0.3f)
             val pulse = 1f + 0.08f * sin(time * 12f)
-            PixelFont.drawCentered(scope, bannerText, GAME_W / 2f + 30f, 110f, 4f * pulse, bannerColor, a)
+            ArcadeFont.drawCentered(scope, bannerText, GAME_W / 2f + 30f, 110f, 4f * pulse, bannerColor, a)
         } else if (lucky && state == State.IDLE) {
-            PixelFont.drawCentered(scope, "${PixelFont.STAR} LUCKY CLAW ${PixelFont.STAR}", GAME_W / 2f + 30f, 110f, 3f, Color(Pal.GOLD), 0.6f + 0.4f * abs(sin(time * 5f)))
+            ArcadeFont.drawCentered(scope, "${ArcadeFont.STAR} LUCKY CLAW ${ArcadeFont.STAR}", GAME_W / 2f + 30f, 110f, 3f, Color(Pal.GOLD), 0.6f + 0.4f * abs(sin(time * 5f)))
         }
         drawControls(scope)
     }
@@ -762,7 +768,7 @@ class ClawMachineGame : BaseMiniGame() {
             for (i in 0 until 12) {
                 val y = top + 20f - i * (top + 150f) / 11f
                 val on = ((time * 5f).toInt() + i) % 3 == 0
-                r.sprite(x, y, BOX_D + 13f, 7f, 7f, white, emissive = 1.2f, tint = if (on) Pal.YELLOW else Pal.shade(Pal.GOLD, 0.45f))
+                r.sprite(x, y, BOX_D + 13f, 7f, 7f, TexKit.dot.full, emissive = 1.2f, tint = if (on) Pal.YELLOW else Pal.shade(Pal.GOLD, 0.45f))
                 if (on) r.sprite(x, y, BOX_D + 14f, 26f, 26f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.5f, tint = Pal.GOLD)
             }
         }
@@ -773,8 +779,8 @@ class ClawMachineGame : BaseMiniGame() {
             drawRect(Color.Black, Offset(0f, 492f), Size(GAME_W, GAME_H - 492f + 40f), alpha = 0.3f)
             drawRect(Color(Pal.HOTPINK), Offset(0f, 492f), Size(GAME_W, 3f), alpha = 0.8f)
             val enabled = state == State.IDLE && !timeUp
-            arcadeButton(this, LEFT_X, BTN_Y, leftPointer >= 0, enabled, "${PixelFont.LEFT}")
-            arcadeButton(this, RIGHT_X, BTN_Y, rightPointer >= 0, enabled, "${PixelFont.RIGHT}")
+            arcadeButton(this, LEFT_X, BTN_Y, leftPointer >= 0, enabled, "${ArcadeFont.LEFT}")
+            arcadeButton(this, RIGHT_X, BTN_Y, rightPointer >= 0, enabled, "${ArcadeFont.RIGHT}")
 
             val pressed = dropPressT > 0f
             val canDrop = enabled && cable <= CABLE_IDLE + 2f
@@ -785,8 +791,8 @@ class ClawMachineGame : BaseMiniGame() {
             drawCircle(Color(base), DROP_R, Offset(DROP_CX, DROP_CY + press))
             drawCircle(Color.White, DROP_R * 0.55f, Offset(DROP_CX - 14f, DROP_CY - 16f + press), alpha = 0.18f)
             val glow = if (canDrop) 0.75f + 0.25f * sin(time * 7f) else 0.5f
-            PixelFont.drawCentered(this, "DROP", DROP_CX, DROP_CY - 10f + press, 4f, Color.White, glow)
-            PixelFont.drawCentered(this, "WON: $wonCount", 116f, 618f, 2f, Color(Pal.YELLOW))
+            ArcadeFont.drawCentered(this, "DROP", DROP_CX, DROP_CY - 10f + press, 4f, Color.White, glow)
+            ArcadeFont.drawCentered(this, "WON: $wonCount", 116f, 618f, 2f, Color(Pal.YELLOW))
         }
     }
 
@@ -797,7 +803,7 @@ class ClawMachineGame : BaseMiniGame() {
             drawRoundRect(Color(Pal.BLACK), Offset(x - 3f, y + 3f), Size(BTN_SIZE + 6f, BTN_SIZE + 6f), CornerRadius(16f, 16f), alpha = 0.5f)
             drawRoundRect(Color(Pal.shade(base, 0.55f)), Offset(x, y + 6f), Size(BTN_SIZE, BTN_SIZE), CornerRadius(14f, 14f))
             drawRoundRect(Color(if (pressed) Pal.shade(base, 0.85f) else base), Offset(x, y + press), Size(BTN_SIZE, BTN_SIZE - 6f), CornerRadius(14f, 14f))
-            PixelFont.drawCentered(this, label, x + BTN_SIZE / 2f, y + 22f + press, 6f, Color(Pal.NAVY), shadow = false)
+            ArcadeFont.drawCentered(this, label, x + BTN_SIZE / 2f, y + 22f + press, 6f, Color(Pal.NAVY), shadow = false)
         }
     }
 

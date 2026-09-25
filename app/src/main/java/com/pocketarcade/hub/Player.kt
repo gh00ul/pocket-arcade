@@ -1,13 +1,13 @@
 package com.pocketarcade.hub
 
 import com.pocketarcade.engine.len
-import kotlin.math.abs
+import kotlin.math.PI
+import kotlin.math.atan2
 
-/** The player's kid: analog movement with wall sliding and a 4-direction walk cycle. */
+/** The player's kid: analog movement with wall sliding, smooth turning and a walk cycle. */
 class Player {
     companion object {
-        const val SPEED = 74f
-        private val CYCLE = intArrayOf(0, 1, 0, 2)
+        const val SPEED = 78f
     }
 
     var x = 0f
@@ -16,8 +16,11 @@ class Player {
         private set
     var vy = 0f
         private set
-    var dir = CharacterArt.UP
-    var frame = 0
+    /** Facing, radians: 0 looks toward the entrance (+z), π toward the back wall. */
+    var yaw = PI.toFloat()
+    var pose = Pose.STAND
+        private set
+    var phase = 0f
         private set
     var moving = false
         private set
@@ -27,17 +30,11 @@ class Player {
 
     var look: CharacterLook? = null
         private set
-    var sheet: CharacterArt.Sheet? = null
-        private set
 
-    private var animT = 0f
-    private var lastCycle = 0
     private val out = FloatArray(2)
 
     fun setLook(newLook: CharacterLook) {
-        if (newLook == look) return
         look = newLook
-        sheet = CharacterArt.Sheet(newLook)
     }
 
     fun update(dt: Float, inputX: Float, inputY: Float, solids: List<Box>) {
@@ -46,27 +43,28 @@ class Player {
         if (mag > 0.01f) {
             vx = inputX * SPEED
             vy = inputY * SPEED
-            dir = if (abs(inputX) > abs(inputY) * 1.1f) {
-                if (inputX < 0f) CharacterArt.LEFT else CharacterArt.RIGHT
-            } else {
-                if (inputY < 0f) CharacterArt.UP else CharacterArt.DOWN
-            }
             val moved = Collision.move(solids, x, y, vx * dt, vy * dt, out)
             vx = (out[0] - x) / dt
             vy = (out[1] - y) / dt
             x = out[0]
             y = out[1]
             moving = moved
-            if (moved) animT += dt * (5f + 5f * mag) else animT = 0f
+            // Turn smoothly towards where the stick points.
+            val target = atan2(inputX, inputY)
+            var d = (target - yaw) % (2f * PI.toFloat())
+            if (d > PI) d -= 2f * PI.toFloat()
+            if (d < -PI) d += 2f * PI.toFloat()
+            yaw += d.coerceIn(-dt * 12f, dt * 12f)
+            if (moved) {
+                val before = (phase / PI.toFloat()).toInt()
+                phase += dt * (6f + 6f * mag)
+                if ((phase / PI.toFloat()).toInt() != before) stepped = true
+            }
         } else {
             vx = 0f
             vy = 0f
             moving = false
-            animT = 0f
         }
-        val cycle = animT.toInt() % 4
-        frame = CYCLE[cycle]
-        if (cycle != lastCycle && (cycle == 1 || cycle == 3)) stepped = true
-        lastCycle = cycle
+        pose = if (moving) Pose.WALK else Pose.STAND
     }
 }

@@ -10,16 +10,29 @@ import com.pocketarcade.engine.TouchType
 const val GAME_W = 360f
 const val GAME_H = 640f
 
-/** The silhouette the hall draws for a machine. */
+/**
+ * The kind of cabinet the hall builds for a machine. The specific shapes get purpose-built
+ * models (a glass claw box, a skee-ball alley...) and their own spot on the arcade floor; the
+ * generic ones suit any new game.
+ */
 enum class CabinetShape {
-    /** Classic upright video cabinet, 2 tiles wide. */
+    /** Classic upright video cabinet. */
     UPRIGHT,
-    /** Wide glass-fronted machine (claw, pusher), 3 tiles wide. */
+    /** Wide glass-fronted merchandiser. */
     WIDE,
-    /** Long alley machine you stand at the end of (skee-ball, hoops), 2 tiles wide, 4 deep. */
+    /** Long alley you stand at the end of. */
     LANE,
-    /** Low playing table with a scoreboard at the far end (air hockey), 2.5 tiles wide, 4 deep. */
+    /** Low playing table with a scoreboard at the far end. */
     TABLE,
+    CLAW,
+    WHACK,
+    SKEEBALL,
+    HOOPS,
+    PUSHER,
+    AIR_HOCKEY,
+    RACER,
+    /** Tall upright with a vertical screen and a big button (stacker). */
+    TOWER,
 }
 
 /** How a machine looks in the hall: body and trim colours, the neon glow it casts, and its shape. */

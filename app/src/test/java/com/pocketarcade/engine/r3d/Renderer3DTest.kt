@@ -9,79 +9,97 @@ class Renderer3DTest {
 
     private fun renderer(): Renderer3D {
         val r = Renderer3D(64, 64)
+        r.startFrame()
         r.camera.lookAt(0f, 0f, 0f, 0f, 0f, -1f, (Math.PI / 2).toFloat(), 64, 64)
-        r.lighting.ambR = 1f; r.lighting.ambG = 1f; r.lighting.ambB = 1f
         r.clear(0xFF000000.toInt())
         return r
     }
 
-    private fun wall(r: Renderer3D, z: Float, size: Float, tex: Texture) {
+    private fun wall(r: Renderer3D, z: Float, size: Float, tex: Texture, blend: Blend = Blend.OPAQUE, nz: Float = 1f) {
         r.quad(
             -size, size, z, size, size, z, size, -size, z, -size, -size, z,
-            tex.full, 0f, 0f, 1f,
+            tex.full, 0f, 0f, nz, blend = blend,
         )
     }
 
     @Test
-    fun drawsAFacingQuadAndLeavesTheRestClear() {
+    fun recordsAFacingQuadAsTwoTriangles() {
         val r = renderer()
         wall(r, -10f, 2f, solid(0xFFFF0000.toInt()))
-        assertEquals(0xFFFF0000.toInt(), r.color[32 * 64 + 32])
-        assertEquals(0xFF000000.toInt(), r.color[1 * 64 + 1])
+        val p = r.finishFrame(0, 0, 64, 64)
+        assertEquals(6, p.vertCount)
+        assertEquals(1, p.drawCount)
+        assertEquals(RenderPass.KIND_BATCH, p.draws[0])
+        assertEquals(Blend.OPAQUE.ordinal, p.draws[1])
     }
 
     @Test
-    fun nearerSurfaceWinsWhateverTheDrawOrder() {
+    fun culledAndBehindTheEyePolygonsAreDropped() {
         val r = renderer()
-        wall(r, -10f, 3f, solid(0xFF00FF00.toInt()))
-        wall(r, -20f, 6f, solid(0xFF0000FF.toInt()))
-        assertEquals(0xFF00FF00.toInt(), r.color[32 * 64 + 32])
+        wall(r, -10f, 2f, solid(-1), nz = -1f)
+        wall(r, 10f, 2f, solid(-1))
+        val p = r.finishFrame(0, 0, 64, 64)
+        assertEquals(0, p.vertCount)
     }
 
     @Test
-    fun culledWhenFacingAway() {
+    fun opaqueGeometryIsGroupedByTextureAndDrawnBeforeSeeThrough() {
         val r = renderer()
-        r.quad(-2f, 2f, -10f, 2f, 2f, -10f, 2f, -2f, -10f, -2f, -2f, -10f, solid(-1).full, 0f, 0f, -1f)
-        assertEquals(0xFF000000.toInt(), r.color[32 * 64 + 32])
+        val a = solid(0xFFFF0000.toInt())
+        val b = solid(0xFF00FF00.toInt())
+        wall(r, -30f, 2f, a, Blend.ALPHA)
+        wall(r, -10f, 2f, a)
+        wall(r, -12f, 2f, b)
+        wall(r, -14f, 2f, a)
+        val p = r.finishFrame(0, 0, 64, 64)
+        // Two opaque batches (a, b) then the alpha batch, whatever order they were recorded in.
+        assertEquals(3, p.drawCount)
+        assertEquals(Blend.OPAQUE.ordinal, p.draws[1])
+        assertEquals(12, p.draws[4])
+        assertEquals(Blend.OPAQUE.ordinal, p.draws[5 + 1])
+        assertEquals(Blend.ALPHA.ordinal, p.draws[10 + 1])
+        assertEquals(24, p.vertCount)
     }
 
     @Test
-    fun clipsGeometryThatCrossesTheNearPlane() {
-        val r = Renderer3D(64, 64)
-        r.camera.lookAt(0f, 10f, 0f, 0f, 0f, -30f, 1.2f, 64, 64)
-        r.lighting.ambR = 1f; r.lighting.ambG = 1f; r.lighting.ambB = 1f
-        r.clear(0xFF000000.toInt())
-        // A floor running from well behind the camera to far in front.
-        r.quad(-50f, 0f, -200f, 50f, 0f, -200f, 50f, 0f, 50f, -50f, 0f, 50f, solid(0xFFFFFFFF.toInt()).full, 0f, 1f, 0f)
-        assertEquals(0xFFFFFFFF.toInt(), r.color[63 * 64 + 32])
+    fun consecutiveSeeThroughPolygonsWithTheSameTextureMerge() {
+        val r = renderer()
+        val glow = solid(0x80FFFFFF.toInt())
+        wall(r, -10f, 2f, glow, Blend.ADD)
+        wall(r, -11f, 2f, glow, Blend.ADD)
+        val p = r.finishFrame(0, 0, 64, 64)
+        assertEquals(1, p.drawCount)
+        assertEquals(12, p.draws[4])
     }
 
     @Test
-    fun projectsAndUnprojectsConsistently() {
-        val cam = Camera3D()
-        cam.lookAt(0f, 300f, 300f, 0f, 0f, 0f, 0.7f, 360, 800)
-        val p = FloatArray(3)
-        assertTrue(cam.project(40f, 0f, -25f, p))
-        val hit = FloatArray(2)
-        assertTrue(cam.rayToPlaneY(p[0], p[1], 0f, hit))
-        assertEquals(40f, hit[0], 0.05f)
-        assertEquals(-25f, hit[1], 0.05f)
-    }
-
-    @Test
-    fun fillRateBenchmark() {
-        val r = Renderer3D(360, 800)
-        r.camera.lookAt(0f, 0f, 0f, 0f, 0f, -1f, 1.0f, 360, 800)
-        r.lighting.ambR = 0.8f
-        val tex = Texture(32, 32, IntArray(32 * 32) { if (it % 3 == 0) 0xFF884422.toInt() else 0xFF2244AA.toInt() })
-        val frames = 30
-        val start = System.nanoTime()
-        repeat(frames) {
-            r.clear(0xFF101010.toInt())
-            for (k in 0 until 3) wall(r, -2f - k, 1.2f + k, tex)
+    fun lightGridListsLightsOnlyWhereTheyReach() {
+        val r = renderer()
+        r.lighting.points += PointLight(0f, 10f, 0f, 1f, 1f, 1f, 50f)
+        r.lighting.points += PointLight(500f, 10f, 0f, 1f, 1f, 1f, 50f)
+        val p = r.finishFrame(0, 0, 64, 64)
+        assertEquals(2, p.lightCount)
+        assertTrue(p.gridW > 1)
+        fun lightsAt(x: Float, z: Float): Set<Int> {
+            val gx = ((x - p.gridX0) * p.gridInvCell).toInt()
+            val gz = ((z - p.gridZ0) * p.gridInvCell).toInt()
+            val base = (gz * p.gridW * 2 + gx * 2) * 4
+            return (0 until 8).map { (p.grid[base + it].toInt() and 255) - 1 }.filter { it >= 0 }.toSet()
         }
-        val ms = (System.nanoTime() - start) / 1e6 / frames
-        println("fill: %.2f ms per frame for ~3 full-screen layers at 360x800".format(ms))
-        assertTrue(ms < 200)
+        assertEquals(setOf(0), lightsAt(0f, 0f))
+        assertEquals(setOf(1), lightsAt(500f, 0f))
+        assertEquals(emptySet<Int>(), lightsAt(250f, 0f))
+    }
+
+    @Test
+    fun projectsAndUnprojectsThroughTheCamera() {
+        val cam = Camera3D()
+        cam.lookAt(0f, 100f, 100f, 0f, 0f, 0f, (Math.PI / 3).toFloat(), 200, 200)
+        val out = FloatArray(3)
+        assertTrue(cam.project(10f, 0f, 5f, out))
+        val hit = FloatArray(2)
+        assertTrue(cam.rayToPlaneY(out[0], out[1], 0f, hit))
+        assertEquals(10f, hit[0], 0.01f)
+        assertEquals(5f, hit[1], 0.01f)
     }
 }

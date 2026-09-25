@@ -5,7 +5,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
-import com.pocketarcade.engine.PixelFont
+import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.clamp01
@@ -20,6 +20,7 @@ import com.pocketarcade.engine.r3d.Xform
 import com.pocketarcade.engine.range
 import com.pocketarcade.games.BaseMiniGame
 import com.pocketarcade.games.CabinetLook
+import com.pocketarcade.games.CabinetShape
 import com.pocketarcade.games.GAME_H
 import com.pocketarcade.games.GAME_W
 import kotlin.math.abs
@@ -61,7 +62,7 @@ class StackerGame : BaseMiniGame() {
         "TO KEEP IT WHOLE",
         "3 MISSES AND YOU'RE OUT",
     )
-    override val look = CabinetLook(body = Pal.VIOLET, trim = Pal.CYAN, glow = Pal.PURPLE)
+    override val look = CabinetLook(body = Pal.VIOLET, trim = Pal.CYAN, glow = Pal.PURPLE, shape = CabinetShape.TOWER)
     override val roundSeconds = StackerTuning.ROUND_SECONDS
 
     /** One placed layer of the tower: centre and size on the ground plane. */
@@ -263,7 +264,7 @@ class StackerGame : BaseMiniGame() {
 
     // ---------------------------------------------------------------- 3D presentation
 
-    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt(), "stacker")
+    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt())
     private val pt = FloatArray(3)
     private val xf = Xform()
     private val key = PointLight(0f, 0f, 0f, 1f, 0.95f, 0.9f, 900f, 0.5f)
@@ -314,33 +315,30 @@ class StackerGame : BaseMiniGame() {
             val grow = 1f + (1f - perfectFlash) * 0.5f
             r.flat(s.x, s.z, y, s.w * grow, s.d * grow, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = perfectFlash, tint = Pal.CYAN)
         }
-        stage.present(scope)
+        stage.present()
 
-        PixelFont.drawCentered(scope, height.toString(), GAME_W / 2f, 24f, 7f, Color.White)
+        ArcadeFont.drawCentered(scope, height.toString(), GAME_W / 2f, 24f, 7f, Color.White)
         for (i in 0 until StackerTuning.LIVES) {
             val on = i < lives
-            PixelFont.drawCentered(scope, "${PixelFont.HEART}", GAME_W / 2f - 30f + i * 30f, 86f, 3f, Color(if (on) Pal.RED else Pal.DARKGRAY))
+            ArcadeFont.drawCentered(scope, "${ArcadeFont.HEART}", GAME_W / 2f - 30f + i * 30f, 86f, 3f, Color(if (on) Pal.RED else Pal.DARKGRAY))
         }
         if (combo >= 2) {
-            PixelFont.drawCentered(scope, "PERFECT x$combo", GAME_W / 2f, 118f, 2f, Color(Pal.CYAN), 0.7f + 0.3f * sin(time * 10f))
+            ArcadeFont.drawCentered(scope, "PERFECT x$combo", GAME_W / 2f, 118f, 2f, Color(Pal.CYAN), 0.7f + 0.3f * sin(time * 10f))
         }
         if (moving && height == 0 && !timeUp) {
-            PixelFont.drawCentered(scope, "TAP TO DROP", GAME_W / 2f, 600f, 2f, Color.White, 0.5f + 0.5f * sin(time * 6f))
+            ArcadeFont.drawCentered(scope, "TAP TO DROP", GAME_W / 2f, 600f, 2f, Color.White, 0.5f + 0.5f * sin(time * 6f))
         }
     }
 
     private fun drawStars(r: Renderer3D, climb: Float) {
         if (climb <= 0.05f) return
-        // Stars fixed in screen space, painted straight into the framebuffer.
-        val w = r.width
-        val hgt = r.height
+        // Stars far behind the tower, fading in as it climbs into the night.
+        val glow = TexKit.glow.full
         for (i in 0 until 40) {
-            val x = (hash01(i, 71) * w).toInt()
-            val y = (hash01(i, 72) * hgt * 0.7f).toInt()
+            val x = -900f + hash01(i, 71) * 1800f
+            val y = camY + 80f + hash01(i, 72) * 900f
             val tw = 0.5f + 0.5f * sin(time * 2f + i)
-            val c = mixColor(0xFF000000.toInt(), -1, climb * tw)
-            val idx = y * w + x
-            if (idx in r.color.indices) r.color[idx] = c or -0x1000000
+            r.sprite(x, y, -1400f, 14f, 14f, glow, blend = Blend.ADD, emissive = 1.4f, alpha = climb * tw)
         }
     }
 

@@ -5,7 +5,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.pocketarcade.engine.FlickTracker
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
-import com.pocketarcade.engine.PixelFont
+import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.Spring
@@ -72,7 +72,7 @@ class HoopsGame : BaseMiniGame() {
         "YOUR POINTS (UP TO x5)",
         "SECOND HALF: HOOP MOVES!",
     )
-    override val look = CabinetLook(body = Pal.RED, trim = Pal.ORANGE, glow = Pal.ORANGE, shape = CabinetShape.LANE)
+    override val look = CabinetLook(body = Pal.RED, trim = Pal.ORANGE, glow = Pal.ORANGE, shape = CabinetShape.HOOPS)
     override val roundSeconds = HoopsTuning.ROUND_SECONDS
 
     private companion object {
@@ -430,7 +430,7 @@ class HoopsGame : BaseMiniGame() {
      * world uses centimetres with z towards the viewer, and the camera matches the
      * simulation's own projection exactly, so [sx]/[sy] still place effects on screen.
      */
-    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt(), "hoops").apply {
+    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt()).apply {
         val fov = 2f * atan(GAME_H / 2f / F) * (180f / Math.PI.toFloat())
         look(0f, CAM_Y * S, -CAM_Z * S, 0f, CAM_Y * S, -CAM_Z * S - 1000f, fovDeg = fov, centerYFrac = HORIZON / GAME_H)
     }
@@ -516,10 +516,10 @@ class HoopsGame : BaseMiniGame() {
         }
         drawNet(r, wob)
         drawSideNets(r)
-        stage.present(scope)
+        stage.present()
 
         if (hasReady && dragging < 0 && !timeUp) {
-            PixelFont.drawCentered(scope, "FLICK ${PixelFont.UP}", CX, 610f, 2f, Color.White, 0.5f + 0.5f * sin(time * 6f))
+            ArcadeFont.drawCentered(scope, "FLICK ${ArcadeFont.UP}", CX, 610f, 2f, Color.White, 0.5f + 0.5f * sin(time * 6f))
         }
         // Multiplier display.
         val m = multiplier
@@ -529,9 +529,9 @@ class HoopsGame : BaseMiniGame() {
             streak >= 2 -> Pal.PINK
             else -> Pal.GRAY
         }
-        PixelFont.drawCentered(scope, label, 318f, 26f, 4f * multSpring.value, Color(c))
-        PixelFont.drawCentered(scope, "MULT", 318f, 62f, 2f, Color(Pal.LIGHTGRAY))
-        PixelFont.drawCentered(scope, "$makes/$shots", 42f, 34f, 2f, Color(Pal.LIGHTGRAY))
+        ArcadeFont.drawCentered(scope, label, 318f, 26f, 4f * multSpring.value, Color(c))
+        ArcadeFont.drawCentered(scope, "MULT", 318f, 62f, 2f, Color(Pal.LIGHTGRAY))
+        ArcadeFont.drawCentered(scope, "$makes/$shots", 42f, 34f, 2f, Color(Pal.LIGHTGRAY))
     }
 
     private fun drawBackLights(r: Renderer3D) {
@@ -541,7 +541,7 @@ class HoopsGame : BaseMiniGame() {
         for (i in 0 until 10) {
             val on = ((time * 6f).toInt() + i) % 3 != 0
             val x = (-0.9f + i * 0.2f) * S
-            r.sprite(x, 370f, z, 8f, 8f, white, emissive = 1.2f, tint = if (on) Pal.RED else Pal.DARKRED)
+            r.sprite(x, 370f, z, 8f, 8f, TexKit.dot.full, emissive = 1.2f, tint = if (on) Pal.RED else Pal.DARKRED)
             if (on) r.sprite(x, 370f, z + 1f, 30f, 30f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.45f, tint = Pal.RED)
         }
     }
@@ -578,6 +578,9 @@ class HoopsGame : BaseMiniGame() {
         r.quad(-w, 420f, -100f, w, 420f, -100f, w, 420f, -BACK_Z * S, -w, 420f, -BACK_Z * S, net, 0f, -1f, 0f, blend = Blend.ALPHA, cull = false)
     }
 
+    private val ballModel by lazy { HoopsArt.ball(BALL_R * S) }
+    private val ballXf = Xform()
+
     private fun drawBall(r: Renderer3D, x: Float, y: Float, z: Float, spin: Float, sqx: Float, sqy: Float) {
         val wx = x * S
         val wz = -z * S
@@ -585,7 +588,8 @@ class HoopsGame : BaseMiniGame() {
         // Contact shadow on the court, softer the higher the ball.
         val a = 0.45f / (1f + y * 0.6f)
         r.flat(wx, wz, 0.5f, d * 1.1f, d * 0.9f, TexKit.shadow.full, blend = Blend.ALPHA, alpha = a)
-        r.sprite(wx, y * S + (sqy - 1f) * d / 2f, wz, d * sqx, d * sqy, HoopsArt.ball.full, roll = -spin, depthBias = 1.02f)
+        ballXf.set(wx, y * S + (sqy - 1f) * d / 2f, wz, pitch = -spin).stretch(sqx, sqy, sqx)
+        ballModel.draw(r, xf = ballXf)
     }
 
     // ---------------------------------------------------------------- attract mode

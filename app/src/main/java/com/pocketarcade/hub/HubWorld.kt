@@ -19,7 +19,6 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
     val npcs = ArrayList<Npc>()
     val camera = HubCamera()
     val joystick = Joystick()
-    val clerk: CharacterArt.Sheet by lazy { CharacterArt.Sheet(CharacterArt.clerk) }
     var time = 0f
         private set
 
@@ -52,20 +51,18 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
     init {
         player.x = map.spawnX
         player.y = map.spawnY
-        player.dir = CharacterArt.UP
-        camera.maxZ = map.heightPx - 160f
         camera.snapTo(player.x, player.y)
-        repeat(7) { i ->
-            val look = CharacterArt.randomKid(i + 3)
+        repeat(13) { i ->
+            val look = Looks.randomKid(i + 3)
             var tx: Int
             var ty: Int
             var tries = 0
             do {
                 tx = rng.nextInt(1, map.cols - 1)
-                ty = rng.nextInt(8, map.rows - 3)
+                ty = rng.nextInt(8, map.rows - 4)
                 tries++
             } while (!map.tileWalkable(tx, ty) && tries < 50)
-            npcs += Npc(look, tx * HubLayout.TILE + 8f, ty * HubLayout.TILE + 12f, Random(100 + i))
+            npcs += Npc(look, tx * HubLayout.TILE + 8f, ty * HubLayout.TILE + 12f, Random(100 + i), i * 1.7f)
         }
     }
 
@@ -73,7 +70,6 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         if (owned == ownedDecor) return
         ownedDecor = owned
         map = HubLayout.build(games, owned)
-        camera.maxZ = map.heightPx - 160f
         // If a new decoration landed on the player, nudge them to the nearest free spot.
         if (Collision.blocked(map.solids, player.x, player.y)) {
             for (r in 1..6) {
@@ -131,8 +127,8 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
     /** Whether no other kid (and not the player) is using hangout [index]. */
     fun hangoutFree(index: Int, asker: Npc): Boolean {
         if (npcs.any { it !== asker && it.hangout == index }) return false
-        val (hx, hy) = map.hangouts[index]
-        return !(abs(player.x - hx) < 20f && abs(player.y - hy) < 24f)
+        val h = map.hangouts[index]
+        return !(abs(player.x - h.x) < 20f && abs(player.y - h.z) < 24f)
     }
 
     /** Breadth-first search over walkable tiles; returns tile indices from start (exclusive) to goal. */

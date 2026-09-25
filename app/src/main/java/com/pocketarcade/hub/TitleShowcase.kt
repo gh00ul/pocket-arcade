@@ -1,83 +1,78 @@
 package com.pocketarcade.hub
 
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import com.pocketarcade.engine.Pal
-import com.pocketarcade.engine.PixelCanvas
+import com.pocketarcade.engine.gl.Gfx
 import com.pocketarcade.engine.r3d.Blend
-import com.pocketarcade.engine.r3d.FrameImage
-import com.pocketarcade.engine.r3d.Model
 import com.pocketarcade.engine.r3d.PointLight
-import com.pocketarcade.engine.r3d.RasterPainter
 import com.pocketarcade.engine.r3d.Renderer3D
-import com.pocketarcade.engine.r3d.Texture
 import com.pocketarcade.games.MiniGame
 import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * The title screen's showroom: every machine in the arcade lined up on a neon floor, with a
- * slow camera dolly gliding past them while their attract screens play.
+ * The title screen's showroom: one of every machine lined up on a polished floor under
+ * spotlights, with a slow camera dolly gliding past them while their screens play.
  */
 class TitleShowcase(private val games: List<MiniGame>) {
-    private val r = Renderer3D(1, 1)
-    private val frame = FrameImage()
-    private val painter = RasterPainter()
-    private val spacing = 52f
-    private val rowWidth = spacing * (games.size - 1)
-    private val entries: List<Triple<MiniGame, CabinetSkin, Model>> = games.mapIndexed { i, g ->
-        val skin = HubScene3D.skinFor(g)
-        val (w, d, _) = HubLayout.cabinetSize(g.look.shape)
-        val cx = i * spacing - rowWidth / 2f
-        val deep = g.look.shape == com.pocketarcade.games.CabinetShape.LANE || g.look.shape == com.pocketarcade.games.CabinetShape.TABLE
-        val front = if (deep) 30f else 0f
-        Triple(g, skin, HubModels.cabinet(skin, cx - w / 2f, front - d, cx + w / 2f, front))
+    companion object {
+        const val SLOT = "title"
     }
-    private val lights = games.mapIndexed { i, g ->
-        val c = g.look.glow
-        PointLight(i * spacing - rowWidth / 2f, 26f, 24f, (c shr 16 and 255) / 255f, (c shr 8 and 255) / 255f, (c and 255) / 255f, 90f, 1.1f)
-    }
-    private val floor = Texture.of(PixelCanvas(32, 32).apply {
-        for (y in 0 until 32) for (x in 0 until 32) {
-            set(x, y, if ((x / 16 + y / 16) % 2 == 0) 0xFF151027.toInt() else 0xFF5E5688.toInt())
-        }
-    }).region(wrap = true)
-    private val glow = HubTextures.glow.full
 
-    fun draw(scope: DrawScope, x: Float, y: Float, w: Float, h: Float, t: Float, highScore: (String) -> Int) {
-        val scale = (w / 300f).toInt().coerceIn(2, 5)
-        val fbw = (w / scale).toInt().coerceAtLeast(16)
-        val fbh = (h / scale).toInt().coerceAtLeast(16)
+    private val r = Renderer3D(1, 1)
+    private val spacing = 58f
+    private val rowWidth = spacing * (games.size - 1)
+    private val units: List<MachineUnit> = games.mapIndexed { i, g ->
+        val (w, d, h) = HubLayout.cabinetSize(g.look.shape)
+        val cx = i * spacing - rowWidth / 2f
+        // Long machines sit further back so every front lines up.
+        val front = 20f
+        val prop = Prop(PropKind.MACHINE, cx - w / 2f, front - d, cx + w / 2f, front, h, machine = i, shape = g.look.shape, variant = i)
+        MachineUnit(prop, g, MachineArt(g))
+    }
+    private val spots = units.map { u ->
+        PointLight(u.prop.centerX, 110f, 40f, 1f, 0.95f, 0.88f, 150f, 0.9f)
+    }
+    private val bulb = HallArt.solid(-1).full
+    private val halo = HallArt.glow.full
+    private val floor = HallArt.tiles.region(wrap = true)
+
+    fun draw(x: Float, y: Float, w: Float, h: Float, t: Float, highScore: (String) -> Int) {
+        val fbw = w.toInt().coerceAtLeast(16)
+        val fbh = h.toInt().coerceAtLeast(16)
+        r.startFrame()
         r.resize(fbw, fbh)
-        val sweep = if (games.size > 1) sin(t * 0.22f) * (rowWidth / 2f - 20f) else 0f
-        val orbit = sin(t * 0.37f) * 0.35f
-        val eyeX = sweep + sin(orbit) * 170f
-        val eyeZ = cos(orbit) * 170f + 20f
-        r.camera.lookAt(eyeX, 64f, eyeZ, sweep, 26f, -8f, Math.toRadians(42.0).toFloat(), fbw, fbh)
-        r.lighting.ambR = 0.3f; r.lighting.ambG = 0.26f; r.lighting.ambB = 0.4f
-        r.lighting.setDirection(0.2f, 1f, 0.8f)
-        r.lighting.dirR = 0.25f; r.lighting.dirG = 0.22f; r.lighting.dirB = 0.3f
-        r.lighting.points.clear()
-        for ((i, l) in lights.withIndex()) {
-            l.intensity = 1f + 0.15f * sin(t * 2.2f + i)
-            r.lighting.points += l
-        }
-        r.fogNear = 200f
-        r.fogFar = 520f
-        r.fogFloor = 0.1f
-        r.clear(Pal.NIGHT)
+        val sweep = if (games.size > 1) sin(t * 0.2f) * (rowWidth / 2f - 10f) else 0f
+        val orbit = sin(t * 0.33f) * 0.4f
+        val eyeX = sweep + sin(orbit) * 190f
+        val eyeZ = cos(orbit) * 190f + 40f
+        r.camera.lookAt(eyeX, 78f, eyeZ, sweep, 34f, -14f, Math.toRadians(44.0).toFloat(), fbw, fbh)
+        val l = r.lighting
+        l.ambR = 0.34f; l.ambG = 0.3f; l.ambB = 0.42f
+        l.setDirection(0.2f, 1f, 0.8f)
+        l.dirR = 0.2f; l.dirG = 0.18f; l.dirB = 0.24f
+        l.points.clear()
+        for (s in spots) l.points += s
+        for (u in units) l.points += u.lights
+        r.fogNear = 260f
+        r.fogFar = 700f
+        r.fogFloor = 0.2f
+        r.exposure = 1.25f
+        r.bloom = 0.9f
+        r.clear(0xFF07050E.toInt())
         r.gradient(0xFF0B0718.toInt(), 0xFF2A1450.toInt(), 0, fbh / 2)
-        val half = rowWidth / 2f + 80f
-        r.quad(-half, 0f, -80f, half, 0f, -80f, half, 0f, 120f, -half, 0f, 120f, floor, 0f, 1f, 0f, u0 = -half * 2f, v0 = -160f, u1 = half * 2f, v1 = 240f)
-        for ((i, e) in entries.withIndex()) {
-            val (g, skin, model) = e
-            skin.paint(g, highScore(g.id), t, i, painter)
-            model.draw(r, Blend.OPAQUE)
+        val half = rowWidth / 2f + 140f
+        r.quad(-half, 0f, -140f, half, 0f, -140f, half, 0f, 200f, -half, 0f, 200f, floor, 0f, 1f, 0f, u0 = -half * 3f, v0 = -420f, u1 = half * 3f, v1 = 600f, gloss = 0.7f)
+        for (u in units) {
+            u.refresh(highScore(u.game.id), t)
+            u.drawOpaque(r, t)
         }
-        for ((i, e) in entries.withIndex()) {
-            val cx = i * spacing - rowWidth / 2f
-            r.decal(cx - 34f, -6f, cx + 34f, 40f, 0.2f, glow, Blend.ADD, emissive = 1f, alpha = 0.35f, tint = e.first.look.glow)
-            e.third.draw(r, Blend.ALPHA)
+        for (u in units) {
+            val p = u.prop
+            r.decal(p.x0 - 16f, p.z1 - 6f, p.x1 + 16f, p.z1 + 44f, 0.2f, halo, Blend.ADD, emissive = 1f, alpha = 0.4f, tint = u.art.glow)
         }
-        frame.draw(scope, r, x, y, w, h)
+        for (u in units) {
+            u.drawTransparent(r)
+            u.drawBulbs(r, t, bulb, halo)
+        }
+        Gfx.submit(SLOT, r.finishFrame(x.toInt(), y.toInt(), fbw, fbh))
     }
 }

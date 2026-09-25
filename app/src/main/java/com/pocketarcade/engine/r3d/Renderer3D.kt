@@ -1,76 +1,116 @@
 package com.pocketarcade.engine.r3d
 
+import java.util.IdentityHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.math.ceil
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.sin
 import kotlin.math.sqrt
 
 enum class Blend {
-    /** Z-tested and z-written; texels with alpha < 128 are cut out (alpha test). */
+    /** Depth-tested and written; texels with alpha under one half are cut out. */
     OPAQUE,
-    /** Z-tested, not written; blended by texel alpha × polygon alpha. */
+    /** Depth-tested, not written; blended by texel alpha × polygon alpha. */
     ALPHA,
-    /** Z-tested, not written; added on top (glows, light pools, sparks). */
+    /** Depth-tested, not written; added on top (glows, light pools, sparks). */
     ADD,
 }
 
 /**
- * A small software 3D rasterizer drawing into an ARGB framebuffer with a 1/z depth buffer.
+ * Records a frame of 3D drawing for the GPU. Scenes describe polygons (lit per pixel by the
+ * [lighting] rig), sprites and whole [Model]s; [finishFrame] packs everything into a
+ * [RenderPass] that the GL thread draws at full resolution with anti-aliasing and bloom.
  *
- * Polygons (up to 8 vertices) are lit per vertex, clipped against the near plane, projected and
- * scan-converted with perspective-correct texture coordinates and Gouraud-interpolated light.
- * Rendering at a low resolution and scaling up with nearest-neighbour keeps the pixel-art look.
+ * Polygons have up to 8 vertices. Opaque polygons are grouped by texture; see-through ones are
+ * drawn in the order they were recorded, after everything opaque.
  */
 class Renderer3D(w: Int, h: Int) {
+    /** Size of the camera image in pixels (the camera's cx, cy and focal length use it). */
     var width = w
         private set
     var height = h
         private set
-    var color = IntArray(w * h)
-        private set
-    var depth = FloatArray(w * h)
-        private set
+
     val camera = Camera3D()
     val lighting = Lighting()
 
-    /** Distance fog: full brightness before [fogNear], fading to [fogFloor] at [fogFar]. */
+    /** Fog darkens surfaces from [fogNear] to [fogFar] (view depth), down to [fogFloor] brightness. */
     var fogNear = 1e8f
     var fogFar = 2e8f
     var fogFloor = 0.15f
+
+    /** Overall brightness before tone mapping, and how strongly bright things glow. */
+    var exposure = 1f
+    var bloom = 0.8f
 
     var polysDrawn = 0
         private set
 
     private companion object {
         const val MAXV = 8
-        const val MAXC = 16
+        const val S = RenderPass.STRIDE
     }
+
+    private val pool = ConcurrentLinkedQueue<RenderPass>()
+    private var pass: RenderPass? = null
+
+    // Opaque immediate geometry, bucketed by texture.
+    private class Bucket(val tex: Texture) {
+        var data = FloatArray(1024 * S)
+        var count = 0
+    }
+    private val buckets = IdentityHashMap<Texture, Bucket>()
+    private val bucketList = ArrayList<Bucket>()
+    private var lastBucket: Bucket? = null
+
+    // See-through immediate geometry and model layers, in submission order.
+    private var trans = FloatArray(1024 * S)
+    private var transCount = 0
+    private var order = IntArray(64 * 5)
+    private var orderCount = 0
+    private var opaqueInstances = IntArray(64)
+    private var opaqueInstanceCount = 0
+
+    private val texIndex = IdentityHashMap<Texture, Int>()
+    private var fogUsedNear = 1e8f
+    private var fogUsedFar = 2e8f
+    private var fogUsedFloor = 0f
 
     fun resize(w: Int, h: Int) {
-        if (w == width && h == height) return
-        width = w
-        height = h
-        color = IntArray(w * h)
-        depth = FloatArray(w * h)
+        width = w.coerceAtLeast(1)
+        height = h.coerceAtLeast(1)
     }
 
-    fun clear(argb: Int) {
-        color.fill(argb or -0x1000000)
-        depth.fill(0f)
+    /** Starts recording a new frame. */
+    fun startFrame() {
+        val p = pool.poll() ?: RenderPass(pool)
+        p.reset()
+        pass = p
+        for (b in bucketList) b.count = 0
+        lastBucket = null
+        transCount = 0
+        orderCount = 0
+        opaqueInstanceCount = 0
+        texIndex.clear()
         polysDrawn = 0
+        fogUsedNear = 1e8f
+        fogUsedFar = 2e8f
+        fogUsedFloor = 0f
     }
 
-    /** Fills rows [y0, y1) with a vertical gradient (skies, backdrops) and clears their depth. */
+    private fun current(): RenderPass = pass ?: run { startFrame(); pass!! }
+
+    /** Clears the background to [argb]. */
+    fun clear(argb: Int) {
+        val p = current()
+        p.clearColor = argb or -0x1000000
+        p.gradientCount = 0
+    }
+
+    /** Paints rows [y0, y1) of the background (camera image pixels) with a vertical gradient. */
     fun gradient(top: Int, bottom: Int, y0: Int = 0, y1: Int = height) {
-        val a = y0.coerceAtLeast(0)
-        val b = y1.coerceAtMost(height)
-        for (y in a until b) {
-            val t = if (y1 - y0 <= 1) 0f else (y - y0).toFloat() / (y1 - y0 - 1)
-            val c = mixArgb(top, bottom, t) or -0x1000000
-            color.fill(c, y * width, y * width + width)
-        }
-        if (b > a) depth.fill(0f, a * width, b * width)
-        if (a == 0 && b == height) polysDrawn = 0
+        current().addGradient(top, bottom, y0 / height.toFloat(), y1 / height.toFloat())
     }
 
     // ------------------------------------------------------------------ polygon assembly
@@ -81,30 +121,10 @@ class Renderer3D(w: Int, h: Int) {
     private val wz = FloatArray(MAXV)
     private val wu = FloatArray(MAXV)
     private val wv = FloatArray(MAXV)
-    private val vxA = FloatArray(MAXV)
-    private val vyA = FloatArray(MAXV)
-    private val vzA = FloatArray(MAXV)
-    private val lrA = FloatArray(MAXV)
-    private val lgA = FloatArray(MAXV)
-    private val lbA = FloatArray(MAXV)
-
-    private val cxA = FloatArray(MAXC)
-    private val cyA = FloatArray(MAXC)
-    private val czA = FloatArray(MAXC)
-    private val cuA = FloatArray(MAXC)
-    private val cvA = FloatArray(MAXC)
-    private val crA = FloatArray(MAXC)
-    private val cgA = FloatArray(MAXC)
-    private val cbA = FloatArray(MAXC)
-
-    private val sx = FloatArray(MAXC)
-    private val sy = FloatArray(MAXC)
-    private val siz = FloatArray(MAXC)
-    private val suz = FloatArray(MAXC)
-    private val svz = FloatArray(MAXC)
-    private val sr = FloatArray(MAXC)
-    private val sg = FloatArray(MAXC)
-    private val sb = FloatArray(MAXC)
+    private val wnx = FloatArray(MAXV)
+    private val wny = FloatArray(MAXV)
+    private val wnz = FloatArray(MAXV)
+    private var smoothNormals = false
 
     private var region: Region? = null
     private var blend = Blend.OPAQUE
@@ -112,6 +132,7 @@ class Renderer3D(w: Int, h: Int) {
     private var alphaK = 1f
     private var bias = 1f
     private var cull = true
+    private var gloss = 0f
     private var hasNormal = false
     private var nX = 0f
     private var nY = 0f
@@ -119,11 +140,11 @@ class Renderer3D(w: Int, h: Int) {
     private var tR = 1f
     private var tG = 1f
     private var tB = 1f
-    private val lightOut = FloatArray(3)
 
     /**
      * Starts a polygon. [emissive] > 0 ignores lighting and uses that brightness (1 = texture
-     * colour). [depthBias] > 1 pulls the polygon toward the camera for depth tests.
+     * colour). [depthBias] > 1 pulls the polygon toward the camera for depth tests. [gloss]
+     * (0..1) adds specular highlights.
      */
     fun begin(
         region: Region,
@@ -132,6 +153,7 @@ class Renderer3D(w: Int, h: Int) {
         alpha: Float = 1f,
         depthBias: Float = 1f,
         cull: Boolean = true,
+        gloss: Float = 0f,
     ) {
         this.region = region
         this.blend = blend
@@ -139,8 +161,10 @@ class Renderer3D(w: Int, h: Int) {
         this.alphaK = alpha
         this.bias = depthBias
         this.cull = cull
+        this.gloss = gloss
         n = 0
         hasNormal = false
+        smoothNormals = false
         tR = 1f; tG = 1f; tB = 1f
     }
 
@@ -164,6 +188,15 @@ class Renderer3D(w: Int, h: Int) {
     fun vertex(x: Float, y: Float, z: Float, u: Float, v: Float) {
         if (n >= MAXV) return
         wx[n] = x; wy[n] = y; wz[n] = z; wu[n] = u; wv[n] = v
+        n++
+    }
+
+    /** Adds a vertex with its own normal, for smoothly shaded surfaces. */
+    fun vertex(x: Float, y: Float, z: Float, u: Float, v: Float, nx: Float, ny: Float, nz: Float) {
+        if (n >= MAXV) return
+        wx[n] = x; wy[n] = y; wz[n] = z; wu[n] = u; wv[n] = v
+        wnx[n] = nx; wny[n] = ny; wnz[n] = nz
+        smoothNormals = true
         n++
     }
 
@@ -191,326 +224,295 @@ class Renderer3D(w: Int, h: Int) {
             mx /= n; my /= n; mz /= n
             if ((mx - cam.ex) * nX + (my - cam.ey) * nY + (mz - cam.ez) * nZ >= 0f) return
         }
+        // Quick reject when every vertex is behind the eye.
+        var anyFront = false
         for (i in 0 until n) {
-            if (emissive > 0f) {
-                lrA[i] = emissive * tR; lgA[i] = emissive * tG; lbA[i] = emissive * tB
-            } else {
-                lighting.shade(wx[i], wy[i], wz[i], nX, nY, nZ, lightOut)
-                lrA[i] = lightOut[0] * tR; lgA[i] = lightOut[1] * tG; lbA[i] = lightOut[2] * tB
+            if (cam.viewZ(wx[i], wy[i], wz[i]) > cam.near) {
+                anyFront = true
+                break
             }
-            vxA[i] = cam.viewX(wx[i], wy[i], wz[i])
-            vyA[i] = cam.viewY(wx[i], wy[i], wz[i])
-            vzA[i] = cam.viewZ(wx[i], wy[i], wz[i])
         }
-        val m = clipNear(cam.near)
-        if (m < 3) return
+        if (!anyFront) return
+        polysDrawn++
+        val tex = reg.tex
+        noteTexture(tex)
+        val tris = n - 2
+        val count = tris * 3
+        val dst: FloatArray
+        var o: Int
+        if (blend == Blend.OPAQUE) {
+            var b = lastBucket
+            if (b == null || b.tex !== tex) {
+                b = buckets[tex] ?: Bucket(tex).also { buckets[tex] = it; bucketList += it }
+                lastBucket = b
+            }
+            if ((b.count + count) * S > b.data.size) b.data = b.data.copyOf(maxOf((b.count + count) * S, b.data.size * 2))
+            o = b.count * S
+            b.count += count
+            dst = b.data
+        } else {
+            if ((transCount + count) * S > trans.size) trans = trans.copyOf(maxOf((transCount + count) * S, trans.size * 2))
+            o = transCount * S
+            // Merge with the previous see-through batch when the texture and blend match.
+            val bi = blend.ordinal
+            val ti = texIndex[tex]!!
+            if (orderCount > 0) {
+                val p = (orderCount - 1) * 5
+                if (order[p] == RenderPass.KIND_BATCH && order[p + 1] == bi && order[p + 2] == ti && order[p + 3] + order[p + 4] == transCount) {
+                    order[p + 4] += count
+                } else {
+                    addOrder(RenderPass.KIND_BATCH, bi, ti, transCount, count)
+                }
+            } else {
+                addOrder(RenderPass.KIND_BATCH, bi, ti, transCount, count)
+            }
+            transCount += count
+            dst = trans
+        }
+        val iw = 1f / tex.width
+        val ih = 1f / tex.height
+        val fog = if (fogNear < 1e7f) 1f else 0f
+        if (fog > 0f) {
+            fogUsedNear = fogNear; fogUsedFar = fogFar; fogUsedFloor = fogFloor
+        }
+        val rx = reg.x.toFloat()
+        val ry = reg.y.toFloat()
+        for (t in 1..tris) {
+            for (k in 0 until 3) {
+                val i = when (k) {
+                    0 -> 0
+                    1 -> t
+                    else -> t + 1
+                }
+                dst[o] = wx[i]; dst[o + 1] = wy[i]; dst[o + 2] = wz[i]
+                if (smoothNormals) {
+                    dst[o + 3] = wnx[i]; dst[o + 4] = wny[i]; dst[o + 5] = wnz[i]
+                } else {
+                    dst[o + 3] = nX; dst[o + 4] = nY; dst[o + 5] = nZ
+                }
+                dst[o + 6] = (rx + wu[i]) * iw
+                dst[o + 7] = (ry + wv[i]) * ih
+                dst[o + 8] = tR; dst[o + 9] = tG; dst[o + 10] = tB; dst[o + 11] = alphaK
+                dst[o + 12] = emissive; dst[o + 13] = bias; dst[o + 14] = gloss; dst[o + 15] = fog
+                o += S
+            }
+        }
+    }
+
+    private fun noteTexture(tex: Texture): Int {
+        val known = texIndex[tex]
+        if (known != null) return known
+        tex.prepare()
+        val p = current()
+        val i = p.textures.size
+        p.textures += tex
+        texIndex[tex] = i
+        return i
+    }
+
+    private fun addOrder(kind: Int, blend: Int, index: Int, first: Int, count: Int) {
+        if ((orderCount + 1) * 5 > order.size) order = order.copyOf(order.size * 2)
+        val o = orderCount * 5
+        order[o] = kind; order[o + 1] = blend; order[o + 2] = index; order[o + 3] = first; order[o + 4] = count
+        orderCount++
+    }
+
+    // ------------------------------------------------------------------ models
+
+    private val identity = FloatArray(16).also { it[0] = 1f; it[5] = 1f; it[10] = 1f; it[15] = 1f }
+
+    /** Draws [model] (placed by [xf]); [only] limits it to one blend layer. */
+    fun drawModel(model: Model, only: Blend?, emissiveBoost: Float, xf: Xform?, tint: Int) {
+        val p = current()
+        val wantOpaque = model.hasOpaque && (only == null || only == Blend.OPAQUE)
+        val wantAlpha = model.hasAlpha && (only == null || only == Blend.ALPHA)
+        val wantAdd = model.hasAdd && (only == null || only == Blend.ADD)
+        if (!wantOpaque && !wantAlpha && !wantAdd) return
+        for (tex in modelTextures(model)) noteTexture(tex)
+        val mi = p.models.size
+        p.models += model
+        fun instance(layer: Blend): Int {
+            if ((p.instanceCount + 1) * 22 > p.instances.size) p.instances = p.instances.copyOf(p.instances.size * 2)
+            val o = p.instanceCount * 22
+            if (xf != null) xf.toMatrix(p.instances, o) else identity.copyInto(p.instances, o)
+            if (tint == -1) {
+                p.instances[o + 16] = 1f; p.instances[o + 17] = 1f; p.instances[o + 18] = 1f
+            } else {
+                p.instances[o + 16] = (tint shr 16 and 255) / 255f
+                p.instances[o + 17] = (tint shr 8 and 255) / 255f
+                p.instances[o + 18] = (tint and 255) / 255f
+            }
+            p.instances[o + 19] = 1f
+            p.instances[o + 20] = emissiveBoost
+            p.instances[o + 21] = mi.toFloat()
+            return p.instanceCount++
+        }
+        if (wantOpaque) {
+            val idx = instance(Blend.OPAQUE)
+            if (opaqueInstanceCount + 1 > opaqueInstances.size) opaqueInstances = opaqueInstances.copyOf(opaqueInstances.size * 2)
+            opaqueInstances[opaqueInstanceCount++] = idx
+        }
+        if (wantAlpha) addOrder(RenderPass.KIND_MODEL, Blend.ALPHA.ordinal, instance(Blend.ALPHA), 0, 0)
+        if (wantAdd) addOrder(RenderPass.KIND_MODEL, Blend.ADD.ordinal, instance(Blend.ADD), 0, 0)
+        polysDrawn += model.polys.size
+    }
+
+    private val modelTex = IdentityHashMap<Model, Array<Texture>>()
+
+    private fun modelTextures(model: Model): Array<Texture> =
+        modelTex.getOrPut(model) {
+            val seen = IdentityHashMap<Texture, Boolean>()
+            for (p in model.polys) seen[p.region.tex] = true
+            seen.keys.toTypedArray()
+        }
+
+    // ------------------------------------------------------------------ finishing
+
+    /**
+     * Packs the recorded frame into a [RenderPass] to show at window pixels ([x], [y], [w], [h]),
+     * optionally clipped to ([clipX0], [clipY0])–([clipX1], [clipY1]).
+     */
+    fun finishFrame(
+        x: Int, y: Int, w: Int, h: Int,
+        clipX0: Int = 0, clipY0: Int = 0, clipX1: Int = 0, clipY1: Int = 0, clip: Boolean = false,
+    ): RenderPass {
+        val p = current()
+        pass = null
+        p.vx = x; p.vy = y; p.vw = w.coerceAtLeast(1); p.vh = h.coerceAtLeast(1)
+        p.clip = clip
+        p.cx0 = clipX0; p.cy0 = clipY0; p.cx1 = clipX1; p.cy1 = clipY1
+        val cam = camera
+        val c = p.cam
+        c[0] = cam.ex; c[1] = cam.ey; c[2] = cam.ez
+        c[3] = cam.rx; c[4] = cam.ry; c[5] = cam.rz
+        c[6] = cam.ux; c[7] = cam.uy; c[8] = cam.uz
+        c[9] = cam.fx; c[10] = cam.fy; c[11] = cam.fz
+        c[12] = cam.focal / width
+        c[13] = cam.cx / width
+        c[14] = cam.cy / height
+        c[15] = cam.focal / height
+        p.fogNear = fogUsedNear
+        p.fogFar = fogUsedFar
+        p.fogFloor = fogUsedFloor
+        p.exposure = exposure
+        p.bloom = bloom
+        packLights(p)
+
+        // Opaque buckets first, then the see-through geometry in order.
+        var total = transCount
+        for (b in bucketList) total += b.count
+        p.vertCount = 0
+        p.ensureVerts(total)
+        var at = 0
+        for (b in bucketList) {
+            if (b.count == 0) continue
+            System.arraycopy(b.data, 0, p.verts, at * S, b.count * S)
+            p.addDraw(RenderPass.KIND_BATCH, Blend.OPAQUE.ordinal, texIndex[b.tex]!!, at, b.count)
+            at += b.count
+        }
+        for (i in 0 until opaqueInstanceCount) p.addDraw(RenderPass.KIND_MODEL, Blend.OPAQUE.ordinal, opaqueInstances[i], 0, 0)
+        val transBase = at
+        System.arraycopy(trans, 0, p.verts, at * S, transCount * S)
+        at += transCount
+        for (i in 0 until orderCount) {
+            val o = i * 5
+            val first = if (order[o] == RenderPass.KIND_BATCH) order[o + 3] + transBase else 0
+            p.addDraw(order[o], order[o + 1], order[o + 2], first, order[o + 4])
+        }
+        p.vertCount = at
+        // Forget buckets for textures that weren't used this frame.
+        if (bucketList.size > 64) {
+            bucketList.removeAll { it.count == 0 }
+            buckets.clear()
+            for (b in bucketList) buckets[b.tex] = b
+        }
+        return p
+    }
+
+    /** Copies the lights and builds the grid telling each patch of floor which lights reach it. */
+    private fun packLights(p: RenderPass) {
+        val l = lighting
+        p.ambient[0] = l.ambR; p.ambient[1] = l.ambG; p.ambient[2] = l.ambB
+        p.dirDir[0] = l.dirX; p.dirDir[1] = l.dirY; p.dirDir[2] = l.dirZ
+        p.dirCol[0] = l.dirR; p.dirCol[1] = l.dirG; p.dirCol[2] = l.dirB
+        val count = minOf(l.points.size, RenderPass.MAX_LIGHTS)
+        p.lightCount = count
+        if (count == 0) return
         var minX = Float.MAX_VALUE
         var maxX = -Float.MAX_VALUE
-        var minY = Float.MAX_VALUE
-        var maxY = -Float.MAX_VALUE
-        val fogSpan = (fogFar - fogNear).coerceAtLeast(1f)
-        for (j in 0 until m) {
-            val z = czA[j]
-            val iz = 1f / z
-            val px = cam.cx + cxA[j] * iz * cam.focal
-            val py = cam.cy - cyA[j] * iz * cam.focal
-            sx[j] = px; sy[j] = py
-            siz[j] = iz
-            suz[j] = cuA[j] * iz
-            svz[j] = cvA[j] * iz
-            val fog = if (z <= fogNear) 1f else (1f - (z - fogNear) / fogSpan).coerceAtLeast(fogFloor)
-            sr[j] = crA[j] * fog * 256f
-            sg[j] = cgA[j] * fog * 256f
-            sb[j] = cbA[j] * fog * 256f
-            if (px < minX) minX = px
-            if (px > maxX) maxX = px
-            if (py < minY) minY = py
-            if (py > maxY) maxY = py
+        var minZ = Float.MAX_VALUE
+        var maxZ = -Float.MAX_VALUE
+        for (i in 0 until count) {
+            val pl = l.points[i]
+            val o = i * 8
+            p.lights[o] = pl.x; p.lights[o + 1] = pl.y; p.lights[o + 2] = pl.z; p.lights[o + 3] = pl.radius
+            p.lights[o + 4] = pl.r; p.lights[o + 5] = pl.g; p.lights[o + 6] = pl.b; p.lights[o + 7] = pl.intensity
+            minX = minOf(minX, pl.x - pl.radius); maxX = maxOf(maxX, pl.x + pl.radius)
+            minZ = minOf(minZ, pl.z - pl.radius); maxZ = maxOf(maxZ, pl.z + pl.radius)
         }
-        if (maxX < 0f || minX > width || maxY < 0f || minY > height) return
-        polysDrawn++
-        for (k in 1 until m - 1) raster(0, k, k + 1, reg)
-    }
-
-    /** Sutherland–Hodgman clip of the view-space polygon against z >= near. */
-    private fun clipNear(near: Float): Int {
-        var out = 0
-        for (i in 0 until n) {
-            val j = if (i + 1 == n) 0 else i + 1
-            val zi = vzA[i]
-            val zj = vzA[j]
-            val inI = zi >= near
-            val inJ = zj >= near
-            if (inI && out < MAXC) {
-                cxA[out] = vxA[i]; cyA[out] = vyA[i]; czA[out] = zi
-                cuA[out] = wu[i]; cvA[out] = wv[i]
-                crA[out] = lrA[i]; cgA[out] = lgA[i]; cbA[out] = lbA[i]
-                out++
-            }
-            if (inI != inJ && out < MAXC) {
-                val t = (near - zi) / (zj - zi)
-                cxA[out] = vxA[i] + (vxA[j] - vxA[i]) * t
-                cyA[out] = vyA[i] + (vyA[j] - vyA[i]) * t
-                czA[out] = near
-                cuA[out] = wu[i] + (wu[j] - wu[i]) * t
-                cvA[out] = wv[i] + (wv[j] - wv[i]) * t
-                crA[out] = lrA[i] + (lrA[j] - lrA[i]) * t
-                cgA[out] = lgA[i] + (lgA[j] - lgA[i]) * t
-                cbA[out] = lbA[i] + (lbA[j] - lbA[i]) * t
-                out++
-            }
-        }
-        return out
-    }
-
-    // ------------------------------------------------------------------ scan conversion
-
-    private fun raster(a: Int, b: Int, c: Int, reg: Region) {
-        val x0 = sx[a]; val y0 = sy[a]
-        val x1 = sx[b]; val y1 = sy[b]
-        val x2 = sx[c]; val y2 = sy[c]
-        val dx1 = x1 - x0; val dy1 = y1 - y0
-        val dx2 = x2 - x0; val dy2 = y2 - y0
-        val denom = dx1 * dy2 - dx2 * dy1
-        if (denom > -1e-5f && denom < 1e-5f) return
-        val inv = 1f / denom
-
-        // Plane gradients for every interpolated attribute.
-        val izX = ((siz[b] - siz[a]) * dy2 - (siz[c] - siz[a]) * dy1) * inv
-        val izY = ((siz[c] - siz[a]) * dx1 - (siz[b] - siz[a]) * dx2) * inv
-        val uX = ((suz[b] - suz[a]) * dy2 - (suz[c] - suz[a]) * dy1) * inv
-        val uY = ((suz[c] - suz[a]) * dx1 - (suz[b] - suz[a]) * dx2) * inv
-        val vX = ((svz[b] - svz[a]) * dy2 - (svz[c] - svz[a]) * dy1) * inv
-        val vY = ((svz[c] - svz[a]) * dx1 - (svz[b] - svz[a]) * dx2) * inv
-        val rX = ((sr[b] - sr[a]) * dy2 - (sr[c] - sr[a]) * dy1) * inv
-        val rY = ((sr[c] - sr[a]) * dx1 - (sr[b] - sr[a]) * dx2) * inv
-        val gX = ((sg[b] - sg[a]) * dy2 - (sg[c] - sg[a]) * dy1) * inv
-        val gY = ((sg[c] - sg[a]) * dx1 - (sg[b] - sg[a]) * dx2) * inv
-        val bX = ((sb[b] - sb[a]) * dy2 - (sb[c] - sb[a]) * dy1) * inv
-        val bY = ((sb[c] - sb[a]) * dx1 - (sb[b] - sb[a]) * dx2) * inv
-
-        // Sort by y: t (top), m (middle), o (bottom).
-        var t = a
-        var m = b
-        var o = c
-        if (sy[m] < sy[t]) { val s = t; t = m; m = s }
-        if (sy[o] < sy[t]) { val s = t; t = o; o = s }
-        if (sy[o] < sy[m]) { val s = m; m = o; o = s }
-        val xt = sx[t]; val yt = sy[t]
-        val xm = sx[m]; val ym = sy[m]
-        val xo = sx[o]; val yo = sy[o]
-        if (yo - yt < 1e-6f) return
-        var yStart = ceil(yt - 0.5f).toInt()
-        var yEnd = ceil(yo - 0.5f).toInt() - 1
-        if (yStart < 0) yStart = 0
-        if (yEnd > height - 1) yEnd = height - 1
-        if (yStart > yEnd) return
-        val slopeLong = (xo - xt) / (yo - yt)
-        val slopeTop = if (ym - yt > 1e-6f) (xm - xt) / (ym - yt) else 0f
-        val slopeBot = if (yo - ym > 1e-6f) (xo - xm) / (yo - ym) else 0f
-
-        val tex = reg.tex.pixels
-        val tw = reg.tex.width
-        val rx = reg.x
-        val ry = reg.y
-        val rw = reg.w
-        val rh = reg.h
-        val wrap = reg.wrap
-        val w = width
-        val col = color
-        val dep = depth
-        val bz = bias
-        val op = blend.ordinal
-        val aK = (alphaK * 256f).toInt().coerceIn(0, 256)
-
-        for (y in yStart..yEnd) {
-            val yc = y + 0.5f
-            val xa = xt + (yc - yt) * slopeLong
-            val xb = if (yc < ym) xt + (yc - yt) * slopeTop else xm + (yc - ym) * slopeBot
-            val xl: Float
-            val xr: Float
-            if (xa < xb) { xl = xa; xr = xb } else { xl = xb; xr = xa }
-            var xs = ceil(xl - 0.5f).toInt()
-            var xe = ceil(xr - 0.5f).toInt() - 1
-            if (xs < 0) xs = 0
-            if (xe > w - 1) xe = w - 1
-            if (xs > xe) continue
-            val fx = xs + 0.5f - x0
-            val fy = yc - y0
-            var iz = siz[a] + fx * izX + fy * izY
-            var uz = suz[a] + fx * uX + fy * uY
-            var vz = svz[a] + fx * vX + fy * vY
-            var lr = sr[a] + fx * rX + fy * rY
-            var lg = sg[a] + fx * gX + fy * gY
-            var lb = sb[a] + fx * bX + fy * bY
-            var idx = y * w + xs
-            if (!wrap) {
-                // Fast path (most pixels): perspective-correct every 8 pixels, fixed-point
-                // texture and light steps in between.
-                var zq = 1f / iz
-                var u0 = uz * zq
-                var v0 = vz * zq
-                var lri = (lr * 256f).toInt()
-                var lgi = (lg * 256f).toInt()
-                var lbi = (lb * 256f).toInt()
-                val dlr = (rX * 256f).toInt()
-                val dlg = (gX * 256f).toInt()
-                val dlb = (bX * 256f).toInt()
-                var x = xs
-                while (x <= xe) {
-                    val n = if (xe - x + 1 < 8) xe - x + 1 else 8
-                    val izN = iz + izX * n
-                    zq = 1f / izN
-                    val u1 = (uz + uX * n) * zq
-                    val v1 = (vz + vX * n) * zq
-                    var fu = (u0 * 65536f).toInt()
-                    var fv = (v0 * 65536f).toInt()
-                    val dfu = ((u1 - u0) * 65536f).toInt() / n
-                    val dfv = ((v1 - v0) * 65536f).toInt() / n
-                    var k = 0
-                    while (k < n) {
-                        val dz = iz * bz
-                        if (dz > dep[idx]) {
-                            var tu = fu shr 16
-                            var tv = fv shr 16
-                            if (tu < 0) tu = 0 else if (tu >= rw) tu = rw - 1
-                            if (tv < 0) tv = 0 else if (tv >= rh) tv = rh - 1
-                            val tx = tex[(ry + tv) * tw + rx + tu]
-                            if (op == 0) {
-                                if (tx < 0) {
-                                    var cr = ((tx shr 16 and 255) * lri) shr 16
-                                    var cg = ((tx shr 8 and 255) * lgi) shr 16
-                                    var cb = ((tx and 255) * lbi) shr 16
-                                    if (cr > 255) cr = 255
-                                    if (cg > 255) cg = 255
-                                    if (cb > 255) cb = 255
-                                    col[idx] = -0x1000000 or (cr shl 16) or (cg shl 8) or cb
-                                    dep[idx] = dz
-                                }
-                            } else {
-                                val ta = ((tx ushr 24) * aK) shr 8
-                                if (ta > 0) {
-                                    var cr = ((tx shr 16 and 255) * lri) shr 16
-                                    var cg = ((tx shr 8 and 255) * lgi) shr 16
-                                    var cb = ((tx and 255) * lbi) shr 16
-                                    if (cr > 255) cr = 255
-                                    if (cg > 255) cg = 255
-                                    if (cb > 255) cb = 255
-                                    val d = col[idx]
-                                    val dr = d shr 16 and 255
-                                    val dg = d shr 8 and 255
-                                    val db = d and 255
-                                    if (op == 1) {
-                                        col[idx] = -0x1000000 or
-                                            ((dr + (((cr - dr) * ta) shr 8)) shl 16) or
-                                            ((dg + (((cg - dg) * ta) shr 8)) shl 8) or
-                                            (db + (((cb - db) * ta) shr 8))
-                                    } else {
-                                        var nr = dr + ((cr * ta) shr 8)
-                                        var ng = dg + ((cg * ta) shr 8)
-                                        var nb = db + ((cb * ta) shr 8)
-                                        if (nr > 255) nr = 255
-                                        if (ng > 255) ng = 255
-                                        if (nb > 255) nb = 255
-                                        col[idx] = -0x1000000 or (nr shl 16) or (ng shl 8) or nb
-                                    }
-                                }
-                            }
+        val extent = maxOf(maxX - minX, maxZ - minZ)
+        val cell = maxOf(24f, extent / 48f)
+        val gw = ceil((maxX - minX) / cell).toInt().coerceIn(1, 64)
+        val gh = ceil((maxZ - minZ) / cell).toInt().coerceIn(1, 64)
+        p.gridW = gw
+        p.gridH = gh
+        p.gridX0 = minX
+        p.gridZ0 = minZ
+        p.gridInvCell = 1f / cell
+        val size = gw * 2 * gh * 4
+        if (p.grid.size < size) p.grid = ByteArray(size)
+        java.util.Arrays.fill(p.grid, 0, size, 0)
+        val cellCount = IntArray(gw * gh)
+        val cellWeakest = FloatArray(gw * gh)
+        for (i in 0 until count) {
+            val pl = l.points[i]
+            if (pl.intensity <= 0f) continue
+            val weight = pl.intensity * pl.radius
+            val cx0 = floor((pl.x - pl.radius - minX) / cell).toInt().coerceIn(0, gw - 1)
+            val cx1 = floor((pl.x + pl.radius - minX) / cell).toInt().coerceIn(0, gw - 1)
+            val cz0 = floor((pl.z - pl.radius - minZ) / cell).toInt().coerceIn(0, gh - 1)
+            val cz1 = floor((pl.z + pl.radius - minZ) / cell).toInt().coerceIn(0, gh - 1)
+            for (gz in cz0..cz1) for (gx in cx0..cx1) {
+                // Skip cells the light's circle doesn't reach.
+                val nx = pl.x.coerceIn(minX + gx * cell, minX + (gx + 1) * cell)
+                val nz = pl.z.coerceIn(minZ + gz * cell, minZ + (gz + 1) * cell)
+                val dx = nx - pl.x
+                val dz = nz - pl.z
+                if (dx * dx + dz * dz > pl.radius * pl.radius) continue
+                val ci = gz * gw + gx
+                val k = cellCount[ci]
+                val base = (gz * gw * 2 + gx * 2) * 4
+                if (k < RenderPass.CELL_LIGHTS) {
+                    p.grid[base + k] = (i + 1).toByte()
+                    cellCount[ci] = k + 1
+                    if (k == 0 || weight < cellWeakest[ci]) cellWeakest[ci] = weight
+                } else if (weight > cellWeakest[ci]) {
+                    // Replace the weakest light in a crowded cell.
+                    var weakest = 0
+                    var wv = Float.MAX_VALUE
+                    for (j in 0 until RenderPass.CELL_LIGHTS) {
+                        val li = (p.grid[base + j].toInt() and 255) - 1
+                        val lp = l.points[li]
+                        val w = lp.intensity * lp.radius
+                        if (w < wv) {
+                            wv = w; weakest = j
                         }
-                        iz += izX
-                        fu += dfu
-                        fv += dfv
-                        lri += dlr; lgi += dlg; lbi += dlb
-                        idx++
-                        k++
                     }
-                    uz += uX * n
-                    vz += vX * n
-                    u0 = u1
-                    v0 = v1
-                    x += n
+                    p.grid[base + weakest] = (i + 1).toByte()
+                    var newWeakest = Float.MAX_VALUE
+                    for (j in 0 until RenderPass.CELL_LIGHTS) {
+                        val li = (p.grid[base + j].toInt() and 255) - 1
+                        val lp = l.points[li]
+                        newWeakest = minOf(newWeakest, lp.intensity * lp.radius)
+                    }
+                    cellWeakest[ci] = newWeakest
                 }
-                continue
-            }
-            var x = xs
-            while (x <= xe) {
-                val dz = iz * bz
-                if (dz > dep[idx]) {
-                    val z = 1f / iz
-                    val fu = uz * z
-                    val fv = vz * z
-                    var tu = fu.toInt()
-                    var tv = fv.toInt()
-                    if (wrap) {
-                        if (fu < 0f) tu -= 1
-                        if (fv < 0f) tv -= 1
-                        tu %= rw; if (tu < 0) tu += rw
-                        tv %= rh; if (tv < 0) tv += rh
-                    } else {
-                        if (tu < 0) tu = 0 else if (tu >= rw) tu = rw - 1
-                        if (tv < 0) tv = 0 else if (tv >= rh) tv = rh - 1
-                    }
-                    val tx = tex[(ry + tv) * tw + rx + tu]
-                    if (op == 0) {
-                        if (tx < 0) {
-                            var cr = ((tx shr 16 and 255) * lr).toInt() shr 8
-                            var cg = ((tx shr 8 and 255) * lg).toInt() shr 8
-                            var cb = ((tx and 255) * lb).toInt() shr 8
-                            if (cr > 255) cr = 255
-                            if (cg > 255) cg = 255
-                            if (cb > 255) cb = 255
-                            col[idx] = -0x1000000 or (cr shl 16) or (cg shl 8) or cb
-                            dep[idx] = dz
-                        }
-                    } else if (op == 1) {
-                        val ta = ((tx ushr 24) * aK) shr 8
-                        if (ta > 0) {
-                            var cr = ((tx shr 16 and 255) * lr).toInt() shr 8
-                            var cg = ((tx shr 8 and 255) * lg).toInt() shr 8
-                            var cb = ((tx and 255) * lb).toInt() shr 8
-                            if (cr > 255) cr = 255
-                            if (cg > 255) cg = 255
-                            if (cb > 255) cb = 255
-                            val d = col[idx]
-                            val dr = d shr 16 and 255
-                            val dg = d shr 8 and 255
-                            val db = d and 255
-                            col[idx] = -0x1000000 or
-                                ((dr + (((cr - dr) * ta) shr 8)) shl 16) or
-                                ((dg + (((cg - dg) * ta) shr 8)) shl 8) or
-                                (db + (((cb - db) * ta) shr 8))
-                        }
-                    } else {
-                        val ta = ((tx ushr 24) * aK) shr 8
-                        if (ta > 0) {
-                            val cr = (((tx shr 16 and 255) * lr).toInt() shr 8) * ta shr 8
-                            val cg = (((tx shr 8 and 255) * lg).toInt() shr 8) * ta shr 8
-                            val cb = (((tx and 255) * lb).toInt() shr 8) * ta shr 8
-                            val d = col[idx]
-                            var nr = (d shr 16 and 255) + cr
-                            var ng = (d shr 8 and 255) + cg
-                            var nb = (d and 255) + cb
-                            if (nr > 255) nr = 255
-                            if (ng > 255) ng = 255
-                            if (nb > 255) nb = 255
-                            col[idx] = -0x1000000 or (nr shl 16) or (ng shl 8) or nb
-                        }
-                    }
-                }
-                iz += izX; uz += uX; vz += vX
-                lr += rX; lg += gX; lb += bX
-                idx++
-                x++
             }
         }
     }
 
     // ------------------------------------------------------------------ convenience shapes
 
-    /**
-     * A quad from four corners given clockwise as seen from its front: top-left, top-right,
-     * bottom-right, bottom-left. The region maps across it from (u0, v0) to (u1, v1).
-     */
     fun quad(
         ax: Float, ay: Float, az: Float,
         bx: Float, by: Float, bz: Float,
@@ -520,9 +522,9 @@ class Renderer3D(w: Int, h: Int) {
         nx: Float, ny: Float, nz: Float,
         u0: Float = 0f, v0: Float = 0f, u1: Float = region.w.toFloat(), v1: Float = region.h.toFloat(),
         blend: Blend = Blend.OPAQUE, emissive: Float = 0f, alpha: Float = 1f, cull: Boolean = true,
-        tint: Int = -1, depthBias: Float = 1f,
+        tint: Int = -1, depthBias: Float = 1f, gloss: Float = 0f,
     ) {
-        begin(region, blend, emissive, alpha, depthBias, cull)
+        begin(region, blend, emissive, alpha, depthBias, cull, gloss)
         normal(nx, ny, nz)
         tint(tint)
         vertex(ax, ay, az, u0, v0)
@@ -580,7 +582,6 @@ class Renderer3D(w: Int, h: Int) {
         val s = sin(roll)
         val hw = w / 2f
         val hh = h / 2f
-        // Screen-plane axes turned by the roll.
         val ax = (cam.rx * c + cam.ux * s) * hw
         val ay = (cam.ry * c + cam.uy * s) * hw
         val az = (cam.rz * c + cam.uz * s) * hw

@@ -9,6 +9,7 @@ import com.pocketarcade.engine.Flash
 import com.pocketarcade.engine.Particles
 import com.pocketarcade.engine.ScreenShake
 import com.pocketarcade.engine.Sfx
+import com.pocketarcade.engine.r3d.GameViewport
 import kotlin.random.Random
 
 /**
@@ -65,8 +66,12 @@ abstract class BaseMiniGame : MiniGame {
     }
 
     final override fun draw(scope: DrawScope) {
+        GameViewport.shakeX = shake.offsetX
+        GameViewport.shakeY = shake.offsetY
         scope.translate(shake.offsetX, shake.offsetY) {
             render(this)
+            GameViewport.shakeX = 0f
+            GameViewport.shakeY = 0f
             particles.draw(this)
             popups.draw(this, 0f, 0f, 1f)
         }

@@ -1,7 +1,6 @@
 package com.pocketarcade
 
 import android.os.Bundle
-import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,7 +11,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.pocketarcade.data.ArcadeRepository
 import com.pocketarcade.engine.AudioSynth
 import com.pocketarcade.engine.Haptics
-import com.pocketarcade.engine.r3d.FrameBudget
 
 class MainActivity : ComponentActivity() {
     private lateinit var services: ArcadeServices
@@ -23,8 +21,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
-        // Frame timings: adb shell setprop log.tag.PocketArcade3D DEBUG
-        FrameBudget.logging = Log.isLoggable(FrameBudget.TAG, Log.DEBUG)
         val audio = AudioSynth().also { it.start() }
         services = ArcadeServices(ArcadeRepository(applicationContext), audio, Haptics.from(applicationContext))
         signals.launchGame = intent?.getStringExtra(EXTRA_PLAY)
