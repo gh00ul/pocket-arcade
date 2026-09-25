@@ -59,6 +59,20 @@ object HubModels {
                 screen(b, skin, x0 + 5f, x1 - 5f, 24f, 37f, z0 + 10.1f)
                 b.box(x0, 40f, z0, x1, 50f, z0 + 8f, BoxFaces(front = skin.marquee.full, top = skin.top.full, frontEmissive = 1.15f))
             }
+            CabinetShape.TABLE -> {
+                val rail = skin.railTex!!.full
+                // The table: a body, the playing surface and a low rail round it.
+                b.box(x0, 0f, z0 + 8f, x1, 16f, f, BoxFaces(front = skin.lowerFront.full, left = skin.sideEdge.full, right = skin.sideEdge.full))
+                b.quad(x0 + 3f, 16.5f, z0 + 10f, x1 - 3f, 16.5f, z0 + 10f, x1 - 3f, 16.5f, f - 3f, x0 + 3f, 16.5f, f - 3f, skin.tableTop!!.full, 0f, 1f, 0f, emissive = 0.9f)
+                b.box(x0, 16f, z0 + 8f, x0 + 3f, 19f, f, BoxFaces(front = rail, top = rail, right = rail))
+                b.box(x1 - 3f, 16f, z0 + 8f, x1, 19f, f, BoxFaces(front = rail, top = rail, left = rail))
+                b.box(x0 + 3f, 16f, f - 3f, x1 - 3f, 19f, f, BoxFaces(front = rail, top = rail))
+                b.box(x0 + 3f, 16f, z0 + 8f, x1 - 3f, 19f, z0 + 10f, BoxFaces(top = rail))
+                // Scoreboard on a post at the far end.
+                b.box(x0 + 3f, 16f, z0, x1 - 3f, 44f, z0 + 6f, BoxFaces(front = skin.bezel.full, left = skin.sideEdge.full, right = skin.sideEdge.full, top = skin.top.full))
+                screen(b, skin, x0 + 5f, x1 - 5f, 27f, 41f, z0 + 6.1f)
+                b.box(x0 + 1f, 44f, z0, x1 - 1f, 52f, z0 + 7f, BoxFaces(front = skin.marquee.full, top = skin.top.full, frontEmissive = 1.15f))
+            }
         }
         return b.build()
     }

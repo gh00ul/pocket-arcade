@@ -250,8 +250,10 @@ class HubScene3D(val map: HubMap, private val games: List<MiniGame>) {
                     com.pocketarcade.games.CabinetShape.UPRIGHT -> 48f
                     com.pocketarcade.games.CabinetShape.WIDE -> 51f
                     com.pocketarcade.games.CabinetShape.LANE -> 45f
+                    com.pocketarcade.games.CabinetShape.TABLE -> 48f
                 }
-                val mZ = if (skin.shape == com.pocketarcade.games.CabinetShape.LANE) p.z0 + 6f else p.frontZ - 3f
+                val back = skin.shape == com.pocketarcade.games.CabinetShape.LANE || skin.shape == com.pocketarcade.games.CabinetShape.TABLE
+                val mZ = if (back) p.z0 + 6f else p.frontZ - 3f
                 r.billboard(p.centerX, mY - 12f, mZ, (p.x1 - p.x0) * 1.9f, 24f, glow, lean = 0f, blend = Blend.ADD, emissive = 1f, alpha = 0.28f, depthBias = 1f, tint = skin.look.trim)
             }
             if (p.decor == DecorStyle.FLAMINGO) {

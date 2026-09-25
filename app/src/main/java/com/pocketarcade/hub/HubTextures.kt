@@ -444,11 +444,13 @@ class CabinetSkin(val look: CabinetLook, private val marqueeText: String) {
         CabinetShape.UPRIGHT -> 22
         CabinetShape.WIDE -> 38
         CabinetShape.LANE -> 22
+        CabinetShape.TABLE -> 30
     }
     val screenH: Int = when (shape) {
         CabinetShape.UPRIGHT -> 16
         CabinetShape.WIDE -> 22
         CabinetShape.LANE -> 13
+        CabinetShape.TABLE -> 14
     }
     val screen = Texture(screenW * TPU, screenH * TPU)
 
@@ -456,6 +458,7 @@ class CabinetSkin(val look: CabinetLook, private val marqueeText: String) {
         CabinetShape.UPRIGHT -> 26
         CabinetShape.WIDE -> 42
         CabinetShape.LANE -> 32
+        CabinetShape.TABLE -> 32
     }
     private val marqueeH = if (shape == CabinetShape.UPRIGHT) 8 else 10
     val marquee = Texture(innerW * TPU, marqueeH * TPU)
@@ -472,6 +475,8 @@ class CabinetSkin(val look: CabinetLook, private val marqueeText: String) {
     val railTex: Texture?
     val consoleFront: Texture?
     val backboard: Texture?
+    /** Playing surface of a table machine. */
+    val tableTop: Texture?
     /** Faint reflections for the glass front of wide machines (alpha-blended). */
     val glassShine: Texture by lazy {
         val w = innerW * TPU
@@ -609,9 +614,28 @@ class CabinetSkin(val look: CabinetLook, private val marqueeText: String) {
             }
         } else {
             laneTex = null
-            railTex = null
+            railTex = if (shape == CabinetShape.TABLE) HubTextures.solid(8, 32, Pal.mix(body, Pal.WHITE, 0.25f)) else null
             consoleFront = null
             backboard = null
+        }
+        tableTop = if (shape == CabinetShape.TABLE) {
+            PixelCanvas(34 * TPU, 46 * TPU).let { t ->
+                t.vgrad(0, 0, t.w, t.h, Pal.mix(Pal.WHITE, glow, 0.2f), Pal.mix(Pal.WHITE, glow, 0.35f))
+                for (y in 3 until t.h step 6) for (x in 3 until t.w step 6) t.set(x, y, Pal.mix(glow, body, 0.5f))
+                t.fill(0, t.h / 2 - 1, t.w, 2, Pal.RED)
+                t.ring(t.w / 2f, t.h / 2f, 12f, 1.5f, Pal.RED)
+                for (end in 0..1) {
+                    val y = if (end == 0) 0 else t.h - 3
+                    t.fill(t.w / 2 - 14, y, 28, 3, Pal.BLACK)
+                    t.ring(t.w / 2f, if (end == 0) 0f else t.h.toFloat(), 18f, 1.5f, Pal.BLUE)
+                }
+                t.disc(t.w * 0.3f, t.h * 0.7f, 5f, Pal.shade(body, 0.8f))
+                t.disc(t.w * 0.62f, t.h * 0.3f, 3f, Pal.RED)
+                t.rect(0, 0, t.w, t.h, Pal.shade(body, 0.7f))
+                Texture.of(t)
+            }
+        } else {
+            null
         }
     }
 

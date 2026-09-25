@@ -28,7 +28,8 @@ class TitleShowcase(private val games: List<MiniGame>) {
         val skin = HubScene3D.skinFor(g)
         val (w, d, _) = HubLayout.cabinetSize(g.look.shape)
         val cx = i * spacing - rowWidth / 2f
-        val front = if (g.look.shape == com.pocketarcade.games.CabinetShape.LANE) 30f else 0f
+        val deep = g.look.shape == com.pocketarcade.games.CabinetShape.LANE || g.look.shape == com.pocketarcade.games.CabinetShape.TABLE
+        val front = if (deep) 30f else 0f
         Triple(g, skin, HubModels.cabinet(skin, cx - w / 2f, front - d, cx + w / 2f, front))
     }
     private val lights = games.mapIndexed { i, g ->

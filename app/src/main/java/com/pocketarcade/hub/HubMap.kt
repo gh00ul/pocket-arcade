@@ -106,6 +106,7 @@ object HubLayout {
         CabinetShape.UPRIGHT -> Triple(30f, 16f, 52f)
         CabinetShape.WIDE -> Triple(46f, 20f, 56f)
         CabinetShape.LANE -> Triple(32f, 62f, 50f)
+        CabinetShape.TABLE -> Triple(40f, 58f, 52f)
     }
 
     /** Height and depth set-back of the centre of a cabinet's screen, for the camera dive. */
@@ -113,6 +114,7 @@ object HubLayout {
         CabinetShape.UPRIGHT -> 33f to 4f
         CabinetShape.WIDE -> 33f to 4f
         CabinetShape.LANE -> 30f to 52f
+        CabinetShape.TABLE -> 34f to 51f
     }
 
     fun build(games: List<MiniGame>, ownedDecor: Set<DecorStyle>): HubMap {

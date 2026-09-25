@@ -18,6 +18,8 @@ enum class CabinetShape {
     WIDE,
     /** Long alley machine you stand at the end of (skee-ball, hoops), 2 tiles wide, 4 deep. */
     LANE,
+    /** Low playing table with a scoreboard at the far end (air hockey), 2.5 tiles wide, 4 deep. */
+    TABLE,
 }
 
 /** How a machine looks in the hall: body and trim colours, the neon glow it casts, and its shape. */
