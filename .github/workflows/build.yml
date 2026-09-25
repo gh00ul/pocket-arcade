@@ -36,7 +36,7 @@ jobs:
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk PocketArcade.apk
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: PocketArcade-apk
           path: PocketArcade.apk
