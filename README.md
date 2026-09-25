@@ -1,8 +1,8 @@
 # Pocket Arcade
 
-A 3D pixel-art arcade hall for Android that you walk around in. Stroll a neon-carpeted hall with a floating joystick, step up to a glowing cabinet, spend a token, and the camera dives into the machine's screen. Play a 40–60 second round, watch your tickets print out of the slot, then trade them at the prize counter for hats, outfits and decorations that show up in the hall.
+A 3D arcade for Android that you walk around in. Stroll a blacklight-carpeted arcade floor with a floating joystick, past banks of claw machines, skee-ball alleys, linked racers and a coin-pusher island. Step up to a glowing cabinet, spend a token, and the camera dives into the machine's screen. Play a 40–60 second round, watch your tickets print out of the slot, then trade them at the prize counter for hats, outfits and decorations that show up in the hall.
 
-Everything is drawn in code. A small software 3D renderer draws the hall and every machine into a low-resolution framebuffer that is scaled up pixel-sharp, so the scenes are properly lit and in perspective but still look like pixel art. Every texture, sprite, font and sound is generated at runtime, with sounds synthesized through `AudioTrack`. The app ships no image or audio files and uses no third-party libraries beyond AndroidX/Compose.
+Everything is made in code. The hall and every machine are rendered on the GPU with OpenGL ES 3 at full resolution: per-pixel lighting from dozens of coloured lights, 4× anti-aliasing and a bloom glow on neon and screens. Every model, texture, font glyph and sound is generated at runtime. Textures are painted with Android's 2D canvas, and sounds are synthesized through `AudioTrack`. The app ships no image or audio files and uses no third-party libraries beyond AndroidX/Compose.
 
 <p>
   <img src="docs/screenshots/title.png" width="160" alt="Title screen">
@@ -23,16 +23,20 @@ Everything is drawn in code. A small software 3D renderer draws the hall and eve
 ## Features
 
 **The hall**
-- A lit 3D room seen from above and behind you, with a smooth follow camera. It grows a row of cabinets for every two machines.
-- Modelled cabinets in four shapes (upright, wide glass-front, long alley and low table), each with a live attract-mode screen, a marquee with chasing bulbs, a neon glow and its own coloured light.
-- A 4-direction walk cycle for your kid (HD sprites with rim lighting), driven by a floating virtual joystick that appears wherever your thumb lands.
-- Collision against walls, cabinets and furniture, with sliding along edges. Kids wander between machines using path finding.
-- Walk up to a machine and a **▶ PLAY (1 token)** prompt floats up. Tap it and the camera flies into the cabinet's screen. Exiting flies you back out to exactly where you stood.
-- A token machine by the entrance, and a prize counter with a clerk and shelves of plushies at the back of the hall.
+- A real arcade floor plan:
+  - at the back, a prize counter with a wall of plushies, flanked by banks of claw machines and stackers;
+  - across the floor, skee-ball and basketball alleys, air hockey tables, a whack-a-mole row, a four-machine coin-pusher island and linked racers in the middle;
+  - around the edges, a snack bar with café tables and vending machines, and a photo booth;
+  - by the doors, a token kiosk and kiddie rides.
+- Every cabinet is modelled for its game, from glass claw boxes with a working gantry to long lanes, basketball cages, racer seats and pusher shelves that sweep. Each has a live attract-mode screen, a marquee with chasing bulbs, a neon glow and its own coloured light.
+- Blacklight carpet, terrazzo at the entrance, walls rising into the dark with acoustic panels, uplights and a backlit mural, and the street outside through the cut-away shopfront.
+- 3D kids with a walk cycle, poses for playing, cheering and sitting, and hats. Yours follows a floating joystick that appears wherever your thumb lands. The other kids find their way between machines, play them and sit down at the snack bar.
+- Collision against walls, cabinets and furniture, with sliding along edges.
+- Walk up to a machine and a **▶ PLAY (1 token)** prompt pops up. Tap it and the camera flies into the cabinet's screen. Exiting flies you back out to exactly where you stood.
 - An ambient arcade soundscape: mains hum, crowd murmur and distant machine bleeps.
 
 **Eight machines**, each a full 3D game that pays out tickets:
-1. **Claw machine**: a glass box with a gantry and a claw that swings on its cable (a real variable-length pendulum), with hinged prongs that open and close. Prizes are a physics pile. Whether a prize holds depends on the machine's grip for that grab and how centred you were, and it can slip on the way up. Now and then you get a gold **lucky claw** turn. Prizes you win go into your plush collection (11 to find, including a rare golden cat).
+1. **Claw machine**: a glass box full of 3D plushies, with a gantry and a claw that swings on its cable (a real variable-length pendulum), with hinged prongs that open and close. Prizes are a physics pile. Whether a prize holds depends on the machine's grip for that grab and how centred you were, and it can slip on the way up. Now and then you get a gold **lucky claw** turn. Prizes you win go into your plush collection (11 to find, including a rare golden cat).
 2. **Skee-ball**: a player's-eye alley with a tilted target board and raised ring walls. Drag the ball to aim, then flick up. Flick speed sets how far it jumps. Rings are worth 10–100, with a 200-point bonus hole in the corner.
 3. **Whack-a-mole**: a table with real holes. Moles, golden moles and bombs rise out of them and you bonk them with a 3D mallet. It speeds up as the round goes on, and hits in a row build a combo.
 4. **Coin pusher**: tap to drop coins onto a packed deck while the shelf sweeps back and forth. Coins that spill over the lip land in the win tray. Gems, big coins, ticket bundles and coin-shower stars are mixed in, and five spills in quick succession trigger an avalanche bonus.
@@ -46,7 +50,8 @@ Everything is drawn in code. A small software 3D renderer draws the hall and eve
 - Ticket strips print out of each machine with a counter ticking up; tap to skip.
 - Haptics on hits, wins and jackpots.
 - A high score for every machine, shown on the cabinet screens in the hall. Beating one sets off confetti and a fanfare.
-- A bitmap pixel font drawn in code, and one bright retro palette across the whole app.
+- Smooth type with vector icons for tokens, tickets and stars, glossy arcade buttons, and one bright palette across the whole app.
+- The prize counter shows each prize as a 3D model on a turntable, photographed by the GPU.
 
 **Progress** is saved with DataStore: tokens, tickets, prize collection, owned and equipped cosmetics, bought decorations, high scores and the daily refill date.
 
@@ -55,15 +60,19 @@ Everything is drawn in code. A small software 3D renderer draws the hall and eve
 
 ## The 3D engine
 
-`engine/r3d` is a small software rasterizer written for this app:
+`engine/r3d` records scenes and `engine/gl` draws them with OpenGL ES 3:
 
-- Textured polygons with perspective-correct UVs, a 1/z depth buffer and near-plane clipping.
-- Per-vertex lighting from ambient, directional and coloured point lights, plus distance fog.
-- Opaque (alpha-tested), alpha-blended and additive polygons, used for glass, glows, neon and sparks.
-- Models built from boxes, cylinders, discs and quads, which can be moved and rotated as jointed parts (the claw's prongs, the mallet's swing).
-- A fast floor caster for the hall floor, and camera-facing sprites, ribbons and flat decals.
-- `Stage3D` gives each game a 3D view that maps touches onto world planes and world points back to the screen.
-- Frames that take too long drop the resolution a notch on their own, so slower phones stay smooth.
+- **Threads.** Each screen records a frame of textured polygons and model instances on the UI thread. A dedicated GL thread draws it into a `TextureView` under the Compose UI.
+- **Geometry.** Static models live on the GPU as vertex buffers and draw as instances. Polygons are sorted into opaque, alpha-blended and additive passes, so glass, glows, neon and sparks all work.
+- **Lighting.**
+  - Per-pixel: ambient, one directional light and up to 64 coloured point lights. A light grid across the floor keeps the many lights cheap.
+  - Glossy highlights, darkening fog and filmic tone mapping.
+- **Models.** They are built from boxes, cylinders, lathes, spheres, capsules and tori, and move as jointed parts: the claw's prongs, the mallet's swing, the kids' limbs.
+- **Image quality.**
+  - Scenes render with 4× multisampling, alpha-to-coverage for cut-outs, a bloom glow and a vignette.
+  - The render resolution eases down if frames run long.
+- **Textures.** They are painted with Android's `Canvas` (gradients, real fonts, glows and grain). A texture can be stored at a finer resolution than the texel size the code maps it in.
+- **Stage3D.** Gives each game a 3D view that maps touches onto world planes and world points back to the screen.
 
 ## Install the APK on your phone
 
@@ -83,7 +92,7 @@ You need JDK 17 or newer and the Android SDK with platform 36.
 ./gradlew assembleDebug
 ```
 
-The APK lands in `app/build/outputs/apk/debug/app-debug.apk`. Install it with `adb install -r app/build/outputs/apk/debug/app-debug.apk`, or open the project in Android Studio and press Run. The debug build is compiled non-debuggable, because the software renderer needs ART's optimising compiler to hit 60 fps.
+The APK lands in `app/build/outputs/apk/debug/app-debug.apk`. Install it with `adb install -r app/build/outputs/apk/debug/app-debug.apk`, or open the project in Android Studio and press Run. The debug build is compiled non-debuggable, because recording each 3D frame needs ART's optimising compiler to hit 60 fps. The phone needs OpenGL ES 3.0, which every Android 8.0 phone has.
 
 To jump straight into a machine (it still costs a token), pass its id:
 
@@ -114,7 +123,7 @@ class BowlingGame : BaseMiniGame() {
     override val look = CabinetLook(body = Pal.TEAL, trim = Pal.WHITE, glow = Pal.CYAN, shape = CabinetShape.LANE)
     override val roundSeconds = 45f
 
-    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt(), "bowling").apply {
+    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt()).apply {
         look(180f, 200f, 700f, 180f, 0f, 100f, fovDeg = 45f)   // camera eye, target, field of view
     }
 
@@ -123,7 +132,7 @@ class BowlingGame : BaseMiniGame() {
     override fun render(scope: DrawScope) {
         val r = stage.begin()
         // r.quad(...), r.sprite(...), model.draw(r, xf = ...) and so on
-        stage.present(scope)
+        stage.present()
     }
     override fun onTouch(type: TouchType, id: Long, x: Float, y: Float, timeMs: Long) {
         // x, y are field units (360 x 640); stage.touchToPlane(x, y, 0f, out) finds the spot in the world
@@ -152,14 +161,16 @@ app/src/main/java/com/pocketarcade/
 ├── MainActivity.kt        single activity: immersive, portrait, audio lifecycle, launch shortcut
 ├── ArcadeApp.kt           title → hall ↔ machine flow and the camera dive transitions
 ├── engine/                fixed-step loop, touch/flick tracking, circle physics, audio synth,
-│   │                      particles, shake/springs, haptics, pixel font, sprite raster and HD upscaler
-│   └── r3d/               software 3D renderer, camera, lighting, models, textures, Stage3D
-├── hub/                   hall layout, 3D scene, cabinet models and skins, characters, camera, joystick
+│   │                      particles, shake/springs, haptics, the game's type and icons
+│   ├── r3d/               scene recorder, camera, lighting, models, painted textures, Stage3D
+│   └── gl/                OpenGL ES 3 thread, renderer, shaders and the render surface
+├── hub/                   hall floor plan, scene, cabinets, fixtures, 3D kids, camera, joystick
 ├── games/                 MiniGame interface, BaseMiniGame, GameRegistry
 │   ├── claw/  skeeball/  whackamole/  coinpusher/  hoops/
 │   └── airhockey/  racer/  stacker/
 ├── data/                  DataStore repository, save state, prize catalog
-└── ui/                    HUD, title, prize counter, token machine, profile, game host, widgets
+└── ui/                    HUD, title, prize counter, token machine, profile, game host, widgets,
+                           and the thumbnail studio
 ```
 
 Tuning knobs for every game (difficulty and payouts) are grouped at the top of each game file in a `*Tuning` object: `ClawTuning`, `SkeeTuning`, `WhackTuning`, `PusherTuning`, `HoopsTuning`, `HockeyTuning`, `RacerTuning` and `StackerTuning`.
