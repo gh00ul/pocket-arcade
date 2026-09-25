@@ -1,6 +1,5 @@
 package com.pocketarcade.hub
 
-import androidx.compose.ui.graphics.ImageBitmap
 import com.pocketarcade.engine.len
 import kotlin.math.abs
 
@@ -28,7 +27,7 @@ class Player {
 
     var look: CharacterLook? = null
         private set
-    var frames: Array<Array<ImageBitmap>> = emptyArray()
+    var sheet: CharacterArt.Sheet? = null
         private set
 
     private var animT = 0f
@@ -38,7 +37,7 @@ class Player {
     fun setLook(newLook: CharacterLook) {
         if (newLook == look) return
         look = newLook
-        frames = CharacterArt.frames(newLook)
+        sheet = CharacterArt.Sheet(newLook)
     }
 
     fun update(dt: Float, inputX: Float, inputY: Float, solids: List<Box>) {

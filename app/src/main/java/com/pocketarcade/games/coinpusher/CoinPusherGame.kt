@@ -13,7 +13,7 @@ import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
 import com.pocketarcade.engine.PixelCanvas
 import com.pocketarcade.engine.PixelFont
-import com.pocketarcade.engine.PixelPainter
+import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Segment
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.TAU
@@ -529,7 +529,7 @@ class CoinPusherGame : BaseMiniGame() {
 
     // ---------------------------------------------------------------- attract mode
 
-    override fun drawAttract(p: PixelPainter, w: Int, h: Int, time: Float) {
+    override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) {
         p.fill(0, 0, w, h, Color(Pal.NAVY))
         val shelf = 3f + (0.5f - 0.5f * cos(time * 2f)) * 3f
         p.fill(0f, 0f, w.toFloat(), shelf, Color(Pal.GRAY))

@@ -38,7 +38,7 @@ import com.pocketarcade.engine.PixelFont
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.games.claw.PlushArt
 import com.pocketarcade.hub.CharacterArt
-import com.pocketarcade.hub.PropArt
+import com.pocketarcade.hub.DecorArt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -64,9 +64,9 @@ fun PrizeCounterScreen(save: SaveState, services: ArcadeServices, onClose: () ->
     fun imageFor(item: ShopItem): ImageBitmap = images.getOrPut(item.id) {
         val outfit = Catalog.outfit(save.outfit)
         when (item.kind) {
-            ItemKind.HAT -> CharacterArt.build(CharacterArt.player(outfit.shirt, outfit.pants, item.hat), CharacterArt.DOWN, 0).toImageBitmap()
-            ItemKind.OUTFIT -> CharacterArt.build(CharacterArt.player(item.shirt, item.pants, Catalog.hat(save.hat)?.hat), CharacterArt.DOWN, 0).toImageBitmap()
-            ItemKind.DECOR -> PropArt.decor(item.decor!!).image
+            ItemKind.HAT -> CharacterArt.buildHd(CharacterArt.player(outfit.shirt, outfit.pants, item.hat), CharacterArt.DOWN, 0).toImageBitmap()
+            ItemKind.OUTFIT -> CharacterArt.buildHd(CharacterArt.player(item.shirt, item.pants, Catalog.hat(save.hat)?.hat), CharacterArt.DOWN, 0).toImageBitmap()
+            ItemKind.DECOR -> DecorArt.preview(item.decor!!)
         }
     }
 
@@ -154,7 +154,7 @@ private fun PreviewCharacter(save: SaveState, selected: ShopItem?) {
     val outfit = if (selected?.kind == ItemKind.OUTFIT) selected else Catalog.outfit(save.outfit)
     val hat = if (selected?.kind == ItemKind.HAT) selected.hat else Catalog.hat(save.hat)?.hat
     val look = CharacterArt.player(outfit.shirt, outfit.pants, hat)
-    val image = remember(look, dir) { CharacterArt.build(look, dir, 0).toImageBitmap() }
+    val image = remember(look, dir) { CharacterArt.buildHd(look, dir, 0).toImageBitmap() }
     Box(
         Modifier
             .fillMaxWidth()
@@ -163,7 +163,7 @@ private fun PreviewCharacter(save: SaveState, selected: ShopItem?) {
             .padding(6.dp),
         contentAlignment = Alignment.Center,
     ) {
-        PixelImage(image, 4.dp)
+        PixelImage(image, 2.dp)
     }
 }
 

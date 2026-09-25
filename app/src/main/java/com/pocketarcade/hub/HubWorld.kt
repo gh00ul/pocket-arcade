@@ -1,14 +1,11 @@
 package com.pocketarcade.hub
 
-import androidx.compose.ui.graphics.ImageBitmap
 import com.pocketarcade.data.DecorStyle
 import com.pocketarcade.engine.AudioSynth
-import com.pocketarcade.engine.Pal
-import com.pocketarcade.engine.Particles
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.range
 import com.pocketarcade.games.MiniGame
-import kotlin.math.roundToInt
+import kotlin.math.abs
 import kotlin.random.Random
 
 /**
@@ -20,16 +17,12 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         private set
     val player = Player()
     val npcs = ArrayList<Npc>()
-    val camera = Camera()
-    val particles = Particles(300)
+    val camera = HubCamera()
     val joystick = Joystick()
-    val clerkFrames: Array<Array<ImageBitmap>> = CharacterArt.frames(CharacterArt.clerk)
+    val clerk: CharacterArt.Sheet by lazy { CharacterArt.Sheet(CharacterArt.clerk) }
     var time = 0f
         private set
 
-    /** Screen pixels per art pixel (always a whole number for crisp pixels). */
-    var scale = 6f
-        private set
     var screenW = 0f
         private set
     var screenH = 0f
@@ -49,15 +42,20 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
     var bubblePressed = -1L
         private set
 
+    /** Becomes true once the player has walked, which retires the "drag to walk" hint. */
+    var hasWalked = false
+        private set
+
     private var ownedDecor: Set<DecorStyle> = emptySet()
     private val rng = Random(42)
-    private var ambientSparkT = 0f
 
     init {
         player.x = map.spawnX
         player.y = map.spawnY
         player.dir = CharacterArt.UP
-        repeat(5) { i ->
+        camera.maxZ = map.heightPx - 160f
+        camera.snapTo(player.x, player.y)
+        repeat(7) { i ->
             val look = CharacterArt.randomKid(i + 3)
             var tx: Int
             var ty: Int
@@ -75,7 +73,8 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         if (owned == ownedDecor) return
         ownedDecor = owned
         map = HubLayout.build(games, owned)
-        // If a new decoration landed on the player, nudge them to the nearest free tile.
+        camera.maxZ = map.heightPx - 160f
+        // If a new decoration landed on the player, nudge them to the nearest free spot.
         if (Collision.blocked(map.solids, player.x, player.y)) {
             for (r in 1..6) {
                 val found = (-r..r).flatMap { dx -> (-r..r).map { dy -> dx to dy } }
@@ -93,19 +92,10 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
 
     fun setViewport(widthPx: Float, heightPx: Float) {
         if (widthPx <= 0f || heightPx <= 0f) return
-        val first = screenW == 0f
         screenW = widthPx
         screenH = heightPx
-        scale = (widthPx / 184f).roundToInt().coerceAtLeast(2).toFloat()
-        camera.setViewport(widthPx / scale, heightPx / scale, map.widthPx.toFloat(), map.heightPx.toFloat())
         joystick.radius = widthPx * 0.11f
-        camera.topMargin = 32f
-        if (first) camera.snapTo(player.x, player.y - 20f)
     }
-
-    /** Becomes true once the player has walked, which retires the "drag to walk" hint. */
-    var hasWalked = false
-        private set
 
     fun update(dt: Float) {
         time += dt
@@ -113,9 +103,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         if (player.moving) hasWalked = true
         if (player.stepped) audio?.play(Sfx.STEP, 0.5f, rng.range(0.8f, 1.2f))
         for (n in npcs) n.update(dt, this)
-        camera.setViewport(screenW / scale, screenH / scale, map.widthPx.toFloat(), map.heightPx.toFloat())
-        camera.follow(player.x, player.y - 16f, player.vx, player.vy, dt)
-        particles.update(dt)
+        camera.follow(player.x, player.y, player.vx, player.vy, dt)
 
         val spot = map.spots.firstOrNull { it.area.contains(player.x, player.y) }
         if (spot !== activeSpot) {
@@ -126,41 +114,25 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         } else {
             promptT += dt
         }
-
-        spawnAmbientParticles(dt)
     }
 
-    private fun spawnAmbientParticles(dt: Float) {
-        ambientSparkT -= dt
-        if (ambientSparkT > 0f) return
-        ambientSparkT = 0.12f
-        for (p in map.props) {
-            if (p.kind == PropKind.DECOR && p.decor == DecorStyle.JUKEBOX && rng.nextFloat() < 0.25f) {
-                particles.spawn(
-                    p.x + 13f + rng.range(-6f, 6f), p.y + 4f, rng.range(-6f, 6f), rng.range(-22f, -12f),
-                    1.4f, 1.5f, if (rng.nextBoolean()) Pal.PINK else Pal.CYAN, kind = Particles.SPARKLE,
-                )
-            }
-            if (p.kind == PropKind.DECOR && p.decor == DecorStyle.DISCO_BALL && rng.nextFloat() < 0.4f) {
-                particles.spawn(
-                    p.x + rng.range(0f, 14f), p.y + rng.range(0f, 14f), 0f, 0f,
-                    0.4f, 1.5f, Pal.WHITE, kind = Particles.SPARKLE,
-                )
-            }
-            if (p.kind == PropKind.COUNTER && rng.nextFloat() < 0.05f) {
-                particles.spawn(
-                    p.x + rng.range(4f, 92f), p.y + rng.range(3f, 12f), 0f, -4f,
-                    0.6f, 1.2f, Pal.WHITE, kind = Particles.SPARKLE,
-                )
-            }
+    /** Points the camera's dive at a machine's screen (used for the enter/exit transition). */
+    fun setDive(spot: Spot?, amount: Float) {
+        if (spot == null || amount <= 0f) {
+            camera.dive = 0f
+            return
         }
+        camera.diveX = spot.focusX
+        camera.diveY = spot.focusY
+        camera.diveZ = spot.focusZ
+        camera.dive = amount
     }
 
     /** Whether no other kid (and not the player) is using hangout [index]. */
     fun hangoutFree(index: Int, asker: Npc): Boolean {
         if (npcs.any { it !== asker && it.hangout == index }) return false
         val (hx, hy) = map.hangouts[index]
-        return !(kotlin.math.abs(player.x - hx) < 20f && kotlin.math.abs(player.y - hy) < 24f)
+        return !(abs(player.x - hx) < 20f && abs(player.y - hy) < 24f)
     }
 
     /** Breadth-first search over walkable tiles; returns tile indices from start (exclusive) to goal. */
@@ -237,8 +209,4 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         joystick.release()
         bubblePressed = -1L
     }
-
-    /** Screen position of a hall point given the current camera. */
-    fun toScreenX(wx: Float): Float = (wx - camera.x) * scale
-    fun toScreenY(wy: Float): Float = (wy - camera.y) * scale
 }

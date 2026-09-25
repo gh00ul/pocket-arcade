@@ -25,7 +25,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.pocketarcade.data.ArcadeRepository
@@ -62,7 +61,7 @@ private enum class Screen { TITLE, HUB, GAME }
 private enum class Overlay { NONE, PRIZES, TOKENS, PROFILE }
 
 /**
- * Top-level flow: title → hall ↔ machines, with the zoom-and-fade transition into a cabinet and
+ * Top-level flow: title → hall ↔ machines, with the camera diving into a cabinet's screen and
  * back out to the exact spot the player was standing.
  */
 @Composable
@@ -75,8 +74,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     var activeGame by remember { mutableIntStateOf(-1) }
     var busy by remember { mutableStateOf(false) }
     var banner by remember { mutableStateOf<String?>(null) }
-    var zoomFocus by remember { mutableStateOf(Offset.Zero) }
-    val zoom = remember { Animatable(1f) }
+    var diveSpot by remember { mutableStateOf<Spot?>(null) }
+    val dive = remember { Animatable(0f) }
     val fade = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val audio = services.audio
@@ -123,13 +122,15 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             audio.play(Sfx.WHOOSH, 0.8f)
             services.haptics.hit()
             val spot = world.map.spots.first { it.type == SpotType.MACHINE && it.machine == index }
-            zoomFocus = Offset(world.toScreenX(spot.focusX), world.toScreenY(spot.focusY))
+            diveSpot = spot
             world.cancelInput()
-            launch { fade.animateTo(1f, tween(620, easing = FastOutLinearInEasing)) }
-            zoom.animateTo(4.5f, tween(650, easing = FastOutSlowInEasing))
+            launch {
+                delay(200)
+                fade.animateTo(1f, tween(560, easing = FastOutLinearInEasing))
+            }
+            dive.animateTo(1f, tween(760, easing = FastOutSlowInEasing))
             activeGame = index
             screen = Screen.GAME
-            zoom.snapTo(1f)
             fade.animateTo(0f, tween(350))
             busy = false
         }
@@ -144,8 +145,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             fade.animateTo(1f, tween(250))
             screen = Screen.HUB
             activeGame = -1
-            zoom.snapTo(1.8f)
-            launch { zoom.animateTo(1f, tween(500, easing = FastOutSlowInEasing)) }
+            dive.snapTo(1f)
+            launch { dive.animateTo(0f, tween(800, easing = FastOutSlowInEasing)) }
             fade.animateTo(0f, tween(420))
             busy = false
         }
@@ -186,12 +187,12 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                 HubScreen(
                     world = world,
                     save = save,
-                    zoom = zoom.value,
-                    zoomFocus = zoomFocus,
+                    dive = dive.value,
+                    diveSpot = diveSpot,
                     inputEnabled = overlay == Overlay.NONE && !busy,
                     onSpotTapped = ::onSpot,
                 )
-                if (!busy && zoom.value <= 1.01f) {
+                if (!busy && dive.value <= 0.01f) {
                     Hud(
                         save = save,
                         onProfile = {

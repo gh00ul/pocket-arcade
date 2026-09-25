@@ -3,7 +3,7 @@ package com.pocketarcade.games
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.pocketarcade.engine.AudioSynth
 import com.pocketarcade.engine.Haptics
-import com.pocketarcade.engine.PixelPainter
+import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.TouchType
 
 /** Every mini-game plays inside a fixed portrait field of GAME_W x GAME_H units. */
@@ -60,7 +60,7 @@ interface MiniGame {
      * Draws the looping attract-mode animation on the cabinet screen in the hall.
      * [p] is set up so one unit is one art pixel; the screen is [w] x [h] art pixels.
      */
-    fun drawAttract(p: PixelPainter, w: Int, h: Int, time: Float)
+    fun drawAttract(p: Painter, w: Int, h: Int, time: Float)
 
     /** Resets all state for a fresh round. */
     fun start(fx: GameFx)

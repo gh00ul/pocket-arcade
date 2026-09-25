@@ -14,7 +14,7 @@ import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
 import com.pocketarcade.engine.PixelCanvas
 import com.pocketarcade.engine.PixelFont
-import com.pocketarcade.engine.PixelPainter
+import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.Spring
 import com.pocketarcade.engine.TAU
@@ -601,7 +601,7 @@ class HoopsGame : BaseMiniGame() {
 
     // ---------------------------------------------------------------- attract mode
 
-    override fun drawAttract(p: PixelPainter, w: Int, h: Int, time: Float) {
+    override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) {
         p.fill(0, 0, w, h, Color(Pal.PLUM))
         val bx = w / 2f + sin(time * 1.1f) * (w / 5f)
         p.fill(bx - 5f, 1f, 10f, 5f, Color.White)

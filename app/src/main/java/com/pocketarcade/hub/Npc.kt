@@ -1,6 +1,5 @@
 package com.pocketarcade.hub
 
-import androidx.compose.ui.graphics.ImageBitmap
 import com.pocketarcade.engine.dist
 import com.pocketarcade.engine.range
 import kotlin.math.abs
@@ -17,7 +16,7 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
         val WALK_CYCLE = intArrayOf(0, 1, 0, 2)
     }
 
-    val frames: Array<Array<ImageBitmap>> = CharacterArt.frames(look)
+    val sheet: CharacterArt.Sheet by lazy { CharacterArt.Sheet(look) }
     var dir = CharacterArt.DOWN
     var frame = 0
         private set

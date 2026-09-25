@@ -1,9 +1,11 @@
 package com.pocketarcade.hub
 
-import androidx.compose.ui.graphics.ImageBitmap
 import com.pocketarcade.data.HatStyle
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.PixelCanvas
+import com.pocketarcade.engine.SpriteFX
+import com.pocketarcade.engine.r3d.Region
+import com.pocketarcade.engine.r3d.Texture
 
 /** Colours and style of one character (the player, a wandering kid or the clerk). */
 data class CharacterLook(
@@ -34,12 +36,8 @@ object CharacterArt {
     const val LEFT = 2
     const val RIGHT = 3
 
-    fun frames(look: CharacterLook): Array<Array<ImageBitmap>> = Array(4) { dir ->
-        Array(3) { frame -> build(look, dir, frame).toImageBitmap() }
-    }
-
-    fun build(look: CharacterLook, dir: Int, frame: Int): PixelCanvas {
-        if (dir == RIGHT) return build(look, LEFT, frame).flippedX()
+    fun build(look: CharacterLook, dir: Int, frame: Int, outline: Boolean = true): PixelCanvas {
+        if (dir == RIGHT) return build(look, LEFT, frame, outline).flippedX()
         val c = PixelCanvas(W, H)
         fun p(x: Int, y: Int, col: Int) = c.set(OX + x, OY + y, col)
         fun r(x: Int, y: Int, w: Int, h: Int, col: Int) = c.fill(OX + x, OY + y, w, h, col)
@@ -154,8 +152,70 @@ object CharacterArt {
         }
 
         look.hat?.let { drawHat(c, it, dir, frame) }
-        c.outline(Pal.BLACK)
+        if (outline) c.outline(Pal.BLACK)
         return c
+    }
+
+    /**
+     * The 2x "HD" frame: Scale2x-smoothed, bevel-shaded, then detailed by hand at the new
+     * resolution (eye highlights, brows, a smile, collar, chest emblem, shoe soles, hair shine).
+     */
+    fun buildHd(look: CharacterLook, dir: Int, frame: Int): PixelCanvas {
+        if (dir == RIGHT) return buildHd(look, LEFT, frame).flippedX()
+        val big = SpriteFX.scale2x(build(look, dir, frame, outline = false))
+        SpriteFX.bevel(big, 0.22f, 0.8f)
+        val ox = OX * 2
+        val oy = OY * 2
+        val brow = Pal.shade(look.hair, 0.75f)
+        val mouth = Pal.shade(look.skin, 0.55f)
+        val collar = Pal.shade(look.shirt, 0.65f)
+        val emblem = Pal.mix(look.shirt, Pal.WHITE, 0.55f)
+        when (dir) {
+            DOWN -> {
+                big.set(ox + 6, oy + 10, Pal.WHITE)
+                big.set(ox + 16, oy + 10, Pal.WHITE)
+                for (dx in 0..2) {
+                    big.set(ox + 5 + dx, oy + 8, brow)
+                    big.set(ox + 15 + dx, oy + 8, brow)
+                }
+                big.set(ox + 10, oy + 14, mouth); big.set(ox + 13, oy + 14, mouth)
+                big.set(ox + 11, oy + 15, mouth); big.set(ox + 12, oy + 15, mouth)
+                for (dx in 0..3) big.set(ox + 10 + dx, oy + 18 + if (dx == 0 || dx == 3) 0 else 1, collar)
+                big.set(ox + 7, oy + 21, emblem); big.set(ox + 8, oy + 21, emblem)
+                big.set(ox + 7, oy + 22, emblem); big.set(ox + 8, oy + 22, emblem)
+            }
+            LEFT -> {
+                big.set(ox + 6, oy + 10, Pal.WHITE)
+                for (dx in 0..2) big.set(ox + 5 + dx, oy + 8, brow)
+                big.set(ox + 3, oy + 14, mouth); big.set(ox + 4, oy + 15, mouth)
+                for (dx in 0..2) big.set(ox + 7 + dx, oy + 18, collar)
+            }
+            else -> for (dx in 0..5) big.set(ox + 8 + dx, oy + 18, collar)
+        }
+        // Hair shine and light shoe soles for every direction.
+        val hairHi = Pal.mix(look.hair, Pal.WHITE, 0.35f)
+        var x = ox + 4
+        while (x < ox + 18) {
+            if (big.get(x, oy + 2) ushr 24 != 0) big.set(x, oy + 2, hairHi)
+            x += 5
+        }
+        val soleY = (OY + 17) * 2 + 1
+        val sole = Pal.mix(look.shoes, Pal.WHITE, 0.55f)
+        for (sx in 0 until big.w) if (big.get(sx, soleY) == look.shoes) big.set(sx, soleY, sole)
+        big.outline(Pal.BLACK)
+        return big
+    }
+
+    /** All 12 HD frames of a character packed into one texture: 3 columns (frames) x 4 rows (directions). */
+    class Sheet(look: CharacterLook) {
+        val texture = Texture(W * 2 * 3, H * 2 * 4)
+        val frames: Array<Array<Region>> = Array(4) { dir ->
+            Array(3) { frame ->
+                val c = buildHd(look, dir, frame)
+                for (y in 0 until c.h) System.arraycopy(c.px, y * c.w, texture.pixels, (dir * H * 2 + y) * texture.width + frame * W * 2, c.w)
+                Region(texture, frame * W * 2, dir * H * 2, W * 2, H * 2)
+            }
+        }
     }
 
     private fun drawHat(c: PixelCanvas, style: HatStyle, dir: Int, frame: Int) {

@@ -12,7 +12,7 @@ import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
 import com.pocketarcade.engine.PixelCanvas
 import com.pocketarcade.engine.PixelFont
-import com.pocketarcade.engine.PixelPainter
+import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.Spring
 import com.pocketarcade.engine.TouchType
@@ -440,7 +440,7 @@ class WhackAMoleGame : BaseMiniGame() {
 
     // ---------------------------------------------------------------- attract mode
 
-    override fun drawAttract(p: PixelPainter, w: Int, h: Int, time: Float) {
+    override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) {
         p.fill(0, 0, w, h, Color(Pal.GREEN))
         val cw = w / 3f
         val ch = h / 3f

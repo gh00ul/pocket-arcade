@@ -10,7 +10,7 @@ import com.pocketarcade.engine.FlickTracker
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
 import com.pocketarcade.engine.PixelFont
-import com.pocketarcade.engine.PixelPainter
+import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.Spring
 import com.pocketarcade.engine.TouchType
@@ -501,7 +501,7 @@ class SkeeBallGame : BaseMiniGame() {
 
     // ---------------------------------------------------------------- attract mode
 
-    override fun drawAttract(p: PixelPainter, w: Int, h: Int, time: Float) {
+    override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) {
         p.fill(0, 0, w, h, Color(Pal.NAVY))
         val cx = w / 2f
         val cy = h * 0.38f

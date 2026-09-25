@@ -16,7 +16,7 @@ import com.pocketarcade.engine.FIXED_DT
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
 import com.pocketarcade.engine.PixelFont
-import com.pocketarcade.engine.PixelPainter
+import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Segment
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.TouchType
@@ -749,7 +749,7 @@ class ClawMachineGame : BaseMiniGame() {
 
     // ---------------------------------------------------------------- attract mode
 
-    override fun drawAttract(p: PixelPainter, w: Int, h: Int, time: Float) {
+    override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) {
         p.fill(0, 0, w, h, Color(Pal.PLUM))
         val colors = intArrayOf(Pal.BROWN, Pal.LIME, Pal.YELLOW, Pal.PINK, Pal.SKY, Pal.WHITE, Pal.GREEN)
         for (i in 0 until w / 3) {
