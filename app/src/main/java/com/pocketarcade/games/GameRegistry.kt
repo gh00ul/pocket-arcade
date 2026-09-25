@@ -1,9 +1,12 @@
 package com.pocketarcade.games
 
+import com.pocketarcade.games.airhockey.AirHockeyGame
 import com.pocketarcade.games.claw.ClawMachineGame
 import com.pocketarcade.games.coinpusher.CoinPusherGame
 import com.pocketarcade.games.hoops.HoopsGame
+import com.pocketarcade.games.racer.RacerGame
 import com.pocketarcade.games.skeeball.SkeeBallGame
+import com.pocketarcade.games.stacker.StackerGame
 import com.pocketarcade.games.whackamole.WhackAMoleGame
 
 /**
@@ -18,5 +21,8 @@ object GameRegistry {
         SkeeBallGame(),
         HoopsGame(),
         CoinPusherGame(),
+        AirHockeyGame(),
+        RacerGame(),
+        StackerGame(),
     )
 }

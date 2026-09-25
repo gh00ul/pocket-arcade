@@ -148,7 +148,6 @@ internal object SkeeArt {
         c.fill(0, 0, c.w, 2, Pal.SKY)
         Texture.of(c)
     }
-    val railTop: Texture by lazy { TexKit.solid(8, 8, Pal.YELLOW) }
 
     /** Marquee above the target. */
     val marquee: Texture by lazy {

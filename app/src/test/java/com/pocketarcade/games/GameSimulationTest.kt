@@ -4,15 +4,19 @@ import com.pocketarcade.engine.AudioSynth
 import com.pocketarcade.engine.FIXED_DT
 import com.pocketarcade.engine.Haptics
 import com.pocketarcade.engine.TouchType
+import com.pocketarcade.games.airhockey.AirHockeyGame
 import com.pocketarcade.games.claw.ClawMachineGame
 import com.pocketarcade.games.coinpusher.CoinPusherGame
 import com.pocketarcade.games.hoops.HoopsGame
 import com.pocketarcade.games.hoops.HoopsTuning
+import com.pocketarcade.games.racer.RacerGame
 import com.pocketarcade.games.skeeball.SkeeBallGame
+import com.pocketarcade.games.stacker.StackerGame
 import com.pocketarcade.games.whackamole.WhackAMoleGame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.random.Random
 
 /**
@@ -216,6 +220,111 @@ class GameSimulationTest {
         return stats
     }
 
+    /**
+     * Guards the goal, and when the puck comes into our half strikes through it towards the far
+     * goal. [lag] is how often the bot re-reads the table; [noise] is aiming error in world units.
+     */
+    private fun hockey(rounds: Int, lag: Float, noise: Float, seed: Int): Stats {
+        val stats = Stats("hockey lag ${(lag * 1000).toInt()}ms")
+        val rng = Random(seed)
+        val game = AirHockeyGame()
+        repeat(rounds) {
+            var next = 0f
+            var down = false
+            var tx = 180f
+            var ty = 540f
+            play(game, stats) { t, ms ->
+                if (t >= next) {
+                    next = t + lag
+                    val px = game.botPuckX
+                    val py = game.botPuckY
+                    if (py > 340f) {
+                        // Aim for the side of the goal the CPU isn't covering.
+                        val aimX = if (game.botCpuX > 180f) 140f else 220f
+                        val gx = aimX - px
+                        val gy = 60f - py
+                        val gl = hypot(gx, gy).coerceAtLeast(1f)
+                        val behind = if (game.botMalletY > py + 8f) -8f else 40f
+                        tx = px - gx / gl * behind + gaussian(rng) * noise
+                        ty = py - gy / gl * behind + gaussian(rng) * noise
+                    } else {
+                        tx = 180f + (px - 180f) * 0.5f
+                        ty = 550f
+                    }
+                }
+                val (sx, sy) = game.botScreen(tx, ty)
+                if (!down) {
+                    game.onTouch(TouchType.DOWN, 1L, sx, sy, ms)
+                    down = true
+                } else {
+                    game.onTouch(TouchType.MOVE, 1L, sx, sy, ms)
+                }
+            }
+        }
+        return stats
+    }
+
+    /** Taps when the sliding slab passes a spot [sigma] away from perfect, on average. */
+    private fun stacker(rounds: Int, sigma: Float, seed: Int): Stats {
+        val stats = Stats("stacker sigma ${sigma.toInt()}")
+        val rng = Random(seed)
+        val game = StackerGame()
+        repeat(rounds) {
+            var height = -1
+            var aim = 0f
+            var last = Float.NaN
+            var id = 1L
+            play(game, stats) { _, ms ->
+                if (!game.botMoving) {
+                    last = Float.NaN
+                    return@play
+                }
+                if (game.botHeight != height) {
+                    height = game.botHeight
+                    aim = gaussian(rng) * sigma
+                    last = Float.NaN
+                }
+                val d = game.botDelta() - aim
+                if (!last.isNaN() && (d > 0f) != (last > 0f)) {
+                    game.onTouch(TouchType.DOWN, id, 180f, 300f, ms)
+                    game.onTouch(TouchType.UP, id++, 180f, 300f, ms + 30)
+                    last = Float.NaN
+                    height = -2
+                } else {
+                    last = d
+                }
+            }
+        }
+        return stats
+    }
+
+    /** Picks the clearest lane every [lag] seconds and steers for it with [noise] error. */
+    private fun racer(rounds: Int, lag: Float, noise: Float, seed: Int, chaseTokens: Boolean): Stats {
+        val stats = Stats("racer lag ${(lag * 1000).toInt()}ms")
+        val rng = Random(seed)
+        val game = RacerGame()
+        repeat(rounds) {
+            var next = 0f
+            var target = 0f
+            play(game, stats) { t, _ ->
+                if (t >= next) {
+                    next = t + lag
+                    val clear = game.botLaneClearance()
+                    val current = ((game.botPX / 100f) + 1f).toInt().coerceIn(0, 2)
+                    var best = current
+                    if (clear[current] < 700f) {
+                        for (i in 0..2) if (clear[i] > clear[best]) best = i
+                    }
+                    val token = if (chaseTokens) game.botTokenLane(900f) else -1
+                    if (token >= 0 && clear[token] > 500f) best = token
+                    target = (best - 1) * 100f + gaussian(rng) * noise
+                }
+                game.botSteer(target)
+            }
+        }
+        return stats
+    }
+
     @Test
     fun everyMachinePaysOutAndRewardsSkill() {
         val rounds = 12
@@ -225,6 +334,9 @@ class GameSimulationTest {
             whack(rounds, reaction = 0.30f, missChance = 0.05f, bombMistake = 0.05f, seed = 5) to whack(rounds, reaction = 0.55f, missChance = 0.2f, bombMistake = 0.3f, seed = 6),
             pusher(rounds, interval = 0.5f, seed = 7) to pusher(rounds, interval = 1.8f, seed = 8),
             hoops(rounds, speedNoise = 0.04f, lateralNoise = 40f, seed = 9) to hoops(rounds, speedNoise = 0.14f, lateralNoise = 150f, seed = 10),
+            hockey(rounds, lag = 0.05f, noise = 3f, seed = 11) to hockey(rounds, lag = 0.3f, noise = 18f, seed = 12),
+            stacker(rounds, sigma = 8f, seed = 13) to stacker(rounds, sigma = 22f, seed = 14),
+            racer(rounds, lag = 0.15f, noise = 8f, seed = 15, chaseTokens = true) to racer(rounds, lag = 0.9f, noise = 45f, seed = 16, chaseTokens = false),
         )
         println("---- Pocket Arcade payout simulation ($rounds rounds each) ----")
         for ((good, casual) in results) {
