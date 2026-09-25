@@ -1,0 +1,55 @@
+name: Build APK
+
+# Every push to main builds the debug APK and publishes it as a GitHub Release, so it can be
+# installed straight from a phone. The newest build is always at:
+# https://github.com/<owner>/pocket-arcade/releases/latest/download/PocketArcade.apk
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Run the payout simulation and build the debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest assembleDebug --stacktrace
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk PocketArcade.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PocketArcade-apk
+          path: PocketArcade.apk
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" PocketArcade.apk \
+            --target "$GITHUB_SHA" \
+            --title "Pocket Arcade 1.0.${GITHUB_RUN_NUMBER}" \
+            --latest \
+            --notes "Debug APK built from ${GITHUB_SHA::7}: $(git log -1 --pretty=%s)
+
+          Open this page on your Android phone, tap **PocketArcade.apk**, and allow installs from your browser when asked. Newer builds install over older ones and keep your tokens, tickets and prizes."
