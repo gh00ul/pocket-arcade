@@ -61,39 +61,14 @@ fun DrawScope.drawPixelImageSquash(
     )
 }
 
+
 /**
- * Draws in "virtual pixels": coordinates are in art pixels and every rectangle is snapped to
- * whole screen pixels, so dynamic effects line up with the 1x sprites around them.
+ * Something that draws in "painter units" — art pixels scaled up by some factor. Attract-mode
+ * screens are written against this so they can draw either straight to the screen or into a
+ * texture that the 3D renderer maps onto a cabinet.
  */
-class PixelPainter {
-    private var scope: DrawScope? = null
-    var ox = 0f
-        private set
-    var oy = 0f
-        private set
-    var s = 1f
-        private set
-
-    fun begin(drawScope: DrawScope, originX: Float, originY: Float, pixelSize: Float): PixelPainter {
-        scope = drawScope
-        ox = originX
-        oy = originY
-        s = pixelSize
-        return this
-    }
-
-    fun sx(x: Float): Float = floor(ox + x * s)
-    fun sy(y: Float): Float = floor(oy + y * s)
-
-    fun fill(x: Float, y: Float, w: Float, h: Float, color: Color, alpha: Float = 1f) {
-        val d = scope ?: return
-        val x0 = sx(x)
-        val y0 = sy(y)
-        val x1 = sx(x + w)
-        val y1 = sy(y + h)
-        if (x1 <= x0 || y1 <= y0) return
-        d.drawRect(color, Offset(x0, y0), Size(x1 - x0, y1 - y0), alpha)
-    }
+interface Painter {
+    fun fill(x: Float, y: Float, w: Float, h: Float, color: Color, alpha: Float = 1f)
 
     fun fill(x: Int, y: Int, w: Int, h: Int, color: Color, alpha: Float = 1f) =
         fill(x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat(), color, alpha)
@@ -121,14 +96,63 @@ class PixelPainter {
         fill(x + w - 1f, y, 1f, h, color, alpha)
     }
 
+    /** Bitmap-font text; the default plots each glyph pixel with [fill]. */
     fun text(text: String, x: Float, y: Float, color: Color, tiny: Boolean = false, alpha: Float = 1f, size: Float = 1f) {
-        val d = scope ?: return
-        PixelFont.draw(d, text, sx(x), sy(y), s * size, color, alpha, tiny)
+        val adv = if (tiny) PixelFont.TADV else PixelFont.ADV
+        for (i in text.indices) {
+            val rows = PixelFont.rows(text[i], tiny) ?: continue
+            for (ry in rows.indices) {
+                val row = rows[ry]
+                for (rx in row.indices) {
+                    if (row[rx] == '#') fill(x + (i * adv + rx) * size, y + ry * size, size, size, color, alpha)
+                }
+            }
+        }
     }
 
     fun textCentered(text: String, cx: Float, y: Float, color: Color, tiny: Boolean = false, alpha: Float = 1f, size: Float = 1f) {
         val w = PixelFont.width(text, size, tiny)
         text(text, floor(cx - w / 2f), y, color, tiny, alpha, size)
+    }
+}
+
+/**
+ * Draws on screen in "virtual pixels": coordinates are in art pixels and every rectangle is
+ * snapped to whole screen pixels, so dynamic effects line up with the sprites around them.
+ */
+class PixelPainter : Painter {
+    private var scope: DrawScope? = null
+    var ox = 0f
+        private set
+    var oy = 0f
+        private set
+    var s = 1f
+        private set
+
+    fun begin(drawScope: DrawScope, originX: Float, originY: Float, pixelSize: Float): PixelPainter {
+        scope = drawScope
+        ox = originX
+        oy = originY
+        s = pixelSize
+        return this
+    }
+
+    fun sx(x: Float): Float = floor(ox + x * s)
+    fun sy(y: Float): Float = floor(oy + y * s)
+
+    override fun fill(x: Float, y: Float, w: Float, h: Float, color: Color, alpha: Float) {
+        val d = scope ?: return
+        val x0 = sx(x)
+        val y0 = sy(y)
+        val x1 = sx(x + w)
+        val y1 = sy(y + h)
+        if (x1 <= x0 || y1 <= y0) return
+        d.drawRect(color, Offset(x0, y0), Size(x1 - x0, y1 - y0), alpha)
+    }
+
+    override fun text(text: String, x: Float, y: Float, color: Color, tiny: Boolean, alpha: Float, size: Float) {
+        val d = scope ?: return
+        PixelFont.draw(d, text, sx(x), sy(y), s * size, color, alpha, tiny)
     }
 
     fun image(img: ImageBitmap, x: Float, y: Float, alpha: Float = 1f, tint: Color? = null) {
