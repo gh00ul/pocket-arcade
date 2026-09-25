@@ -1,33 +1,36 @@
 package com.pocketarcade.games.whackamole
 
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.drawscope.rotate
+import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
-import com.pocketarcade.engine.PixelCanvas
 import com.pocketarcade.engine.PixelFont
-import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.Spring
 import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.chance
 import com.pocketarcade.engine.clamp01
-import com.pocketarcade.engine.drawPixelImageSquash
 import com.pocketarcade.engine.easeOutBack
 import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.lerp
+import com.pocketarcade.engine.r3d.Blend
+import com.pocketarcade.engine.r3d.BoxFaces
+import com.pocketarcade.engine.r3d.Model
+import com.pocketarcade.engine.r3d.ModelBuilder
+import com.pocketarcade.engine.r3d.PointLight
+import com.pocketarcade.engine.r3d.Renderer3D
+import com.pocketarcade.engine.r3d.Stage3D
+import com.pocketarcade.engine.r3d.TexKit
+import com.pocketarcade.engine.r3d.Xform
 import com.pocketarcade.engine.range
 import com.pocketarcade.games.BaseMiniGame
 import com.pocketarcade.games.CabinetLook
 import com.pocketarcade.games.GAME_H
 import com.pocketarcade.games.GAME_W
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.sin
 
 /** Difficulty and payout knobs for whack-a-mole. */
@@ -80,13 +83,37 @@ class WhackAMoleGame : BaseMiniGame() {
     }
 
     private companion object {
-        val COLS = floatArrayOf(70f, 180f, 290f)
-        val ROWS = floatArrayOf(250f, 385f, 520f)
-        const val HOLE_RX = 48f
-        const val HOLE_RY = 17f
-        const val SPRITE_SCALE = 4f
         const val RISE_TIME = 0.12f
         const val FALL_TIME = 0.14f
+
+        // 3D table layout, in world units.
+        val HOLE_XS = floatArrayOf(65f, 180f, 295f)
+        val HOLE_ZS = floatArrayOf(0f, 150f, 300f)
+        const val HOLE_R = 40f
+        const val RIM_W = 9f
+        const val RIM_H = 5f
+        const val WELL_DEPTH = 110f
+        const val MOLE_W = 80f
+        /** Height of the mole that shows above the rim when fully up. */
+        const val MOLE_H = 92f
+        /** Extra body below the rim, so the bottom of the sprite never shows down the hole. */
+        const val MOLE_BELOW = 50f
+        const val TABLE_L = -30f
+        const val TABLE_R = 390f
+        const val TABLE_BACK = -90f
+        const val TABLE_FRONT = 390f
+        const val BACK_H = 230f
+        const val PANEL_L = 100f
+        const val PANEL_R = 260f
+        const val PANEL_TOP = 184f
+        const val MALLET_LEN = 90f
+        const val MALLET_R = 20f
+        const val MALLET_HALF = 30f
+
+        /** Hit box around a hole, in world units: half width, reach above the rim, below it. */
+        const val HIT_HALF_W = 50f
+        const val HIT_UP = 92f
+        const val HIT_DOWN = 26f
     }
 
     private val moles = Array(9) { Mole() }
@@ -94,12 +121,8 @@ class WhackAMoleGame : BaseMiniGame() {
     private var combo = 0
     private var bestCombo = 0
     private var stunT = 0f
-    private var malletX = 0f
-    private var malletY = 0f
     private var malletT = 99f
     private var hits = 0
-
-    private val sprites: Map<String, ImageBitmap> by lazy { buildSprites() }
 
     override fun reset() {
         moles.forEach {
@@ -174,9 +197,9 @@ class WhackAMoleGame : BaseMiniGame() {
         for (i in moles.indices) {
             val m = moles[i]
             if (m.kind == Kind.BOMB && m.phase != Phase.HIDDEN && m.phase != Phase.BONKED && m.rise > 0.5f && rng.chance(0.5f)) {
-                val hx = COLS[i % 3] + 14f
-                val hy = ROWS[i / 3] - m.rise * 20f * SPRITE_SCALE + 2f
-                particles.spawn(hx, hy, rng.range(-40f, 40f), rng.range(-90f, -20f), 0.25f, 3f, if (rng.nextBoolean()) Pal.YELLOW else Pal.ORANGE)
+                val fuseY = moleBase(m.rise) + MOLE_H * 0.98f
+                stage.toField(worldX(i) + 4f, fuseY, worldZ(i), pt)
+                particles.spawn(pt[0], pt[1], rng.range(-40f, 40f), rng.range(-90f, -20f), 0.25f, 3f, if (rng.nextBoolean()) Pal.YELLOW else Pal.ORANGE)
             }
         }
     }
@@ -201,9 +224,8 @@ class WhackAMoleGame : BaseMiniGame() {
 
     override fun onTouch(type: TouchType, id: Long, x: Float, y: Float, timeMs: Long) {
         if (type != TouchType.DOWN || timeUp) return
-        malletX = x
-        malletY = y
         malletT = 0f
+        if (stage.touchToPlane(x, y, 0f, pt)) aimMallet(pt[0], 0f, pt[1])
         if (stunT > 0f) {
             play(Sfx.ERROR, 0.3f)
             return
@@ -211,10 +233,11 @@ class WhackAMoleGame : BaseMiniGame() {
         var hitIndex = -1
         var bestDist = Float.MAX_VALUE
         for (i in moles.indices) {
-            val hx = COLS[i % 3]
-            val hy = ROWS[i / 3]
-            if (abs(x - hx) < 58f && y > hy - 96f && y < hy + 30f) {
-                val d = abs(x - hx) + abs(y - (hy - 30f))
+            val hx = holeSX[i]
+            val hy = holeSY[i]
+            val s = holeScale[i]
+            if (abs(x - hx) < HIT_HALF_W * s && y > hy - HIT_UP * s && y < hy + HIT_DOWN * s) {
+                val d = abs(x - hx) + abs(y - (hy - 30f * s))
                 if (d < bestDist) {
                     bestDist = d; hitIndex = i
                 }
@@ -225,8 +248,9 @@ class WhackAMoleGame : BaseMiniGame() {
             return
         }
         val m = moles[hitIndex]
-        val hx = COLS[hitIndex % 3]
-        val hy = ROWS[hitIndex / 3]
+        val hx = holeSX[hitIndex]
+        val hy = holeSY[hitIndex]
+        aimMallet(worldX(hitIndex), if (m.phase == Phase.HIDDEN) 0f else MOLE_H * 0.7f * m.rise, worldZ(hitIndex))
         val whackable = (m.phase == Phase.RISING || m.phase == Phase.UP || m.phase == Phase.FALLING) && m.rise > 0.3f
         if (!whackable) {
             combo = 0
@@ -238,7 +262,7 @@ class WhackAMoleGame : BaseMiniGame() {
         m.t = 0f
         m.squash.snap(1f)
         m.squash.kick(-9f)
-        val headY = hy - 18f * SPRITE_SCALE
+        val headY = holeScreenY(hitIndex, 70f)
         when (m.kind) {
             Kind.BOMB -> {
                 combo = 0
@@ -279,146 +303,223 @@ class WhackAMoleGame : BaseMiniGame() {
         }
     }
 
-    // ---------------------------------------------------------------- drawing
+    // ---------------------------------------------------------------- 3D presentation
+
+    /**
+     * The table in 3D. Holes sit on a 3×3 grid of world positions; their on-screen positions
+     * (for hit tests, particles and popups) come from projecting them through the fixed camera.
+     */
+    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt(), "whack").apply {
+        look(180f, 560f, 560f, 180f, 0f, 190f, fovDeg = 52f, centerYFrac = 0.625f)
+    }
+    private val pt = FloatArray(3)
+    private val holeSX = FloatArray(9)
+    private val holeSY = FloatArray(9)
+    private val holeScale = FloatArray(9)
+
+    init {
+        for (i in 0 until 9) {
+            stage.toField(worldX(i), 0f, worldZ(i), pt)
+            holeSX[i] = pt[0]
+            holeSY[i] = pt[1]
+            holeScale[i] = stage.scaleAt(worldX(i), 0f, worldZ(i))
+        }
+    }
+
+    /** Height of the rim line on a mole that has risen [rise] of the way. */
+    private fun moleBase(rise: Float) = -(1f - rise) * (MOLE_H + 12f)
+
+    private fun worldX(i: Int) = HOLE_XS[i % 3]
+    private fun worldZ(i: Int) = HOLE_ZS[i / 3]
+
+    /** Screen position of a point [lift] units above hole [i]'s centre. */
+    private fun holeScreenY(i: Int, lift: Float) = holeSY[i] - lift * holeScale[i]
+
+    private val tableModel: Model by lazy {
+        val holes = List(9) { i -> floatArrayOf(worldX(i) - TABLE_L, worldZ(i) - TABLE_BACK) }
+        val tableTex = WhackArt.table((TABLE_R - TABLE_L).toInt(), (TABLE_FRONT - TABLE_BACK).toInt(), holes, HOLE_R)
+        val b = ModelBuilder()
+        b.quad(
+            TABLE_L, 0f, TABLE_BACK, TABLE_R, 0f, TABLE_BACK, TABLE_R, 0f, TABLE_FRONT, TABLE_L, 0f, TABLE_FRONT,
+            tableTex.full, 0f, 1f, 0f,
+        )
+        b.quad(
+            TABLE_L, 0f, TABLE_FRONT, TABLE_R, 0f, TABLE_FRONT, TABLE_R, -220f, TABLE_FRONT, TABLE_L, -220f, TABLE_FRONT,
+            WhackArt.front.full, 0f, 0f, 1f,
+        )
+        val bb = WhackArt.backboard.full
+        b.quad(
+            TABLE_L, BACK_H, TABLE_BACK, TABLE_R, BACK_H, TABLE_BACK, TABLE_R, 0f, TABLE_BACK, TABLE_L, 0f, TABLE_BACK,
+            bb, 0f, 0f, 1f,
+        )
+        val wood = WhackArt.wood.full
+        // Side posts framing the backboard.
+        b.box(TABLE_L - 14f, 0f, TABLE_BACK - 10f, TABLE_L, BACK_H + 20f, TABLE_BACK + 12f, BoxFaces(front = wood, right = wood, top = wood))
+        b.box(TABLE_R, 0f, TABLE_BACK - 10f, TABLE_R + 14f, BACK_H + 20f, TABLE_BACK + 12f, BoxFaces(front = wood, left = wood, top = wood))
+        b.box(TABLE_L - 14f, BACK_H, TABLE_BACK - 10f, TABLE_R + 14f, BACK_H + 20f, TABLE_BACK + 2f, BoxFaces(front = wood, top = wood))
+        // Side rails along the table.
+        b.box(TABLE_L - 14f, -220f, TABLE_BACK, TABLE_L, 10f, TABLE_FRONT + 4f, BoxFaces(front = wood, right = wood, top = wood))
+        b.box(TABLE_R, -220f, TABLE_BACK, TABLE_R + 14f, 10f, TABLE_FRONT + 4f, BoxFaces(front = wood, left = wood, top = wood))
+        b.box(TABLE_L - 14f, 0f, TABLE_FRONT, TABLE_R + 14f, 8f, TABLE_FRONT + 10f, BoxFaces(front = wood, top = wood))
+        // Each hole: a dark well under the table and a rubber rim around the opening.
+        val rim = WhackArt.rim.full
+        for (i in 0 until 9) {
+            val x = worldX(i)
+            val z = worldZ(i)
+            b.cylinder(x, z, -WELL_DEPTH, 0f, HOLE_R, 12, WhackArt.well.full, inward = true)
+            b.disc(x, z, -WELL_DEPTH, HOLE_R, 12, WhackArt.wellBottom.full)
+            b.cylinder(x, z, 0f, RIM_H, HOLE_R + RIM_W, 14, rim)
+            b.annulus(x, z, RIM_H, HOLE_R, HOLE_R + RIM_W, 14, rim)
+        }
+        b.build()
+    }
+
+    private val malletHead: Model by lazy {
+        ModelBuilder().cylinder(0f, 0f, -MALLET_HALF, MALLET_HALF, MALLET_R, 10, WhackArt.malletHead.full, top = WhackArt.malletCap.full, bottom = WhackArt.malletCap.full).build()
+    }
+    private val malletHandle: Model by lazy {
+        val h = WhackArt.handle.full
+        ModelBuilder().box(-4f, -4f, 0f, 4f, 4f, MALLET_LEN, BoxFaces(front = h, back = h, left = h, right = h, top = h)).build()
+    }
+    private val handXf = Xform()
+    private val partXf = Xform()
+    private val localXf = Xform()
+    private var malletTX = 0f
+    private var malletTZ = 0f
+    private var malletTY = 0f
+    private var panelText = ""
+
+    private val topLight = PointLight(180f, 320f, 160f, 1f, 0.95f, 0.85f, 620f, 0.9f)
+    private val backLight = PointLight(180f, 180f, -40f, 0.6f, 1f, 0.5f, 360f, 0.6f)
+    private val goldLight = PointLight(0f, 60f, 0f, 1f, 0.8f, 0.3f, 180f, 0f)
+    private val boomLight = PointLight(0f, 80f, 0f, 1f, 0.55f, 0.2f, 360f, 0f)
 
     override fun render(scope: DrawScope) {
-        with(scope) {
-            // Wooden cabinet top with a grassy playfield.
-            drawRect(Color(Pal.DARKBROWN), Offset(-40f, -40f), Size(GAME_W + 80f, GAME_H + 80f))
-            drawRoundRect(Color(Pal.DARKGREEN), Offset(14f, 120f), Size(GAME_W - 28f, 500f), CornerRadius(24f, 24f))
-            drawRoundRect(Color(Pal.GREEN), Offset(20f, 126f), Size(GAME_W - 40f, 488f), CornerRadius(20f, 20f))
-            for (i in 0 until 90) {
-                val gx = 26f + hash01(i, 11) * (GAME_W - 60f)
-                val gy = 132f + hash01(i, 12) * 470f
-                drawRect(Color(Pal.DARKGREEN), Offset(gx, gy), Size(3f, 6f), alpha = 0.5f)
-                drawRect(Color(Pal.LIME), Offset(gx + 3f, gy - 2f), Size(2f, 4f), alpha = 0.4f)
-            }
-            // Title strip with blinking bulbs.
-            drawRoundRect(Color(Pal.BROWN), Offset(14f, 20f), Size(GAME_W - 28f, 88f), CornerRadius(16f, 16f))
-            for (i in 0 until 14) {
-                val on = ((time * 5f).toInt() + i) % 2 == 0
-                drawCircle(Color(if (on) Pal.YELLOW else Pal.shade(Pal.YELLOW, 0.3f)), 4f, Offset(30f + i * 23f, 28f))
-                drawCircle(Color(if (!on) Pal.YELLOW else Pal.shade(Pal.YELLOW, 0.3f)), 4f, Offset(30f + i * 23f, 100f))
-            }
-            val comboText = if (combo >= 2) "COMBO x$combo" else "BONK 'EM!"
-            PixelFont.drawCentered(this, comboText, GAME_W / 2f, 52f, 4f, Color(if (combo >= 5) Pal.CYAN else Pal.CREAM))
-
-            for (i in moles.indices) drawHole(this, i)
-
-            // Mallet.
-            if (malletT < 0.3f) {
-                val swing = clamp01(malletT / 0.07f)
-                val deg = lerp(-50f, 10f, swing)
-                val alpha = if (malletT > 0.15f) 1f - (malletT - 0.15f) / 0.15f else 1f
-                rotate(deg, Offset(malletX + 40f, malletY + 40f)) {
-                    drawRect(Color(Pal.TAN), Offset(malletX + 4f, malletY - 4f), Size(46f, 10f), alpha = alpha)
-                    drawRoundRect(Color(Pal.RED), Offset(malletX - 26f, malletY - 22f), Size(34f, 46f), CornerRadius(8f, 8f), alpha = alpha)
-                    drawRect(Color(Pal.CREAM), Offset(malletX - 22f, malletY - 18f), Size(8f, 38f), alpha = alpha * 0.5f)
-                }
-                if (malletT < 0.1f) {
-                    drawCircle(Color.White, 30f * (1f + malletT * 8f), Offset(malletX, malletY), alpha = (0.1f - malletT) * 4f)
-                }
-            }
-            if (stunT > 0f) {
-                PixelFont.drawCentered(this, "STUNNED!", GAME_W / 2f, 600f, 3f, Color(Pal.RED), 0.5f + 0.5f * abs(sin(time * 20f)))
-            }
-        }
-    }
-
-    private fun drawHole(scope: DrawScope, i: Int) {
-        val hx = COLS[i % 3]
-        val hy = ROWS[i / 3]
-        val m = moles[i]
-        with(scope) {
-            drawOval(Color(Pal.shade(Pal.DARKGREEN, 0.6f)), Offset(hx - HOLE_RX - 6f, hy - HOLE_RY - 4f), Size((HOLE_RX + 6f) * 2f, (HOLE_RY + 6f) * 2f))
-            drawOval(Color(Pal.BLACK), Offset(hx - HOLE_RX, hy - HOLE_RY), Size(HOLE_RX * 2f, HOLE_RY * 2f))
-            if (m.phase != Phase.HIDDEN && m.rise > 0.01f) {
-                val key = when {
-                    m.kind == Kind.BOMB -> if (m.phase == Phase.BONKED) "bomb_hit" else "bomb"
-                    m.kind == Kind.GOLD -> if (m.phase == Phase.BONKED) "gold_hit" else "gold"
-                    else -> if (m.phase == Phase.BONKED) "mole_hit" else "mole"
-                }
-                val img = sprites.getValue(key)
-                val spriteH = img.height * SPRITE_SCALE
-                val bottom = hy + spriteH * (1f - m.rise) + 6f
-                val sq = m.squash.value
-                clipRect(left = hx - 80f, top = hy - 200f, right = hx + 80f, bottom = hy + 4f) {
-                    drawPixelImageSquash(img, hx, bottom, SPRITE_SCALE, 2f - sq, sq)
-                }
-                if (m.phase == Phase.BONKED) {
-                    val headY = bottom - spriteH * sq
-                    for (k in 0 until 3) {
-                        val a = time * 8f + k * 2.1f
-                        val sx = hx + kotlin.math.cos(a) * 26f
-                        val sy = headY + 4f + sin(a) * 7f
-                        PixelFont.draw(this, "${PixelFont.STAR}", sx - 6f, sy - 7f, 2f, Color(Pal.YELLOW))
-                    }
-                }
-            }
-            // Front lip of the hole overlaps the mole's base.
-            drawOval(Color(Pal.shade(Pal.GREEN, 0.75f)), Offset(hx - HOLE_RX - 6f, hy - 1f), Size((HOLE_RX + 6f) * 2f, 14f))
-            drawOval(Color(Pal.LIME), Offset(hx - HOLE_RX, hy + 1f), Size(HOLE_RX * 2f, 3f), alpha = 0.35f)
-        }
-    }
-
-    private fun buildSprites(): Map<String, ImageBitmap> {
-        fun mole(body: Int, face: Int, bonked: Boolean, sparkle: Boolean): ImageBitmap {
-            val c = PixelCanvas(22, 24)
-            c.disc(11f, 10f, 9f, body)
-            c.fill(2, 10, 18, 14, body)
-            c.ellipse(11f, 13f, 6.5f, 5.5f, face)
-            if (bonked) {
-                for (d in 0..2) {
-                    c.set(6 + d, 7 + d, Pal.BLACK); c.set(8 - d, 7 + d, Pal.BLACK)
-                    c.set(13 + d, 7 + d, Pal.BLACK); c.set(15 - d, 7 + d, Pal.BLACK)
-                }
-                c.fill(9, 15, 4, 2, Pal.DARKRED)
-            } else {
-                c.fill(7, 8, 2, 3, Pal.BLACK); c.fill(13, 8, 2, 3, Pal.BLACK)
-                c.set(7, 8, Pal.WHITE); c.set(13, 8, Pal.WHITE)
-                c.fill(10, 15, 1, 2, Pal.WHITE); c.fill(11, 15, 1, 2, Pal.WHITE)
-            }
-            c.ellipse(11f, 12.5f, 2.4f, 1.5f, Pal.HOTPINK)
-            c.set(10, 12, Pal.WHITE)
-            c.disc(4f, 20f, 2.4f, face); c.disc(18f, 20f, 2.4f, face)
-            c.set(3, 18, Pal.WHITE); c.set(5, 18, Pal.WHITE); c.set(17, 18, Pal.WHITE); c.set(19, 18, Pal.WHITE)
-            if (sparkle) {
-                c.set(3, 3, Pal.WHITE); c.set(18, 2, Pal.WHITE); c.set(20, 12, Pal.WHITE)
-            }
-            c.outline(Pal.BLACK)
-            return c.toImageBitmap()
-        }
-
-        fun bomb(bonked: Boolean): ImageBitmap {
-            val c = PixelCanvas(22, 24)
-            c.fill(10, 0, 2, 4, Pal.TAN)
-            c.fill(8, 3, 6, 2, Pal.GRAY)
-            c.disc(11f, 13f, 9.5f, Pal.DARKGRAY)
-            c.fill(2, 13, 18, 11, Pal.DARKGRAY)
-            c.disc(8f, 9f, 2.5f, Pal.GRAY)
-            c.set(7, 8, Pal.WHITE)
-            if (bonked) {
-                c.disc(11f, 13f, 6f, Pal.ORANGE)
-                c.disc(11f, 13f, 3.5f, Pal.YELLOW)
-            } else {
-                c.hline(5, 9, 10, Pal.RED); c.hline(13, 17, 10, Pal.RED)
-                c.set(5, 9, Pal.RED); c.set(17, 9, Pal.RED)
-                c.fill(7, 11, 2, 2, Pal.RED); c.fill(14, 11, 2, 2, Pal.RED)
-                c.hline(8, 14, 17, Pal.BLACK)
-                c.set(9, 16, Pal.WHITE); c.set(13, 16, Pal.WHITE)
-            }
-            c.outline(Pal.BLACK)
-            return c.toImageBitmap()
-        }
-
-        return mapOf(
-            "mole" to mole(Pal.BROWN, Pal.TAN, bonked = false, sparkle = false),
-            "mole_hit" to mole(Pal.BROWN, Pal.TAN, bonked = true, sparkle = false),
-            "gold" to mole(Pal.GOLD, Pal.YELLOW, bonked = false, sparkle = true),
-            "gold_hit" to mole(Pal.GOLD, Pal.YELLOW, bonked = true, sparkle = true),
-            "bomb" to bomb(false),
-            "bomb_hit" to bomb(true),
+        val r = stage.begin()
+        lightScene(r)
+        r.gradient(Pal.shade(Pal.DARKGREEN, 0.25f), Pal.NIGHT)
+        tableModel.draw(r)
+        paintPanelIfNeeded()
+        r.quad(
+            PANEL_L, PANEL_TOP, TABLE_BACK + 1f, PANEL_R, PANEL_TOP, TABLE_BACK + 1f,
+            PANEL_R, PANEL_TOP - 30f, TABLE_BACK + 1f, PANEL_L, PANEL_TOP - 30f, TABLE_BACK + 1f,
+            WhackArt.panelTex.full, 0f, 0f, 1f, emissive = 1f,
         )
+        drawBulbs(r)
+        for (i in moles.indices) drawMole(r, i)
+        drawMallet(r)
+        stage.present(scope)
+        if (stunT > 0f) {
+            PixelFont.drawCentered(scope, "STUNNED!", GAME_W / 2f, 600f, 3f, Color(Pal.RED), 0.5f + 0.5f * abs(sin(time * 20f)))
+        }
+    }
+
+    private fun lightScene(r: Renderer3D) {
+        val l = r.lighting
+        l.ambR = 0.55f; l.ambG = 0.55f; l.ambB = 0.62f
+        l.setDirection(-0.3f, 1f, 0.5f)
+        l.dirR = 0.45f; l.dirG = 0.42f; l.dirB = 0.36f
+        l.points.clear()
+        l.points += topLight
+        l.points += backLight
+        var gold = -1
+        for (i in moles.indices) if (moles[i].kind == Kind.GOLD && moles[i].phase != Phase.HIDDEN) gold = i
+        if (gold >= 0) {
+            goldLight.x = worldX(gold); goldLight.z = worldZ(gold) + 30f
+            goldLight.intensity = moles[gold].rise * (0.9f + 0.3f * sin(time * 12f))
+            l.points += goldLight
+        }
+        if (stunT > 0f) {
+            boomLight.x = malletTX; boomLight.z = malletTZ
+            boomLight.intensity = stunT / WhackTuning.BOMB_STUN_SECONDS * 2f
+            l.points += boomLight
+        }
+    }
+
+    private fun paintPanelIfNeeded() {
+        val text = if (combo >= 2) "COMBO x$combo" else "BONK 'EM!"
+        if (text == panelText) return
+        panelText = text
+        WhackArt.paintPanel(text, if (combo >= 5) Pal.CYAN else if (combo >= 2) Pal.LIME else Pal.ORANGE)
+    }
+
+    private fun drawBulbs(r: Renderer3D) {
+        val white = TexKit.white.full
+        val glow = TexKit.glow.full
+        for (i in 0 until 14) {
+            val x = TABLE_L - 7f + i * (TABLE_R - TABLE_L + 14f) / 13f
+            val on = ((time * 5f).toInt() + i) % 2 == 0
+            r.sprite(x, BACK_H + 10f, TABLE_BACK + 3f, 7f, 7f, white, emissive = 1.2f, tint = if (on) Pal.YELLOW else Pal.shade(Pal.YELLOW, 0.35f))
+            if (on) r.sprite(x, BACK_H + 10f, TABLE_BACK + 4f, 26f, 26f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.5f, tint = Pal.GOLD)
+        }
+    }
+
+    private fun drawMole(r: Renderer3D, i: Int) {
+        val m = moles[i]
+        if (m.phase == Phase.HIDDEN || m.rise <= 0.01f) return
+        val bonked = m.phase == Phase.BONKED
+        val tex = WhackArt.sprites[
+            when (m.kind) {
+                Kind.NORMAL -> if (bonked) 1 else 0
+                Kind.GOLD -> if (bonked) 3 else 2
+                Kind.BOMB -> if (bonked) 5 else 4
+            },
+        ]
+        val sq = m.squash.value
+        val w = MOLE_W * (2f - sq)
+        val h = (MOLE_H + MOLE_BELOW) * sq
+        val x = worldX(i)
+        val z = worldZ(i)
+        // Below the table the mole is only visible through its hole.
+        val base = moleBase(m.rise) - MOLE_BELOW * sq
+        r.billboard(x, base, z, w, h, tex.full, lean = 0.35f, depthBias = 1f)
+        if (m.kind == Kind.GOLD && !bonked) {
+            r.sprite(x, base + h * 0.6f, z + 4f, 110f, 110f, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = 0.35f * m.rise, tint = Pal.GOLD)
+        }
+        if (bonked && m.t < 0.55f) {
+            val headY = base + h * 0.9f
+            for (k in 0 until 3) {
+                val a = time * 8f + k * 2.1f
+                r.sprite(x + cos(a) * 30f, headY + sin(a) * 6f, z + sin(a) * 14f, 16f, 16f, WhackArt.star.full, depthBias = 1.05f)
+            }
+        }
+    }
+
+    /** Lines the mallet up over the struck spot; [y] is the height the head comes down to. */
+    private fun aimMallet(x: Float, y: Float, z: Float) {
+        malletTX = x
+        malletTY = y
+        malletTZ = z
+    }
+
+    private fun drawMallet(r: Renderer3D) {
+        if (malletT >= 0.32f) return
+        // Swing down fast, rest on the target, then lift away.
+        val swing = when {
+            malletT < 0.07f -> 1f - malletT / 0.07f
+            malletT < 0.18f -> 0f
+            else -> (malletT - 0.18f) / 0.14f
+        }
+        val strike = 0.5f
+        val pitch = -strike + swing * 1.25f
+        val yaw = 0.45f
+        // Place the hand so that at the strike pose the head lands on the target.
+        localXf.set(yaw = yaw, pitch = -strike)
+        val ox = localXf.x(0f, 0f, -MALLET_LEN)
+        val oy = localXf.y(0f, 0f, -MALLET_LEN)
+        val oz = localXf.z(0f, 0f, -MALLET_LEN)
+        handXf.set(malletTX - ox, malletTY + MALLET_R - oy, malletTZ - oz, yaw = yaw, pitch = pitch)
+        // The handle runs from the hand (local origin) along -z.
+        localXf.set(0f, 0f, -MALLET_LEN)
+        partXf.setProduct(handXf, localXf)
+        malletHandle.draw(r, xf = partXf)
+        localXf.set(0f, 0f, -MALLET_LEN, roll = PI.toFloat() / 2f)
+        partXf.setProduct(handXf, localXf)
+        malletHead.draw(r, xf = partXf)
+        if (malletT < 0.1f) {
+            val a = (0.1f - malletT) * 6f
+            r.flat(malletTX, malletTZ, 1f, 90f * (1f + malletT * 6f), 90f * (1f + malletT * 6f), TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = a.coerceAtMost(0.8f))
+        }
     }
 
     // ---------------------------------------------------------------- simulation-test hooks
@@ -435,8 +536,9 @@ class WhackAMoleGame : BaseMiniGame() {
         }
     }
 
-    internal fun holeX(i: Int): Float = COLS[i % 3]
-    internal fun holeY(i: Int): Float = ROWS[i / 3]
+    /** Where hole [i] appears on screen, in field units. */
+    internal fun holeX(i: Int): Float = holeSX[i]
+    internal fun holeY(i: Int): Float = holeSY[i]
 
     // ---------------------------------------------------------------- attract mode
 

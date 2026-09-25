@@ -28,8 +28,14 @@ class Camera3D {
         private set
     var near = 8f
 
-    /** Aims the camera from the eye at a target with a vertical field of view in radians. */
-    fun lookAt(eyeX: Float, eyeY: Float, eyeZ: Float, tx: Float, ty: Float, tz: Float, fovY: Float, width: Int, height: Int) {
+    /**
+     * Aims the camera from the eye at a target with a vertical field of view in radians.
+     * [centerYFrac] shifts the lens: the target lands that far down the image instead of mid-height.
+     */
+    fun lookAt(
+        eyeX: Float, eyeY: Float, eyeZ: Float, tx: Float, ty: Float, tz: Float, fovY: Float, width: Int, height: Int,
+        centerYFrac: Float = 0.5f,
+    ) {
         ex = eyeX; ey = eyeY; ez = eyeZ
         var dx = tx - eyeX
         var dy = ty - eyeY
@@ -49,7 +55,7 @@ class Camera3D {
         uz = rx * fy - ry * fx
         focal = (height / 2f) / tan(fovY / 2f)
         cx = width / 2f
-        cy = height / 2f
+        cy = height * centerYFrac
     }
 
     fun viewX(x: Float, y: Float, z: Float) = (x - ex) * rx + (y - ey) * ry + (z - ez) * rz

@@ -1,6 +1,8 @@
 package com.pocketarcade.engine.r3d
 
 import kotlin.math.ceil
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 enum class Blend {
@@ -58,13 +60,17 @@ class Renderer3D(w: Int, h: Int) {
         polysDrawn = 0
     }
 
-    /** Fills rows [y0, y1) with a vertical gradient (skies, backdrops); leaves depth cleared. */
+    /** Fills rows [y0, y1) with a vertical gradient (skies, backdrops) and clears their depth. */
     fun gradient(top: Int, bottom: Int, y0: Int = 0, y1: Int = height) {
-        for (y in y0.coerceAtLeast(0) until y1.coerceAtMost(height)) {
+        val a = y0.coerceAtLeast(0)
+        val b = y1.coerceAtMost(height)
+        for (y in a until b) {
             val t = if (y1 - y0 <= 1) 0f else (y - y0).toFloat() / (y1 - y0 - 1)
             val c = mixArgb(top, bottom, t) or -0x1000000
             color.fill(c, y * width, y * width + width)
         }
+        if (b > a) depth.fill(0f, a * width, b * width)
+        if (a == 0 && b == height) polysDrawn = 0
     }
 
     // ------------------------------------------------------------------ polygon assembly
@@ -557,6 +563,96 @@ class Renderer3D(w: Int, h: Int) {
         vertex(brx + upx * h, y + upy * h, brz + upz * h, u1, 0f)
         vertex(brx, y, brz, u1, region.h.toFloat())
         vertex(blx, y, blz, u0, region.h.toFloat())
+        end()
+    }
+
+    /**
+     * A sprite centred on ([x], [y], [z]) that faces the camera squarely, turned by [roll]
+     * radians in the screen plane (balls, plush toys, sparks).
+     */
+    fun sprite(
+        x: Float, y: Float, z: Float, w: Float, h: Float, region: Region, roll: Float = 0f,
+        blend: Blend = Blend.OPAQUE, emissive: Float = 0f, alpha: Float = 1f, depthBias: Float = 1f,
+        tint: Int = -1, flipX: Boolean = false,
+    ) {
+        val cam = camera
+        val c = cos(roll)
+        val s = sin(roll)
+        val hw = w / 2f
+        val hh = h / 2f
+        // Screen-plane axes turned by the roll.
+        val ax = (cam.rx * c + cam.ux * s) * hw
+        val ay = (cam.ry * c + cam.uy * s) * hw
+        val az = (cam.rz * c + cam.uz * s) * hw
+        val bx = (cam.ux * c - cam.rx * s) * hh
+        val by = (cam.uy * c - cam.ry * s) * hh
+        val bz = (cam.uz * c - cam.rz * s) * hh
+        val u0 = if (flipX) region.w.toFloat() else 0f
+        val u1 = if (flipX) 0f else region.w.toFloat()
+        begin(region, blend, emissive, alpha, depthBias, cull = false)
+        normal(-cam.fx, -cam.fy, -cam.fz)
+        tint(tint)
+        vertex(x - ax + bx, y - ay + by, z - az + bz, u0, 0f)
+        vertex(x + ax + bx, y + ay + by, z + az + bz, u1, 0f)
+        vertex(x + ax - bx, y + ay - by, z + az - bz, u1, region.h.toFloat())
+        vertex(x - ax - bx, y - ay - by, z - az - bz, u0, region.h.toFloat())
+        end()
+    }
+
+    /**
+     * A ribbon [width] wide from one point to another, turned to face the camera (cables,
+     * table lines, light beams).
+     */
+    fun beam(
+        x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float, width: Float, region: Region,
+        blend: Blend = Blend.OPAQUE, emissive: Float = 0f, alpha: Float = 1f, tint: Int = -1,
+    ) {
+        val cam = camera
+        val dx = x1 - x0
+        val dy = y1 - y0
+        val dz = z1 - z0
+        val vx = (x0 + x1) / 2f - cam.ex
+        val vy = (y0 + y1) / 2f - cam.ey
+        val vz = (z0 + z1) / 2f - cam.ez
+        var sx = dy * vz - dz * vy
+        var sy = dz * vx - dx * vz
+        var sz = dx * vy - dy * vx
+        val l = sqrt(sx * sx + sy * sy + sz * sz)
+        if (l < 1e-5f) return
+        val k = width / 2f / l
+        sx *= k; sy *= k; sz *= k
+        begin(region, blend, emissive, alpha, 1f, cull = false)
+        normal(-cam.fx, -cam.fy, -cam.fz)
+        tint(tint)
+        vertex(x0 - sx, y0 - sy, z0 - sz, 0f, 0f)
+        vertex(x0 + sx, y0 + sy, z0 + sz, region.w.toFloat(), 0f)
+        vertex(x1 + sx, y1 + sy, z1 + sz, region.w.toFloat(), region.h.toFloat())
+        vertex(x1 - sx, y1 - sy, z1 - sz, 0f, region.h.toFloat())
+        end()
+    }
+
+    /**
+     * A horizontal quad [w] × [d] lying at height [y], centred on ([x], [z]) and turned by
+     * [angle] around the vertical axis (coins, pucks, spinning shadows).
+     */
+    fun flat(
+        x: Float, z: Float, y: Float, w: Float, d: Float, region: Region, angle: Float = 0f,
+        blend: Blend = Blend.OPAQUE, emissive: Float = 0f, alpha: Float = 1f, tint: Int = -1,
+        depthBias: Float = 1f,
+    ) {
+        val c = cos(angle)
+        val s = sin(angle)
+        val ax = c * w / 2f
+        val az = s * w / 2f
+        val bx = -s * d / 2f
+        val bz = c * d / 2f
+        begin(region, blend, emissive, alpha, depthBias, cull = false)
+        normal(0f, 1f, 0f)
+        tint(tint)
+        vertex(x - ax - bx, y, z - az - bz, 0f, 0f)
+        vertex(x + ax - bx, y, z + az - bz, region.w.toFloat(), 0f)
+        vertex(x + ax + bx, y, z + az + bz, region.w.toFloat(), region.h.toFloat())
+        vertex(x - ax + bx, y, z - az + bz, 0f, region.h.toFloat())
         end()
     }
 

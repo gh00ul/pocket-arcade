@@ -4,10 +4,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.drawscope.withTransform
 import com.pocketarcade.data.Catalog
 import com.pocketarcade.data.Plush
 import com.pocketarcade.engine.Body
@@ -23,9 +20,16 @@ import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.approach
 import com.pocketarcade.engine.chance
 import com.pocketarcade.engine.clamp01
-import com.pocketarcade.engine.drawPixelImage
-import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.lerp
+import com.pocketarcade.engine.r3d.Blend
+import com.pocketarcade.engine.r3d.BoxFaces
+import com.pocketarcade.engine.r3d.Model
+import com.pocketarcade.engine.r3d.ModelBuilder
+import com.pocketarcade.engine.r3d.PointLight
+import com.pocketarcade.engine.r3d.Renderer3D
+import com.pocketarcade.engine.r3d.Stage3D
+import com.pocketarcade.engine.r3d.TexKit
+import com.pocketarcade.engine.r3d.Xform
 import com.pocketarcade.engine.range
 import com.pocketarcade.games.BaseMiniGame
 import com.pocketarcade.games.CabinetLook
@@ -105,6 +109,11 @@ class ClawMachineGame : BaseMiniGame() {
         const val CABLE_IDLE = 36f
         const val CLAW_REACH = 28f
         const val PENDULUM_G = 900f
+
+        // 3D box: half its depth, how far the chute drops, where the gantry rails sit.
+        const val BOX_D = 50f
+        const val PIT_D = 70f
+        const val RAIL_Z = 22f
 
         const val LEFT_X = 22f
         const val RIGHT_X = 120f
@@ -358,8 +367,9 @@ class ClawMachineGame : BaseMiniGame() {
         }
 
         if (lucky && (state == State.IDLE || state == State.DROPPING) && rng.chance(0.35f)) {
+            screenOf(cx, cy)
             particles.spawn(
-                cx + rng.range(-16f, 16f), cy + rng.range(-6f, 30f), rng.range(-20f, 20f), rng.range(-30f, 10f),
+                pt[0] + rng.range(-16f, 16f), pt[1] + rng.range(-6f, 30f), rng.range(-20f, 20f), rng.range(-30f, 10f),
                 0.5f, 3f, if (rng.nextBoolean()) Pal.GOLD else Pal.WHITE, kind = Particles.SPARKLE,
             )
         }
@@ -385,7 +395,8 @@ class ClawMachineGame : BaseMiniGame() {
             banner("LUCKY CLAW!", Color(Pal.GOLD), 2.2f)
             play(Sfx.LUCKY)
             fx.haptics.win()
-            particles.burst(clawX, clawY + 10f, 30, 60f, 200f, intArrayOf(Pal.GOLD, Pal.YELLOW, Pal.WHITE), 0.8f, 4f, kind = Particles.SPARKLE)
+            screenOf(clawX, clawY + 10f)
+            particles.burst(pt[0], pt[1], 30, 60f, 200f, intArrayOf(Pal.GOLD, Pal.YELLOW, Pal.WHITE), 0.8f, 4f, kind = Particles.SPARKLE)
         }
     }
 
@@ -438,7 +449,8 @@ class ClawMachineGame : BaseMiniGame() {
         progress = 0f
         enter(State.LIFTING)
         fx.haptics.hit()
-        particles.burst(b.x, b.y - b.r, 8, 40f, 120f, intArrayOf(Pal.WHITE, Pal.LAVENDER), 0.4f, 3f)
+        screenOf(b.x, b.y - b.r)
+        particles.burst(pt[0], pt[1], 8, 40f, 120f, intArrayOf(Pal.WHITE, Pal.LAVENDER), 0.4f, 3f)
     }
 
     private fun slip() {
@@ -474,14 +486,17 @@ class ClawMachineGame : BaseMiniGame() {
                 wonCount++
                 botCounters[3]++
                 chuteFlash = 1f
-                addScore(p.points, CHUTE_X, LIP_TOP - 30f, Color(Pal.YELLOW))
+                screenOf(CHUTE_X, LIP_TOP)
+                val sx = pt[0]
+                val sy = pt[1]
+                addScore(p.points, sx, sy - 30f, Color(Pal.YELLOW))
                 banner(if (p.rare) "RARE PRIZE!" else "GOT IT!", Color(if (p.rare) Pal.GOLD else Pal.LIME))
-                popups.add(p.name, CHUTE_X + 60f, LIP_TOP - 60f, Color.White, size = 2f, life = 1.4f)
+                popups.add(p.name, sx + 60f, sy - 60f, Color.White, size = 2f, life = 1.4f)
                 play(if (p.rare) Sfx.JACKPOT else Sfx.PRIZE)
                 fx.haptics.win()
                 shake.add(0.35f)
-                particles.confetti(BOX_LEFT, BOX_TOP, BOX_RIGHT - BOX_LEFT, 50)
-                particles.burst(CHUTE_X, LIP_TOP + 30f, 30, 80f, 260f, intArrayOf(Pal.YELLOW, Pal.PINK, Pal.CYAN, Pal.WHITE), 0.7f, 5f, grav = 300f)
+                particles.confetti(BOX_LEFT, 40f, BOX_RIGHT - BOX_LEFT, 50)
+                particles.burst(sx, sy + 30f, 30, 80f, 260f, intArrayOf(Pal.YELLOW, Pal.PINK, Pal.CYAN, Pal.WHITE), 0.7f, 5f, grav = 300f)
                 fx.onCollectible(p.id)
             } else if (b.y > GAME_H + 40f) {
                 it.remove()
@@ -562,142 +577,201 @@ class ClawMachineGame : BaseMiniGame() {
         fx.haptics.tick()
     }
 
-    // ---------------------------------------------------------------- drawing
+    // ---------------------------------------------------------------- 3D presentation
+
+    /**
+     * The machine in 3D. The simulation is a 2D slice through the middle of the glass box
+     * (x across, y down); the world keeps x, turns y into height above the prize floor and
+     * gives each prize a little depth so the pile looks full.
+     */
+    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt(), "claw").apply {
+        look(180f, 340f, 860f, 180f, 215f, 0f, fovDeg = 46f, centerYFrac = 0.40f)
+    }
+    private val pt = FloatArray(3)
+
+    /** World height of a simulation y. */
+    private fun wy(y: Float) = FLOOR_Y - y
+
+    /** Projects a simulation point into field units (into [pt]); used for effects. */
+    private fun screenOf(x: Float, y: Float) {
+        stage.toField(x, wy(y), 0f, pt)
+    }
+
+    private fun depthOf(b: Body): Float = ((System.identityHashCode(b) ushr 3) % 7 - 3) * 5f
+
+    private val cabinet: Model by lazy {
+        val b = ModelBuilder()
+        val cab = ClawArt.cabinet.full
+        val top = wy(BOX_TOP) + 60f
+        // Inside of the box.
+        b.quad(LIP_X, 0f, -BOX_D, BOX_RIGHT, 0f, -BOX_D, BOX_RIGHT, 0f, BOX_D, LIP_X, 0f, BOX_D, ClawArt.floor.full, 0f, 1f, 0f)
+        b.quad(BOX_LEFT, top, -BOX_D, BOX_RIGHT, top, -BOX_D, BOX_RIGHT, -PIT_D, -BOX_D, BOX_LEFT, -PIT_D, -BOX_D, ClawArt.backWall.full, 0f, 0f, 1f)
+        b.quad(BOX_LEFT, top, BOX_D, BOX_LEFT, top, -BOX_D, BOX_LEFT, -PIT_D, -BOX_D, BOX_LEFT, -PIT_D, BOX_D, ClawArt.sideWall.full, 1f, 0f, 0f)
+        b.quad(BOX_RIGHT, top, -BOX_D, BOX_RIGHT, top, BOX_D, BOX_RIGHT, -PIT_D, BOX_D, BOX_RIGHT, -PIT_D, -BOX_D, ClawArt.sideWall.full, -1f, 0f, 0f)
+        // The prize chute: a dark pit behind a clear lip.
+        b.quad(BOX_LEFT, -PIT_D, -BOX_D, LIP_X, -PIT_D, -BOX_D, LIP_X, -PIT_D, BOX_D, BOX_LEFT, -PIT_D, BOX_D, ClawArt.pit.full, 0f, 1f, 0f)
+        b.quad(LIP_X, 0f, -BOX_D, LIP_X, 0f, BOX_D, LIP_X, -PIT_D, BOX_D, LIP_X, -PIT_D, -BOX_D, ClawArt.pit.full, -1f, 0f, 0f)
+        // Gantry rails the trolley runs on.
+        val metal = ClawArt.metal.full
+        for (z in floatArrayOf(-RAIL_Z, RAIL_Z)) {
+            b.box(BOX_LEFT, wy(RAIL_Y) - 3f, z - 3f, BOX_RIGHT, wy(RAIL_Y) + 3f, z + 3f, BoxFaces(front = metal, top = metal, left = metal, right = metal))
+        }
+        // Cabinet frame around the glass.
+        b.box(-20f, -200f, BOX_D, BOX_LEFT, top + 40f, BOX_D + 12f, BoxFaces(front = cab, right = cab, top = cab))
+        b.box(BOX_RIGHT, -200f, BOX_D, GAME_W + 20f, top + 40f, BOX_D + 12f, BoxFaces(front = cab, left = cab, top = cab))
+        b.box(BOX_LEFT, top, BOX_D, BOX_RIGHT, top + 40f, BOX_D + 12f, BoxFaces(front = ClawArt.marquee.full, top = cab))
+        b.box(BOX_LEFT, -200f, BOX_D, BOX_RIGHT, 0f, BOX_D + 12f, BoxFaces(front = ClawArt.base.full, top = cab))
+        b.build()
+    }
+    private val marqueeFront: Model by lazy {
+        val top = wy(BOX_TOP) + 60f
+        ModelBuilder().quad(
+            BOX_LEFT, top + 40f, BOX_D + 12.5f, BOX_RIGHT, top + 40f, BOX_D + 12.5f, BOX_RIGHT, top, BOX_D + 12.5f, BOX_LEFT, top, BOX_D + 12.5f,
+            ClawArt.marquee.full, 0f, 0f, 1f, emissive = 1f,
+        ).build()
+    }
+
+    private val trolleyModel: Model by lazy {
+        val d = ClawArt.darkMetal.full
+        ModelBuilder().box(-16f, -6f, -RAIL_Z - 6f, 16f, 10f, RAIL_Z + 6f, BoxFaces(front = d, top = ClawArt.metal.full, left = d, right = d)).build()
+    }
+    private fun hubModel(gold: Boolean): Model {
+        val side = if (gold) ClawArt.goldMetal.full else ClawArt.metal.full
+        return ModelBuilder()
+            .cylinder(0f, 0f, -8f, 8f, 13f, 10, side, top = side, bottom = side)
+            .cylinder(0f, 0f, 8f, 16f, 13f, 10, side, top = side, topRadius = 4f)
+            .build()
+    }
+    private val hubSilver by lazy { hubModel(false) }
+    private val hubGold by lazy { hubModel(true) }
+    private fun prongModel(gold: Boolean, length: Float, thick: Float): Model {
+        val t = if (gold) ClawArt.goldMetal.full else ClawArt.metal.full
+        val f = BoxFaces(front = t, back = t, left = t, right = t, top = t)
+        return ModelBuilder().box(-thick, -length, -thick, thick, 0f, thick, f).build()
+    }
+    private val prongSilver by lazy { prongModel(false, 24f, 2.5f) }
+    private val prongGold by lazy { prongModel(true, 24f, 2.5f) }
+    private val hookSilver by lazy { prongModel(false, 12f, 2f) }
+    private val hookGold by lazy { prongModel(true, 12f, 2f) }
+    private val headXf = Xform()
+    private val partXf = Xform()
+    private val localXf = Xform()
+    private val tipXf = Xform()
+
+    private val topLight = PointLight(180f, 470f, 20f, 1f, 0.85f, 0.95f, 620f, 0.9f)
+    private val frontLight = PointLight(180f, 200f, 260f, 0.9f, 0.8f, 1f, 520f, 0.6f)
+    private val chuteLight = PointLight(CHUTE_X, 60f, 20f, 1f, 0.9f, 0.3f, 220f, 0f)
+    private val luckyLight = PointLight(0f, 0f, 30f, 1f, 0.8f, 0.3f, 160f, 0f)
 
     override fun render(scope: DrawScope) {
-        with(scope) {
-            drawRect(Color(Pal.NIGHT), Offset(-40f, -40f), Size(GAME_W + 80f, GAME_H + 80f))
-            // Back wall of the glass box with a starry print.
-            drawRect(Color(Pal.PLUM), Offset(BOX_LEFT, BOX_TOP), Size(BOX_RIGHT - BOX_LEFT, FLOOR_Y - BOX_TOP))
-            drawRect(Color(Pal.INDIGO), Offset(BOX_LEFT, BOX_TOP), Size(BOX_RIGHT - BOX_LEFT, 90f), alpha = 0.6f)
-            for (i in 0 until 40) {
-                val sx = BOX_LEFT + hash01(i, 3) * (BOX_RIGHT - BOX_LEFT)
-                val sy = BOX_TOP + hash01(i, 7) * (FLOOR_Y - BOX_TOP - 60f)
-                val tw = 0.3f + 0.7f * abs(sin(time * 2f + i))
-                drawRect(Color(Pal.LAVENDER), Offset(sx, sy), Size(3f, 3f), alpha = 0.25f * tw)
-            }
-            // Neon strip along the top of the box.
-            val neon = 0.7f + 0.3f * sin(time * 6f)
-            drawRect(Color(Pal.HOTPINK), Offset(BOX_LEFT, BOX_TOP), Size(BOX_RIGHT - BOX_LEFT, 5f), alpha = neon)
-            drawRect(Color(Pal.HOTPINK), Offset(BOX_LEFT, BOX_TOP + 5f), Size(BOX_RIGHT - BOX_LEFT, 12f), alpha = 0.15f * neon)
-
-            // Prize chute.
-            drawRect(Color(Pal.BLACK), Offset(BOX_LEFT, LIP_TOP), Size(LIP_X - BOX_LEFT, FLOOR_Y - LIP_TOP + 20f))
-            val arrowBlink = state == State.CARRYING && (time * 4f).toInt() % 2 == 0
-            PixelFont.drawCentered(this, "WIN", (BOX_LEFT + LIP_X) / 2f, LIP_TOP + 20f, 3f, Color(if (arrowBlink || chuteFlash > 0f) Pal.YELLOW else Pal.DARKGRAY), shadow = false)
-            PixelFont.drawCentered(this, "${PixelFont.DOWN}", (BOX_LEFT + LIP_X) / 2f, LIP_TOP + 48f, 3f, Color(if (arrowBlink || chuteFlash > 0f) Pal.YELLOW else Pal.DARKGRAY), shadow = false)
-            if (chuteFlash > 0f) drawRect(Color(Pal.YELLOW), Offset(BOX_LEFT, LIP_TOP), Size(LIP_X - BOX_LEFT, FLOOR_Y - LIP_TOP), alpha = chuteFlash * 0.4f)
-
-            // Floor of the pile.
-            drawRect(Color(Pal.VIOLET), Offset(LIP_X, FLOOR_Y), Size(BOX_RIGHT - LIP_X, 10f))
-
-            // Rail and trolley.
-            drawRect(Color(Pal.DARKGRAY), Offset(20f, 18f), Size(320f, 12f))
-            drawRect(Color(Pal.GRAY), Offset(20f, 18f), Size(320f, 3f))
-            for (i in 0..8) drawRect(Color(Pal.BLACK), Offset(28f + i * 38f, 24f), Size(3f, 3f))
-
-            // Prizes (held prize is drawn with the claw so it stays in front of the prongs' back).
-            for (b in world.bodies) {
-                if (b === held) continue
-                drawPlush(this, b)
-            }
-            drawClaw(this)
-            held?.let { drawPlush(this, it) }
-            drawClawFront(this)
-
-            // Plexiglass lip over the chute and glass reflections.
-            drawRect(Color(Pal.LIGHTGRAY), Offset(LIP_X - 5f, LIP_TOP), Size(7f, FLOOR_Y - LIP_TOP), alpha = 0.45f)
-            drawRect(Color.White, Offset(LIP_X - 4f, LIP_TOP), Size(2f, FLOOR_Y - LIP_TOP), alpha = 0.6f)
-            for (k in 0 until 3) {
-                val gx = 70f + k * 110f
-                drawLine(Color.White, Offset(gx, BOX_TOP), Offset(gx + 90f, FLOOR_Y), strokeWidth = 14f - k * 4f, alpha = 0.05f)
-            }
-            // Glass frame.
-            val frame = Color(Pal.PINK)
-            drawRect(frame, Offset(0f, 34f), Size(BOX_LEFT, FLOOR_Y + 20f - 34f))
-            drawRect(frame, Offset(BOX_RIGHT, 34f), Size(GAME_W - BOX_RIGHT, FLOOR_Y + 20f - 34f))
-            drawRect(frame, Offset(0f, FLOOR_Y + 10f), Size(GAME_W, 12f))
-            drawRect(Color(Pal.HOTPINK), Offset(0f, FLOOR_Y + 10f), Size(GAME_W, 3f))
-
-            if (bannerT > 0f) {
-                val a = clamp01(bannerT / 0.3f)
-                val pulse = 1f + 0.08f * sin(time * 12f)
-                PixelFont.drawCentered(this, bannerText, GAME_W / 2f + 30f, 110f, 4f * pulse, bannerColor, a)
-            } else if (lucky && state == State.IDLE) {
-                PixelFont.drawCentered(this, "${PixelFont.STAR} LUCKY CLAW ${PixelFont.STAR}", GAME_W / 2f + 30f, 110f, 3f, Color(Pal.GOLD), 0.6f + 0.4f * abs(sin(time * 5f)))
-            }
-
-            drawControls(this)
+        val r = stage.begin()
+        val l = r.lighting
+        l.ambR = 0.55f; l.ambG = 0.5f; l.ambB = 0.62f
+        l.setDirection(0.1f, 1f, 0.7f)
+        l.dirR = 0.35f; l.dirG = 0.32f; l.dirB = 0.35f
+        l.points.clear()
+        l.points += topLight
+        l.points += frontLight
+        chuteLight.intensity = chuteFlash * 2f + (if (state == State.CARRYING) 0.4f else 0f)
+        if (chuteLight.intensity > 0f) l.points += chuteLight
+        if (lucky) {
+            luckyLight.x = clawX; luckyLight.y = wy(clawY)
+            luckyLight.intensity = 0.8f + 0.3f * sin(time * 8f)
+            l.points += luckyLight
         }
-    }
+        r.gradient(0xFF07030E.toInt(), Pal.shade(Pal.PLUM, 0.5f))
+        cabinet.draw(r)
+        marqueeFront.draw(r)
 
-    private fun drawPlush(scope: DrawScope, b: Body) {
-        val p = b.data as? Plush ?: return
-        val img = PlushArt.image(p)
-        val size = b.r * 2.3f
-        val scale = size / PlushArt.SIZE
-        val deg = b.angle * 180f / PI.toFloat()
-        scope.rotate(deg, Offset(b.x, b.y)) {
-            drawPixelImage(img, b.x - size / 2f, b.y - size / 2f, scale)
+        for (b in world.bodies) {
+            val p = b.data as? Plush ?: continue
+            val z = if (b === held) 0f else depthOf(b)
+            val size = b.r * 2.3f
+            r.sprite(b.x, wy(b.y), z, size, size, PlushArt.texture(p).full, roll = -b.angle)
         }
-    }
+        drawClaw(r)
+        drawBulbs(r)
 
-    private fun clawColors(): Pair<Color, Color> =
-        if (lucky) Color(Pal.GOLD) to Color(Pal.ORANGE) else Color(Pal.LIGHTGRAY) to Color(Pal.GRAY)
-
-    private fun drawClaw(scope: DrawScope) {
-        val cx = clawX
-        val cy = clawY
-        val (metal, dark) = clawColors()
-        scope.drawLine(Color(Pal.LIGHTGRAY), Offset(trolleyX, RAIL_Y + 4f), Offset(cx, cy - 6f), strokeWidth = 2.5f)
-        scope.drawRect(Color(Pal.GRAY), Offset(trolleyX - 16f, 14f), Size(32f, 18f))
-        scope.drawRect(Color(Pal.LIGHTGRAY), Offset(trolleyX - 16f, 14f), Size(32f, 4f))
-        scope.drawRect(Color(if (state == State.IDLE) Pal.LIME else Pal.RED), Offset(trolleyX - 3f, 22f), Size(6f, 5f))
-        val deg = -theta * 180f / PI.toFloat()
-        scope.withTransform({ rotate(deg, Offset(cx, cy)) }) {
-            // Back prong.
-            prong(this, cx, cy, 0f, dark, back = true)
+        // Transparent layer: the chute's clear lip, glow, the front glass.
+        val lip = ClawArt.lipGlass.full
+        r.quad(LIP_X, wy(LIP_TOP), BOX_D, LIP_X, wy(LIP_TOP), -BOX_D, LIP_X, 0f, -BOX_D, LIP_X, 0f, BOX_D, lip, 1f, 0f, 0f, blend = Blend.ALPHA, cull = false)
+        r.quad(BOX_LEFT, wy(LIP_TOP), BOX_D - 1f, LIP_X, wy(LIP_TOP), BOX_D - 1f, LIP_X, 0f, BOX_D - 1f, BOX_LEFT, 0f, BOX_D - 1f, lip, 0f, 0f, 1f, blend = Blend.ALPHA, cull = false)
+        val blink = state == State.CARRYING && (time * 4f).toInt() % 2 == 0
+        val signGlow = if (blink || chuteFlash > 0f) 1.3f else 0.5f
+        r.quad(
+            (BOX_LEFT + LIP_X) / 2f - 22f, wy(LIP_TOP) - 14f, BOX_D - 0.5f, (BOX_LEFT + LIP_X) / 2f + 22f, wy(LIP_TOP) - 14f, BOX_D - 0.5f,
+            (BOX_LEFT + LIP_X) / 2f + 22f, wy(LIP_TOP) - 34f, BOX_D - 0.5f, (BOX_LEFT + LIP_X) / 2f - 22f, wy(LIP_TOP) - 34f, BOX_D - 0.5f,
+            ClawArt.winSign.full, 0f, 0f, 1f, emissive = signGlow,
+        )
+        val glow = TexKit.glow.full
+        if (chuteFlash > 0f) {
+            r.sprite(CHUTE_X, 40f, 20f, 160f, 160f, glow, blend = Blend.ADD, emissive = 1f, alpha = chuteFlash, tint = Pal.YELLOW)
         }
         if (lucky) {
-            scope.drawCircle(Color(Pal.GOLD), 34f, Offset(cx, cy + 12f), alpha = 0.18f + 0.1f * sin(time * 8f))
+            r.sprite(clawX, wy(clawY) - 12f, 10f, 90f, 90f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.3f + 0.12f * sin(time * 8f), tint = Pal.GOLD)
         }
-        scope.withTransform({ rotate(deg, Offset(cx, cy)) }) {
-            drawRoundRect(metal, Offset(cx - 15f, cy - 9f), Size(30f, 16f), CornerRadius(5f, 5f))
-            drawRect(dark, Offset(cx - 15f, cy + 3f), Size(30f, 4f))
-            drawRect(Color.White, Offset(cx - 11f, cy - 7f), Size(10f, 3f), alpha = 0.7f)
+        // Neon tube along the top of the box.
+        val neonA = 0.7f + 0.3f * sin(time * 6f)
+        r.quad(BOX_LEFT, wy(BOX_TOP) + 58f, BOX_D - 2f, BOX_RIGHT, wy(BOX_TOP) + 58f, BOX_D - 2f, BOX_RIGHT, wy(BOX_TOP) + 52f, BOX_D - 2f, BOX_LEFT, wy(BOX_TOP) + 52f, BOX_D - 2f, ClawArt.neon.full, 0f, 0f, 1f, emissive = 1.3f * neonA)
+        r.quad(BOX_LEFT, wy(BOX_TOP) + 70f, BOX_D - 1f, BOX_RIGHT, wy(BOX_TOP) + 70f, BOX_D - 1f, BOX_RIGHT, wy(BOX_TOP) + 30f, BOX_D - 1f, BOX_LEFT, wy(BOX_TOP) + 30f, BOX_D - 1f, glow, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1f, alpha = 0.25f * neonA, tint = Pal.HOTPINK)
+        r.quad(BOX_LEFT, wy(BOX_TOP) + 60f, BOX_D, BOX_RIGHT, wy(BOX_TOP) + 60f, BOX_D, BOX_RIGHT, 0f, BOX_D, BOX_LEFT, 0f, BOX_D, ClawArt.glass.full, 0f, 0f, 1f, blend = Blend.ALPHA)
+        r.quad(BOX_LEFT, wy(BOX_TOP) + 60f, BOX_D + 0.5f, BOX_RIGHT, wy(BOX_TOP) + 60f, BOX_D + 0.5f, BOX_RIGHT, 0f, BOX_D + 0.5f, BOX_LEFT, 0f, BOX_D + 0.5f, ClawArt.glare.full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1f, alpha = 0.3f)
+        stage.present(scope)
+
+        if (bannerT > 0f) {
+            val a = clamp01(bannerT / 0.3f)
+            val pulse = 1f + 0.08f * sin(time * 12f)
+            PixelFont.drawCentered(scope, bannerText, GAME_W / 2f + 30f, 110f, 4f * pulse, bannerColor, a)
+        } else if (lucky && state == State.IDLE) {
+            PixelFont.drawCentered(scope, "${PixelFont.STAR} LUCKY CLAW ${PixelFont.STAR}", GAME_W / 2f + 30f, 110f, 3f, Color(Pal.GOLD), 0.6f + 0.4f * abs(sin(time * 5f)))
         }
+        drawControls(scope)
     }
 
-    private fun drawClawFront(scope: DrawScope) {
+    private fun drawClaw(r: Renderer3D) {
         val cx = clawX
-        val cy = clawY
-        val (metal, _) = clawColors()
-        val deg = -theta * 180f / PI.toFloat()
-        scope.withTransform({ rotate(deg, Offset(cx, cy)) }) {
-            prong(this, cx, cy, -1f, metal, back = false)
-            prong(this, cx, cy, 1f, metal, back = false)
+        val cy = wy(clawY)
+        val railY = wy(RAIL_Y)
+        partXf.set(trolleyX, railY, 0f)
+        trolleyModel.draw(r, xf = partXf)
+        r.sprite(trolleyX, railY + 2f, RAIL_Z + 7f, 6f, 5f, TexKit.white.full, emissive = 1.2f, tint = if (state == State.IDLE) Pal.LIME else Pal.RED)
+        r.beam(trolleyX, railY - 4f, 0f, cx, cy + 14f, 0f, 2.5f, ClawArt.metal.full)
+        // The head swings with the pendulum; each prong hinges outward by the claw's openness.
+        headXf.set(cx, cy, 0f, roll = theta)
+        (if (lucky) hubGold else hubSilver).draw(r, xf = headXf)
+        val spread = (-6f + openness * 46f) * (PI.toFloat() / 180f)
+        val prong = if (lucky) prongGold else prongSilver
+        for (k in 0 until 3) {
+            val yaw = PI.toFloat() / 2f + k * (2f * PI.toFloat() / 3f)
+            localXf.set(cos(yaw) * 10f, -6f, -sin(yaw) * 10f, yaw = yaw, roll = spread)
+            partXf.setProduct(headXf, localXf)
+            prong.draw(r, xf = partXf)
+            // The hooked tip bends back inwards.
+            tipXf.set(0f, -24f, 0f, roll = -0.95f)
+            localXf.setProduct(partXf, tipXf)
+            (if (lucky) hookGold else hookSilver).draw(r, xf = localXf)
         }
     }
 
-    private fun prong(scope: DrawScope, cx: Float, cy: Float, side: Float, color: Color, back: Boolean) {
-        val spread = (-6f + openness * 46f) * (PI.toFloat() / 180f)
-        val baseX = cx + side * 10f
-        val baseY = cy + 6f
-        val len = if (back) 20f else 22f
-        val ang = if (back) 0f else spread * side
-        val midX = baseX + sin(ang) * len
-        val midY = baseY + cos(ang) * len
-        val hookAng = ang - side * 0.9f
-        val tipX = midX + sin(hookAng) * 10f
-        val tipY = midY + cos(hookAng) * 10f
-        scope.drawLine(color, Offset(baseX, baseY), Offset(midX, midY), strokeWidth = 5f, cap = StrokeCap.Round)
-        scope.drawLine(color, Offset(midX, midY), Offset(tipX, tipY), strokeWidth = 5f, cap = StrokeCap.Round)
+    private fun drawBulbs(r: Renderer3D) {
+        val white = TexKit.white.full
+        val glow = TexKit.glow.full
+        val top = wy(BOX_TOP) + 60f
+        for (s in 0..1) {
+            val x = if (s == 0) (BOX_LEFT - 20f) / 2f else (BOX_RIGHT + GAME_W + 20f) / 2f
+            for (i in 0 until 12) {
+                val y = top + 20f - i * (top + 150f) / 11f
+                val on = ((time * 5f).toInt() + i) % 3 == 0
+                r.sprite(x, y, BOX_D + 13f, 7f, 7f, white, emissive = 1.2f, tint = if (on) Pal.YELLOW else Pal.shade(Pal.GOLD, 0.45f))
+                if (on) r.sprite(x, y, BOX_D + 14f, 26f, 26f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.5f, tint = Pal.GOLD)
+            }
+        }
     }
 
     private fun drawControls(scope: DrawScope) {
         with(scope) {
-            drawRect(Color(Pal.shade(Pal.PINK, 0.55f)), Offset(0f, 492f), Size(GAME_W, GAME_H - 492f + 40f))
-            drawRect(Color(Pal.shade(Pal.PINK, 0.8f)), Offset(0f, 492f), Size(GAME_W, 6f))
+            drawRect(Color.Black, Offset(0f, 492f), Size(GAME_W, GAME_H - 492f + 40f), alpha = 0.3f)
+            drawRect(Color(Pal.HOTPINK), Offset(0f, 492f), Size(GAME_W, 3f), alpha = 0.8f)
             val enabled = state == State.IDLE && !timeUp
             arcadeButton(this, LEFT_X, BTN_Y, leftPointer >= 0, enabled, "${PixelFont.LEFT}")
             arcadeButton(this, RIGHT_X, BTN_Y, rightPointer >= 0, enabled, "${PixelFont.RIGHT}")

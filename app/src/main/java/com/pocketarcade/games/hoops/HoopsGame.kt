@@ -1,18 +1,10 @@
 package com.pocketarcade.games.hoops
 
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.rotate
 import com.pocketarcade.engine.FlickTracker
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
-import com.pocketarcade.engine.PixelCanvas
 import com.pocketarcade.engine.PixelFont
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Sfx
@@ -22,9 +14,16 @@ import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.Vec2
 import com.pocketarcade.engine.clamp01
 import com.pocketarcade.engine.damp
-import com.pocketarcade.engine.drawPixelImage
-import com.pocketarcade.engine.drawPixelImageSquash
 import com.pocketarcade.engine.lerp
+import com.pocketarcade.engine.r3d.Blend
+import com.pocketarcade.engine.r3d.BoxFaces
+import com.pocketarcade.engine.r3d.Model
+import com.pocketarcade.engine.r3d.ModelBuilder
+import com.pocketarcade.engine.r3d.PointLight
+import com.pocketarcade.engine.r3d.Renderer3D
+import com.pocketarcade.engine.r3d.Stage3D
+import com.pocketarcade.engine.r3d.TexKit
+import com.pocketarcade.engine.r3d.Xform
 import com.pocketarcade.engine.range
 import com.pocketarcade.games.BaseMiniGame
 import com.pocketarcade.games.CabinetLook
@@ -32,6 +31,7 @@ import com.pocketarcade.games.CabinetShape
 import com.pocketarcade.games.GAME_H
 import com.pocketarcade.games.GAME_W
 import kotlin.math.abs
+import kotlin.math.atan
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -94,6 +94,8 @@ class HoopsGame : BaseMiniGame() {
         const val START_Z = 0.2f
         const val CAGE_HALF_W = 1.0f
         const val BACK_Z = 3.2f
+        /** World units (centimetres) per simulation metre. */
+        const val S = 100f
     }
 
     private class Ball {
@@ -130,8 +132,6 @@ class HoopsGame : BaseMiniGame() {
     private val multSpring = Spring(stiffness = 300f, damping = 10f)
     private var makes = 0
     private var shots = 0
-
-    private val ballImg: ImageBitmap by lazy { buildBall() }
 
     private val idealPower: Float by lazy {
         val th = HoopsTuning.LAUNCH_ANGLE_DEG * (Math.PI.toFloat() / 180f)
@@ -423,180 +423,169 @@ class HoopsGame : BaseMiniGame() {
         particles.burst(rx, ry + 20f, 16, 60f, 200f, intArrayOf(Pal.WHITE, Pal.YELLOW), 0.5f, 4f, kind = Particles.SPARKLE)
     }
 
-    // ---------------------------------------------------------------- drawing
+    // ---------------------------------------------------------------- 3D presentation
+
+    /**
+     * The alley in 3D. The simulation is already 3D (metres, z away from the player); the
+     * world uses centimetres with z towards the viewer, and the camera matches the
+     * simulation's own projection exactly, so [sx]/[sy] still place effects on screen.
+     */
+    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt(), "hoops").apply {
+        val fov = 2f * atan(GAME_H / 2f / F) * (180f / Math.PI.toFloat())
+        look(0f, CAM_Y * S, -CAM_Z * S, 0f, CAM_Y * S, -CAM_Z * S - 1000f, fovDeg = fov, centerYFrac = HORIZON / GAME_H)
+    }
+
+    private val court: Model by lazy {
+        val b = ModelBuilder()
+        val w = CAGE_HALF_W * S
+        val back = -BACK_Z * S
+        b.quad(-w, 0f, back, w, 0f, back, w, 0f, 60f, -w, 0f, 60f, HoopsArt.floor.full, 0f, 1f, 0f)
+        b.quad(-w - 60f, 420f, back, w + 60f, 420f, back, w + 60f, 0f, back, -w - 60f, 0f, back, HoopsArt.backWall.full, 0f, 0f, 1f)
+        // Outside the cage: dark carpet and cabinet sides.
+        val side = HoopsArt.cabinet.full
+        b.box(-w - 60f, 0f, back, -w - 4f, 60f, 60f, BoxFaces(top = side, right = side))
+        b.box(w + 4f, 0f, back, w + 60f, 60f, 60f, BoxFaces(top = side, left = side))
+        // Cage posts.
+        val post = HoopsArt.post.full
+        for (sx in floatArrayOf(-w, w)) for (z in floatArrayOf(back + 4f, -100f)) {
+            b.box(sx - 3f, 0f, z - 3f, sx + 3f, 420f, z + 3f, BoxFaces(front = post, left = post, right = post, top = post))
+        }
+        b.box(-w, 414f, -104f, w, 420f, -96f, BoxFaces(front = post, top = post))
+        b.build()
+    }
+
+    /** Backboard, bracket and pole, centred on the hoop (moved each frame). */
+    private val board: Model by lazy {
+        val b = ModelBuilder()
+        val hw = BOARD_HALF_W * S
+        val bz = -BOARD_Z * S
+        val top = BOARD_TOP * S
+        val bottom = BOARD_BOTTOM * S
+        val edge = HoopsArt.boardEdge.full
+        b.quad(-hw, top, bz, hw, top, bz, hw, bottom, bz, -hw, bottom, bz, HoopsArt.board.full, 0f, 0f, 1f)
+        b.box(-hw, bottom, bz - 5f, hw, top, bz, BoxFaces(top = edge, left = edge, right = edge))
+        val pole = HoopsArt.post.full
+        b.box(-6f, 0f, bz - 30f, 6f, top - 20f, bz - 18f, BoxFaces(front = pole, left = pole, right = pole))
+        b.box(-6f, top - 40f, bz - 30f, 6f, top - 28f, bz - 5f, BoxFaces(front = pole, top = pole, left = pole, right = pole))
+        // Bracket from the board to the rim.
+        val rimY = RIM_Y * S
+        b.box(-4f, rimY - 6f, -(HOOP_Z + RIM_R) * S, 4f, rimY, bz, BoxFaces(top = pole, left = pole, right = pole))
+        b.build()
+    }
+
+    private val rim: Model by lazy {
+        val b = ModelBuilder()
+        val r = RIM_R * S
+        val t = HoopsArt.rim.full
+        b.cylinder(0f, 0f, -1.6f, 1.6f, r + 1.2f, 18, t)
+        b.cylinder(0f, 0f, -1.6f, 1.6f, r - 1.2f, 18, t, inward = true)
+        b.annulus(0f, 0f, 1.6f, r - 1.2f, r + 1.2f, 18, t)
+        b.build()
+    }
+
+    private val boardXf = Xform()
+    private val rimXf = Xform()
+    private val gymLight = PointLight(0f, 380f, -200f, 1f, 0.95f, 0.85f, 520f, 1f)
+    private val fireLight = PointLight(0f, RIM_Y * S, -HOOP_Z * S, 1f, 0.5f, 0.15f, 220f, 0f)
 
     override fun render(scope: DrawScope) {
-        with(scope) {
-            drawRect(Color(Pal.NIGHT), Offset(-40f, -40f), Size(GAME_W + 80f, GAME_H + 80f))
-            drawCage(this)
-            drawBoard(this)
-            for (b in balls) if (b.active && b.z >= HOOP_Z + 0.25f) drawBall(this, b.x, b.y, b.z, b.spin)
-            drawRim(this, back = true)
-            for (b in balls) if (b.active && b.z < HOOP_Z + 0.25f && b.z >= HOOP_Z - 0.25f) drawBall(this, b.x, b.y, b.z, b.spin)
-            drawNet(this)
-            drawRim(this, back = false)
-            for (b in balls) if (b.active && b.z < HOOP_Z - 0.25f) drawBall(this, b.x, b.y, b.z, b.spin)
+        val r = stage.begin()
+        val l = r.lighting
+        l.ambR = 0.55f; l.ambG = 0.52f; l.ambB = 0.62f
+        l.setDirection(0f, 1f, 0.6f)
+        l.dirR = 0.35f; l.dirG = 0.33f; l.dirB = 0.3f
+        l.points.clear()
+        l.points += gymLight
+        if (streak >= HoopsTuning.MAX_MULTIPLIER) {
+            fireLight.x = hoopX * S
+            fireLight.intensity = 1.2f + 0.4f * sin(time * 14f)
+            l.points += fireLight
+        }
+        r.gradient(0xFF06030C.toInt(), Pal.NIGHT)
+        court.draw(r)
+        boardXf.set(hoopX * S, 0f, 0f)
+        board.draw(r, xf = boardXf)
+        val wob = sin(time * 60f) * rimShake * 1.5f
+        rimXf.set(hoopX * S, RIM_Y * S + wob, -HOOP_Z * S)
+        rim.draw(r, xf = rimXf)
+        drawBackLights(r)
+        for (b in balls) if (b.active) drawBall(r, b.x, b.y, b.z, b.spin, 1f, 1f)
+        if (hasReady) {
+            val s = readySquash.value
+            drawBall(r, readyX, START_Y, START_Z, 0f, 2f - s, s)
+        }
+        drawNet(r, wob)
+        drawSideNets(r)
+        stage.present(scope)
 
-            if (hasReady) {
-                val s = readySquash.value
-                val x = sx(readyX, START_Z)
-                val y = sy(START_Y, START_Z)
-                val r = sr(BALL_R, START_Z)
-                drawOval(Color.Black, Offset(x - r, y + r * 0.7f), Size(r * 2f, r * 0.6f), alpha = 0.35f)
-                drawPixelImageSquash(ballImg, x, y + r, r * 2f / ballImg.width, 2f - s, s)
-                if (dragging < 0 && !timeUp) {
-                    PixelFont.drawCentered(this, "FLICK ${PixelFont.UP}", CX, 610f, 2f, Color.White, 0.5f + 0.5f * sin(time * 6f))
-                }
-            }
-            // Multiplier display.
-            val m = multiplier
-            val label = if (streak >= 1) "x$m" else "x1"
-            val c = when {
-                streak >= HoopsTuning.MAX_MULTIPLIER -> Pal.ORANGE
-                streak >= 2 -> Pal.PINK
-                else -> Pal.GRAY
-            }
-            PixelFont.drawCentered(this, label, 318f, 26f, 4f * multSpring.value, Color(c))
-            PixelFont.drawCentered(this, "MULT", 318f, 62f, 2f, Color(Pal.LIGHTGRAY))
-            PixelFont.drawCentered(this, "$makes/$shots", 42f, 34f, 2f, Color(Pal.LIGHTGRAY))
+        if (hasReady && dragging < 0 && !timeUp) {
+            PixelFont.drawCentered(scope, "FLICK ${PixelFont.UP}", CX, 610f, 2f, Color.White, 0.5f + 0.5f * sin(time * 6f))
+        }
+        // Multiplier display.
+        val m = multiplier
+        val label = if (streak >= 1) "x$m" else "x1"
+        val c = when {
+            streak >= HoopsTuning.MAX_MULTIPLIER -> Pal.ORANGE
+            streak >= 2 -> Pal.PINK
+            else -> Pal.GRAY
+        }
+        PixelFont.drawCentered(scope, label, 318f, 26f, 4f * multSpring.value, Color(c))
+        PixelFont.drawCentered(scope, "MULT", 318f, 62f, 2f, Color(Pal.LIGHTGRAY))
+        PixelFont.drawCentered(scope, "$makes/$shots", 42f, 34f, 2f, Color(Pal.LIGHTGRAY))
+    }
+
+    private fun drawBackLights(r: Renderer3D) {
+        val white = TexKit.white.full
+        val glow = TexKit.glow.full
+        val z = -BACK_Z * S + 1f
+        for (i in 0 until 10) {
+            val on = ((time * 6f).toInt() + i) % 3 != 0
+            val x = (-0.9f + i * 0.2f) * S
+            r.sprite(x, 370f, z, 8f, 8f, white, emissive = 1.2f, tint = if (on) Pal.RED else Pal.DARKRED)
+            if (on) r.sprite(x, 370f, z + 1f, 30f, 30f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.45f, tint = Pal.RED)
         }
     }
 
-    private fun drawCage(scope: DrawScope) {
-        with(scope) {
-            val zNear = 0f
-            val zFar = BACK_Z
-            // Floor ramp.
-            val floor = Path().apply {
-                moveTo(sx(-CAGE_HALF_W, zNear), sy(0f, zNear))
-                lineTo(sx(CAGE_HALF_W, zNear), sy(0f, zNear))
-                lineTo(sx(CAGE_HALF_W, zFar), sy(0f, zFar))
-                lineTo(sx(-CAGE_HALF_W, zFar), sy(0f, zFar))
-                close()
-            }
-            drawPath(floor, Color(Pal.WOOD))
-            for (i in 1 until 10) {
-                val z = zFar * i / 10f
-                drawLine(Color(Pal.shade(Pal.WOOD, 0.8f)), Offset(sx(-CAGE_HALF_W, z), sy(0f, z)), Offset(sx(CAGE_HALF_W, z), sy(0f, z)), strokeWidth = 2f)
-            }
-            // Back wall.
-            drawRect(Color(Pal.PLUM), Offset(sx(-CAGE_HALF_W, zFar), sy(4f, zFar)), Size(sx(CAGE_HALF_W, zFar) - sx(-CAGE_HALF_W, zFar), sy(0f, zFar) - sy(4f, zFar)))
-            // Side nets as a grid of lines.
-            for (k in 0..1) {
-                val x = (if (k == 0) -1f else 1f) * CAGE_HALF_W
-                for (i in 0..8) {
-                    val z = zFar * i / 8f
-                    drawLine(Color(Pal.LAVENDER), Offset(sx(x, z), sy(0f, z)), Offset(sx(x, z), sy(4f, z)), strokeWidth = 1.5f, alpha = 0.35f)
-                }
-                for (j in 0..10) {
-                    val y = j * 0.4f
-                    drawLine(Color(Pal.LAVENDER), Offset(sx(x, zNear + 0.3f), sy(y, zNear + 0.3f)), Offset(sx(x, zFar), sy(y, zFar)), strokeWidth = 1.5f, alpha = 0.35f)
-                }
-            }
-            // Scoreboard lights on the back wall.
-            for (i in 0 until 10) {
-                val on = ((time * 6f).toInt() + i) % 3 != 0
-                val x = sx(-0.9f + i * 0.2f, zFar)
-                drawCircle(Color(if (on) Pal.RED else Pal.DARKRED), 4f, Offset(x, sy(3.7f, zFar)))
-            }
-        }
-    }
-
-    private fun drawBoard(scope: DrawScope) {
-        with(scope) {
-            val l = sx(hoopX - BOARD_HALF_W, BOARD_Z)
-            val r = sx(hoopX + BOARD_HALF_W, BOARD_Z)
-            val t = sy(BOARD_TOP, BOARD_Z)
-            val b = sy(BOARD_BOTTOM, BOARD_Z)
-            // Pole behind.
-            drawRect(Color(Pal.GRAY), Offset(sx(hoopX, BOARD_Z) - 5f, b), Size(10f, sy(0f, BACK_Z) - b))
-            drawRect(Color.White, Offset(l, t), Size(r - l, b - t))
-            drawRect(Color(Pal.RED), Offset(l, t), Size(r - l, 5f))
-            drawRect(Color(Pal.RED), Offset(l, b - 5f), Size(r - l, 5f))
-            drawRect(Color(Pal.RED), Offset(l, t), Size(5f, b - t))
-            drawRect(Color(Pal.RED), Offset(r - 5f, t), Size(5f, b - t))
-            val il = sx(hoopX - 0.2f, BOARD_Z)
-            val ir = sx(hoopX + 0.2f, BOARD_Z)
-            val innerTop = sy(2.62f, BOARD_Z)
-            val innerBottom = sy(RIM_Y, BOARD_Z)
-            drawRect(Color(Pal.RED), Offset(il, innerTop), Size(ir - il, 3f))
-            drawRect(Color(Pal.RED), Offset(il, innerTop), Size(3f, innerBottom - innerTop))
-            drawRect(Color(Pal.RED), Offset(ir - 3f, innerTop), Size(3f, innerBottom - innerTop))
-            // Bracket from board to rim.
-            drawRect(Color(Pal.GRAY), Offset(sx(hoopX, BOARD_Z) - 4f, sy(RIM_Y, BOARD_Z) - 2f), Size(8f, sy(RIM_Y, HOOP_Z + RIM_R) - sy(RIM_Y, BOARD_Z) + 4f))
-        }
-    }
-
-    private fun drawRim(scope: DrawScope, back: Boolean) {
-        val n = 28
-        val wob = sin(time * 60f) * rimShake * 2f
-        for (i in 0 until n) {
-            val a0 = i / n.toFloat() * TAU
-            val a1 = (i + 1) / n.toFloat() * TAU
-            val z0 = HOOP_Z + sin(a0) * RIM_R
-            val z1 = HOOP_Z + sin(a1) * RIM_R
-            val isBack = (z0 + z1) / 2f >= HOOP_Z
-            if (isBack != back) continue
-            val x0 = hoopX + cos(a0) * RIM_R
-            val x1 = hoopX + cos(a1) * RIM_R
-            scope.drawLine(
-                Color(if (back) Pal.shade(Pal.ORANGE, 0.75f) else Pal.ORANGE),
-                Offset(sx(x0, z0), sy(RIM_Y, z0) + wob),
-                Offset(sx(x1, z1), sy(RIM_Y, z1) + wob),
-                strokeWidth = if (back) 4f else 5f,
-                cap = StrokeCap.Round,
-            )
-        }
-    }
-
-    private fun drawNet(scope: DrawScope) {
-        val n = 10
-        val drop = 0.36f + netSwish * 0.1f
-        val bottomR = RIM_R * (0.6f - netSwish * 0.15f)
-        val sway = sin(time * 20f) * netSwish * 0.03f
+    private fun drawNet(r: Renderer3D, wob: Float) {
+        val tex = TexKit.white.full
+        val n = 12
+        val rimR = RIM_R * S
+        val drop = (0.36f + netSwish * 0.1f) * S
+        val bottomR = rimR * (0.6f - netSwish * 0.15f)
+        val sway = sin(time * 20f) * netSwish * 3f
+        val cx = hoopX * S
+        val cz = -HOOP_Z * S
+        val top = RIM_Y * S + wob - 1f
         for (i in 0 until n) {
             val a = i / n.toFloat() * TAU
-            val topX = hoopX + cos(a) * RIM_R
-            val topZ = HOOP_Z + sin(a) * RIM_R
-            val a2 = a + 0.35f
-            val botX = hoopX + cos(a2) * bottomR + sway
-            val botZ = HOOP_Z + sin(a2) * bottomR
-            val a3 = a - 0.35f
-            val botX2 = hoopX + cos(a3) * bottomR + sway
-            val botZ2 = HOOP_Z + sin(a3) * bottomR
-            val alpha = if (topZ < HOOP_Z) 0.95f else 0.5f
-            scope.drawLine(Color.White, Offset(sx(topX, topZ), sy(RIM_Y, topZ)), Offset(sx(botX, botZ), sy(RIM_Y - drop, botZ)), strokeWidth = 2f, alpha = alpha)
-            scope.drawLine(Color.White, Offset(sx(topX, topZ), sy(RIM_Y, topZ)), Offset(sx(botX2, botZ2), sy(RIM_Y - drop, botZ2)), strokeWidth = 2f, alpha = alpha)
+            val tx = cx + cos(a) * rimR
+            val tz = cz + sin(a) * rimR
+            for (d in intArrayOf(-1, 1)) {
+                val a2 = a + d * 0.3f
+                val bx = cx + cos(a2) * bottomR + sway
+                val bz = cz + sin(a2) * bottomR
+                r.beam(tx, top, tz, bx, top - drop, bz, 1.4f, tex, blend = Blend.ALPHA, alpha = 0.85f)
+            }
         }
     }
 
-    private fun drawBall(scope: DrawScope, x: Float, y: Float, z: Float, spin: Float) {
-        val px = sx(x, z)
-        val py = sy(y, z)
-        val r = sr(BALL_R, z)
-        // Shadow on the floor.
-        val fy = sy(0f, z)
-        val fr = r * (1f / (1f + y * 0.3f))
-        scope.drawOval(Color.Black, Offset(px - fr, fy - fr * 0.3f), Size(fr * 2f, fr * 0.6f), alpha = 0.3f)
-        scope.rotate(spin * 57.3f, Offset(px, py)) {
-            drawPixelImage(ballImg, px - r, py - r, r * 2f / ballImg.width)
+    private fun drawSideNets(r: Renderer3D) {
+        val w = CAGE_HALF_W * S
+        val net = HoopsArt.net.full
+        for (x in floatArrayOf(-w, w)) {
+            r.quad(x, 420f, -BACK_Z * S, x, 420f, -100f, x, 0f, -100f, x, 0f, -BACK_Z * S, net, if (x < 0f) 1f else -1f, 0f, 0f, blend = Blend.ALPHA, cull = false)
         }
+        r.quad(-w, 420f, -100f, w, 420f, -100f, w, 420f, -BACK_Z * S, -w, 420f, -BACK_Z * S, net, 0f, -1f, 0f, blend = Blend.ALPHA, cull = false)
     }
 
-    private fun buildBall(): ImageBitmap {
-        val c = PixelCanvas(18, 18)
-        c.disc(9f, 9f, 8.6f, Pal.ORANGE)
-        c.disc(7f, 6f, 3f, Pal.mix(Pal.ORANGE, Pal.YELLOW, 0.45f))
-        c.vline(9, 1, 16, Pal.DARKBROWN)
-        c.hline(1, 16, 9, Pal.DARKBROWN)
-        for (y in 2..15) {
-            val dx = (sqrt(49f - (y - 9f) * (y - 9f)).coerceAtLeast(0f) * 0.55f).toInt()
-            c.set(4 + (3 - dx).coerceAtLeast(0), y, Pal.DARKBROWN)
-            c.set(13 - (3 - dx).coerceAtLeast(0), y, Pal.DARKBROWN)
-        }
-        c.set(6, 4, Pal.WHITE)
-        c.outline(Pal.DARKBROWN)
-        return c.toImageBitmap()
+    private fun drawBall(r: Renderer3D, x: Float, y: Float, z: Float, spin: Float, sqx: Float, sqy: Float) {
+        val wx = x * S
+        val wz = -z * S
+        val d = BALL_R * 2f * S
+        // Contact shadow on the court, softer the higher the ball.
+        val a = 0.45f / (1f + y * 0.6f)
+        r.flat(wx, wz, 0.5f, d * 1.1f, d * 0.9f, TexKit.shadow.full, blend = Blend.ALPHA, alpha = a)
+        r.sprite(wx, y * S + (sqy - 1f) * d / 2f, wz, d * sqx, d * sqy, HoopsArt.ball.full, roll = -spin, depthBias = 1.02f)
     }
 
     // ---------------------------------------------------------------- attract mode

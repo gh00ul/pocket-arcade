@@ -4,10 +4,13 @@ import androidx.compose.ui.graphics.Color
 import com.pocketarcade.data.Catalog
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.PixelCanvas
-import com.pocketarcade.engine.PixelFont
 import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.r3d.RasterPainter
+import com.pocketarcade.engine.r3d.TexKit
 import com.pocketarcade.engine.r3d.Texture
+import com.pocketarcade.engine.r3d.bigText
+import com.pocketarcade.engine.r3d.bigTextWidth
+import com.pocketarcade.engine.r3d.vgrad
 import com.pocketarcade.games.CabinetLook
 import com.pocketarcade.games.CabinetShape
 import com.pocketarcade.games.MiniGame
@@ -17,25 +20,6 @@ import kotlin.math.sqrt
 
 /** Texels per hall unit for every hall texture. */
 const val TPU = 2
-
-/** Draws bitmap-font text into a canvas at an integer [scale]. */
-fun PixelCanvas.bigText(s: String, x: Int, y: Int, color: Int, scale: Int, tiny: Boolean = false) {
-    val adv = if (tiny) PixelFont.TADV else PixelFont.ADV
-    for (i in s.indices) {
-        val rows = PixelFont.rows(s[i], tiny) ?: continue
-        for (ry in rows.indices) for (rx in rows[ry].indices) {
-            if (rows[ry][rx] == '#') fill(x + (i * adv + rx) * scale, y + ry * scale, scale, scale, color)
-        }
-    }
-}
-
-fun bigTextWidth(s: String, scale: Int, tiny: Boolean = false): Int =
-    if (s.isEmpty()) 0 else ((if (tiny) PixelFont.TADV else PixelFont.ADV) * s.length - 1) * scale
-
-/** Vertical gradient fill. */
-fun PixelCanvas.vgrad(x: Int, y: Int, w: Int, h: Int, top: Int, bottom: Int) {
-    for (yy in 0 until h) fill(x, y + yy, w, 1, Pal.mix(top, bottom, if (h <= 1) 0f else yy / (h - 1f)))
-}
 
 /** Procedural textures for the hall: floor, walls, signs and furniture, at [TPU] texels per unit. */
 object HubTextures {
@@ -305,33 +289,9 @@ object HubTextures {
         Texture(8, alphas.size, IntArray(8 * alphas.size) { i -> (alphas[i / 8] shl 24) or (Pal.CYAN and 0xFFFFFF) })
     }
 
-    /** Soft white radial glow; tinted when drawn additively. */
-    val glow: Texture by lazy { radial(32, 1f, 255) }
-
-    /** Soft dark ellipse for contact shadows. */
-    val shadow: Texture by lazy { radial(32, 1f, 170, Pal.BLACK) }
-
-    /** A tiny bright spark for particles. */
-    val spark: Texture by lazy {
-        Texture(4, 4, IntArray(16) { i ->
-            val x = i % 4
-            val y = i / 4
-            if ((x == 1 || x == 2) || (y == 1 || y == 2)) -1 else 0x40FFFFFF
-        })
-    }
-
-    private fun radial(n: Int, power: Float, maxAlpha: Int, color: Int = Pal.WHITE): Texture {
-        val px = IntArray(n * n)
-        for (y in 0 until n) for (x in 0 until n) {
-            val dx = (x + 0.5f - n / 2f) / (n / 2f)
-            val dy = (y + 0.5f - n / 2f) / (n / 2f)
-            val d = sqrt(dx * dx + dy * dy)
-            val v = (1f - d).coerceIn(0f, 1f)
-            val a = (Math.pow(v.toDouble(), power.toDouble() + 1.0) * maxAlpha).toInt()
-            px[y * n + x] = (a shl 24) or (color and 0xFFFFFF)
-        }
-        return Texture(n, n, px)
-    }
+    val glow: Texture get() = TexKit.glow
+    val shadow: Texture get() = TexKit.shadow
+    val spark: Texture get() = TexKit.spark
 
     // ------------------------------------------------------------------ furniture
 
@@ -466,7 +426,7 @@ object HubTextures {
         Texture(64, 20, c.px)
     }
 
-    fun solid(w: Int, h: Int, color: Int) = Texture(w, h, IntArray(w * h) { color })
+    fun solid(w: Int, h: Int, color: Int) = TexKit.solid(w, h, color)
 }
 
 /**

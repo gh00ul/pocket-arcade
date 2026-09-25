@@ -5,15 +5,24 @@ import com.pocketarcade.data.Plush
 import com.pocketarcade.data.PlushShape
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.PixelCanvas
+import com.pocketarcade.engine.SpriteFX
+import com.pocketarcade.engine.r3d.Texture
 
 /** Pixel-art plush sprites, generated from each plush's shape and colours. */
 object PlushArt {
     const val SIZE = 18
     private val cache = HashMap<String, ImageBitmap>()
 
+    private val textures = HashMap<String, Texture>()
+
     fun image(p: Plush): ImageBitmap = cache.getOrPut(p.id) { build(p).toImageBitmap() }
 
-    fun build(p: Plush): PixelCanvas {
+    /** The HD (2x, bevelled) sprite used in the 3D claw machine. */
+    fun texture(p: Plush): Texture = textures.getOrPut(p.id) {
+        Texture.of(SpriteFX.hd(SpriteFX.pad(build(p, outline = false), 1)))
+    }
+
+    fun build(p: Plush, outline: Boolean = true): PixelCanvas {
         val c = PixelCanvas(SIZE, SIZE)
         val m = p.main
         val a = p.accent
@@ -126,7 +135,7 @@ object PlushArt {
         if (p.rare) {
             c.set(2, 2, Pal.WHITE); c.set(15, 1, Pal.WHITE); c.set(16, 14, Pal.WHITE)
         }
-        c.outline(Pal.BLACK)
+        if (outline) c.outline(Pal.BLACK)
         return c
     }
 }

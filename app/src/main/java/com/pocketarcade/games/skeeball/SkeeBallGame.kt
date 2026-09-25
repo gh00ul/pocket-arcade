@@ -1,25 +1,34 @@
 package com.pocketarcade.games.skeeball
 
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import com.pocketarcade.engine.FlickTracker
+import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
+import com.pocketarcade.engine.PixelCanvas
 import com.pocketarcade.engine.PixelFont
-import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.Spring
+import com.pocketarcade.engine.TAU
 import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.Vec2
 import com.pocketarcade.engine.clamp01
 import com.pocketarcade.engine.damp
 import com.pocketarcade.engine.easeOutCubic
-import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.len
+import com.pocketarcade.engine.r3d.Blend
+import com.pocketarcade.engine.r3d.Model
+import com.pocketarcade.engine.r3d.ModelBuilder
+import com.pocketarcade.engine.r3d.PointLight
+import com.pocketarcade.engine.r3d.Region
+import com.pocketarcade.engine.r3d.Renderer3D
+import com.pocketarcade.engine.r3d.Stage3D
+import com.pocketarcade.engine.r3d.TexKit
+import com.pocketarcade.engine.r3d.Texture
+import com.pocketarcade.engine.r3d.vgrad
 import com.pocketarcade.games.BaseMiniGame
 import com.pocketarcade.games.CabinetLook
 import com.pocketarcade.games.CabinetShape
@@ -88,6 +97,22 @@ class SkeeBallGame : BaseMiniGame() {
         const val REST_X = 180f
         const val REST_Y = 586f
         const val GRAB_TOP = 430f
+
+        // 3D alley layout (world units = field units).
+        const val BOARD_L = 20f
+        const val BOARD_R = 340f
+        const val LANE_END = 780f
+        const val RAMP_H = 10f
+        const val BOARD_BASE = 16f
+        /** tan of the board's tilt; its cosine is [SQUASH], which turns the ring ellipses into circles. */
+        const val BOARD_TAN = 0.802f
+        const val PIT_Y = -40f
+        const val RAIL_H = 20f
+        const val SIGN_TOP = 300f
+        const val SIDE_BACK_Z = 10f
+        const val SIDE_FRONT_Z = 298f
+        const val SIDE_BACK_Y = 340f
+        const val SIDE_FRONT_Y = 100f
     }
 
     private enum class Phase { ROLLING, FLYING, SETTLING, GUTTER }
@@ -157,8 +182,11 @@ class SkeeBallGame : BaseMiniGame() {
             TouchType.MOVE -> {
                 if (id == dragging) {
                     flick.add(x, y, timeMs)
-                    readyX = x.coerceIn(LANE_L + BALL_R, LANE_R - BALL_R)
-                    readyY = y.coerceIn(GRAB_TOP + 60f, GAME_H - 30f)
+                    // The ball follows the finger across the lane.
+                    if (stage.touchToPlane(x, y, 0f, pt)) {
+                        readyX = pt[0].coerceIn(LANE_L + BALL_R, LANE_R - BALL_R)
+                        readyY = pt[1].coerceIn(GRAB_TOP + 60f, GAME_H - 30f)
+                    }
                 }
             }
             TouchType.UP -> {
@@ -332,31 +360,35 @@ class SkeeBallGame : BaseMiniGame() {
         val pts = b.points
         ringFlash[b.ring] = 1f
         val color = Color(ringColor(b.ring))
+        // Effects appear where the cup is on screen.
+        stage.toField(b.toX, surfaceY(b.toY) + BALL_R, b.toY, pt)
+        val sx = pt[0]
+        val sy = pt[1]
         when {
             b.ring == 6 -> {
-                addScore(pts, BONUS_X - 40f, BONUS_Y + 30f, Color(Pal.GOLD))
+                addScore(pts, sx - 40f, sy + 30f, Color(Pal.GOLD))
                 popups.add("BONUS!!", CX, 200f, Color(Pal.GOLD), size = 5f, life = 1.4f)
                 play(Sfx.JACKPOT)
                 fx.haptics.jackpot()
                 shake.add(0.6f)
                 flash.trigger(0.8f)
                 particles.confetti(0f, 0f, GAME_W, 90)
-                particles.burst(BONUS_X, BONUS_Y, 40, 80f, 300f, intArrayOf(Pal.GOLD, Pal.YELLOW, Pal.WHITE), 0.9f, 5f, kind = Particles.SPARKLE)
+                particles.burst(sx, sy, 40, 80f, 300f, intArrayOf(Pal.GOLD, Pal.YELLOW, Pal.WHITE), 0.9f, 5f, kind = Particles.SPARKLE)
             }
             pts >= 100 -> {
-                addScore(pts, b.toX, b.toY - 20f, color)
-                popups.add("BULLSEYE!", CX, 270f, Color(Pal.RED), size = 4f, life = 1.2f)
+                addScore(pts, sx, sy - 20f, color)
+                popups.add("BULLSEYE!", CX, 300f, Color(Pal.RED), size = 4f, life = 1.2f)
                 play(Sfx.WIN)
                 fx.haptics.win()
                 shake.add(0.45f)
-                particles.burst(b.toX, b.toY, 36, 80f, 260f, intArrayOf(Pal.RED, Pal.YELLOW, Pal.WHITE), 0.8f, 5f)
+                particles.burst(sx, sy, 36, 80f, 260f, intArrayOf(Pal.RED, Pal.YELLOW, Pal.WHITE), 0.8f, 5f)
             }
             else -> {
-                addScore(pts, b.toX, b.toY - 20f, color)
+                addScore(pts, sx, sy - 20f, color)
                 play(Sfx.COIN, 0.7f, 0.7f + pts / 100f)
                 fx.haptics.hit()
                 shake.add(0.08f + pts / 400f)
-                particles.burst(b.toX, b.toY, 10 + pts / 4, 50f, 180f, intArrayOf(ringColor(b.ring), Pal.WHITE), 0.6f, 4f)
+                particles.burst(sx, sy, 10 + pts / 4, 50f, 180f, intArrayOf(ringColor(b.ring), Pal.WHITE), 0.6f, 4f)
             }
         }
     }
@@ -371,113 +403,285 @@ class SkeeBallGame : BaseMiniGame() {
         else -> Pal.GOLD
     }
 
-    // ---------------------------------------------------------------- drawing
+    // ---------------------------------------------------------------- 3D presentation
+
+    /**
+     * The alley in 3D. The simulation stays top-down (x across, y up the lane, z height); the
+     * world uses x as is, the lane's y as depth and adds the surface height: flat lane, the
+     * jump ramp, the pit, then the target board tilted back so the rings read as circles.
+     */
+    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt(), "skee").apply {
+        look(CX, 300f, 1000f, CX, 40f, 300f, fovDeg = 44f)
+    }
+    private val pt = FloatArray(3)
+
+    private val boardTex by lazy {
+        SkeeArt.board(
+            BOARD_L, BOARD_TOP - 10f, BOARD_R, BOARD_BOTTOM, CX, CY, SQUASH,
+            SkeeTuning.RING_RADII, SkeeTuning.RING_POINTS, IntArray(6) { ringColor(it) },
+            BONUS_X, BONUS_Y, BONUS_R,
+        )
+    }
+    private val laneTex by lazy { SkeeArt.lane((LANE_R - LANE_L).toInt(), (LANE_END - RAMP_Y).toInt(), 1.5f) }
+    private val railTop by lazy {
+        val c = PixelCanvas(40, 4)
+        c.fill(0, 0, 40, 4, Pal.shade(Pal.BLUE, 0.8f))
+        c.fill(30, 0, 10, 4, Pal.YELLOW)
+        c.fill(29, 0, 1, 4, Pal.ORANGE)
+        Texture.of(c)
+    }
+    private val boardLight = PointLight(CX, 330f, 70f, 1f, 0.95f, 1.05f, 520f, 1.1f)
+    private val laneLight = PointLight(CX, 150f, 470f, 1f, 0.8f, 0.6f, 420f, 0.7f)
+    private val marqueeLight = PointLight(CX, 260f, 40f, 1f, 0.35f, 0.55f, 260f, 0.8f)
+    private val ringLight = PointLight(CX, 150f, CY, 1f, 1f, 1f, 260f, 0f)
+
+    /** Raised walls standing up from the board between the scoring rings. */
+    private val ringWalls: Model by lazy {
+        val c = PixelCanvas(4, 8)
+        c.vgrad(0, 0, 4, 8, Pal.WHITE, Pal.GRAY)
+        c.fill(0, 0, 4, 2, Pal.WHITE)
+        val tex = Texture.of(c).full
+        val b = ModelBuilder()
+        val nY = SQUASH
+        val nZ = 0.626f
+        val n = 32
+        for (ring in SkeeTuning.RING_RADII.indices) {
+            val rad = SkeeTuning.RING_RADII[ring]
+            val h = 5f + ring * 0.6f
+            val tint = Pal.mix(ringColor(ring), Pal.WHITE, 0.25f)
+            for (k in 0 until n) {
+                val a0 = k * TAU / n
+                val a1 = (k + 1) * TAU / n
+                val x0 = CX + cos(a0) * rad
+                val z0 = CY + sin(a0) * rad * SQUASH
+                val x1 = CX + cos(a1) * rad
+                val z1 = CY + sin(a1) * rad * SQUASH
+                val y0 = boardY(z0)
+                val y1 = boardY(z1)
+                b.quad(
+                    x0, y0 + nY * h, z0 + nZ * h, x1, y1 + nY * h, z1 + nZ * h, x1, y1, z1, x0, y0, z0,
+                    tex, 0f, nY, nZ, cull = false, tint = tint,
+                )
+            }
+        }
+        b.build()
+    }
+
+    /** Height of the playfield surface under lane position [y]. */
+    private fun surfaceY(y: Float): Float = when {
+        y >= RAMP_Y -> 0f
+        y >= RAMP_TOP -> {
+            val t = (RAMP_Y - y) / (RAMP_Y - RAMP_TOP)
+            RAMP_H * t * t
+        }
+        y >= BOARD_BOTTOM -> RAMP_H + (BOARD_BASE - RAMP_H) * (RAMP_TOP - y) / (RAMP_TOP - BOARD_BOTTOM)
+        else -> boardY(y)
+    }
+
+    private fun boardY(y: Float) = BOARD_BASE + (BOARD_BOTTOM - y) * BOARD_TAN
 
     override fun render(scope: DrawScope) {
-        with(scope) {
-            drawRect(Color(Pal.NIGHT), Offset(-40f, -40f), Size(GAME_W + 80f, GAME_H + 80f))
-            // Side cabinet walls.
-            drawRect(Color(Pal.shade(Pal.BLUE, 0.6f)), Offset(0f, 0f), Size(LANE_L, GAME_H))
-            drawRect(Color(Pal.shade(Pal.BLUE, 0.6f)), Offset(LANE_R, 0f), Size(GAME_W - LANE_R, GAME_H))
-            for (i in 0 until 12) {
-                val on = ((time * 6f).toInt() + i) % 3 == 0
-                val c = Color(if (on) Pal.YELLOW else Pal.shade(Pal.YELLOW, 0.35f))
-                drawCircle(c, 5f, Offset(30f, 320f + i * 26f))
-                drawCircle(c, 5f, Offset(GAME_W - 30f, 320f + i * 26f))
-            }
-            drawTarget(this)
-            // Pit between ramp and target.
-            drawRect(Color(Pal.BLACK), Offset(20f, BOARD_BOTTOM), Size(GAME_W - 40f, RAMP_TOP - BOARD_BOTTOM))
-            // Ramp hump.
-            for (i in 0 until 6) {
-                val t = i / 5f
-                val c = Pal.mix(Pal.TAN, Pal.WOOD, t)
-                drawRect(Color(c), Offset(LANE_L, RAMP_TOP + i * 5f), Size(LANE_R - LANE_L, 5f))
-            }
-            drawRect(Color(Pal.CREAM), Offset(LANE_L, RAMP_TOP), Size(LANE_R - LANE_L, 2f), alpha = 0.7f)
-            // Lane planks.
-            drawRect(Color(Pal.WOOD), Offset(LANE_L, RAMP_Y), Size(LANE_R - LANE_L, GAME_H - RAMP_Y))
-            for (i in 1 until 8) {
-                val x = LANE_L + i * (LANE_R - LANE_L) / 8f
-                drawRect(Color(Pal.shade(Pal.WOOD, 0.8f)), Offset(x, RAMP_Y), Size(2f, GAME_H - RAMP_Y))
-            }
-            for (i in 0 until 10) {
-                val y = RAMP_Y + 10f + i * 32f
-                val x = LANE_L + hash01(i, 5) * (LANE_R - LANE_L - 30f)
-                drawRect(Color(Pal.shade(Pal.WOOD, 0.85f)), Offset(x, y), Size(20f, 2f))
-            }
-            // Guide arrows.
-            for (i in 0 until 3) {
-                val y = 470f - i * 44f
-                val pulse = 0.25f + 0.25f * sin(time * 5f - i)
-                PixelFont.drawCentered(this, "${PixelFont.UP}", CX, y, 4f, Color(Pal.CREAM), pulse, shadow = false)
-            }
-            drawRect(Color(Pal.shade(Pal.WOOD, 0.55f)), Offset(LANE_L - 6f, RAMP_Y), Size(6f, GAME_H - RAMP_Y))
-            drawRect(Color(Pal.shade(Pal.WOOD, 0.55f)), Offset(LANE_R, RAMP_Y), Size(6f, GAME_H - RAMP_Y))
+        val r = stage.begin()
+        lightScene(r)
+        r.gradient(0xFF04020A.toInt(), Pal.NIGHT)
+        drawCabinet(r)
+        drawBoardFx(r)
+        for (b in balls) if (b.active && b.phase != Phase.GUTTER) drawBall(r, b.x, b.y, b.z, b.spin, 1f, 1f)
+        if (hasReady) {
+            val s = readySquash.value
+            drawBall(r, readyX, readyY, 0f, 0f, 2f - s, s)
+        }
+        stage.present(scope)
 
-            // Balls on the target / in flight.
-            for (b in balls) if (b.active && b.phase != Phase.ROLLING) drawBall(this, b.x, b.y, b.z, b.spin)
-            for (b in balls) if (b.active && b.phase == Phase.ROLLING) drawBall(this, b.x, b.y, 0f, b.spin)
+        if (hasReady && dragging < 0 && !timeUp && stage.toField(readyX, 0f, readyY, pt)) {
+            val a = 0.5f + 0.5f * sin(time * 6f)
+            PixelFont.drawCentered(scope, "FLICK ${PixelFont.UP}", pt[0], pt[1] + 26f, 1.8f, Color.White, a)
+        }
+        drawSpeedMeter(scope)
+    }
 
-            // Ball tray and the ready ball.
-            drawRoundRect(Color(Pal.shade(Pal.BLUE, 0.4f)), Offset(CX - 60f, REST_Y + 8f), Size(120f, 30f), CornerRadius(12f, 12f))
-            if (hasReady) {
-                val s = readySquash.value
-                drawBall(this, readyX, readyY, 0f, 0f, sx = 2f - s, sy = s)
-                if (dragging < 0 && !timeUp) {
-                    val a = 0.5f + 0.5f * sin(time * 6f)
-                    PixelFont.drawCentered(this, "FLICK ${PixelFont.UP}", CX, REST_Y + 36f, 1.8f, Color.White, a)
-                }
+    private fun lightScene(r: Renderer3D) {
+        val l = r.lighting
+        l.ambR = 0.5f; l.ambG = 0.47f; l.ambB = 0.62f
+        l.setDirection(0.2f, 1f, 0.7f)
+        l.dirR = 0.35f; l.dirG = 0.33f; l.dirB = 0.3f
+        l.points.clear()
+        l.points += boardLight
+        l.points += laneLight
+        marqueeLight.intensity = 0.7f + 0.2f * sin(time * 5f)
+        l.points += marqueeLight
+        var hot = -1
+        for (i in ringFlash.indices) if (ringFlash[i] > 0f && (hot < 0 || ringFlash[i] > ringFlash[hot])) hot = i
+        if (hot >= 0) {
+            val c = ringColor(hot)
+            ringLight.r = (c shr 16 and 255) / 255f
+            ringLight.g = (c shr 8 and 255) / 255f
+            ringLight.b = (c and 255) / 255f
+            ringLight.intensity = ringFlash[hot] * 1.6f
+            if (hot == 6) {
+                ringLight.x = BONUS_X; ringLight.z = BONUS_Y; ringLight.y = boardY(BONUS_Y) + 60f
+            } else {
+                ringLight.x = CX; ringLight.z = CY; ringLight.y = boardY(CY) + 70f
             }
-            drawSpeedMeter(this)
+            l.points += ringLight
         }
     }
 
-    private fun drawTarget(scope: DrawScope) {
-        with(scope) {
-            drawRoundRect(Color(Pal.NAVY), Offset(20f, BOARD_TOP - 10f), Size(GAME_W - 40f, BOARD_BOTTOM - BOARD_TOP + 10f), CornerRadius(18f, 18f))
-            drawRoundRect(Color(Pal.SKY), Offset(20f, BOARD_TOP - 10f), Size(GAME_W - 40f, BOARD_BOTTOM - BOARD_TOP + 10f), CornerRadius(18f, 18f), style = Stroke(4f))
-            for (ring in SkeeTuning.RING_RADII.indices.reversed()) {
-                val r = SkeeTuning.RING_RADII[ring]
-                val base = ringColor(ring)
-                val lit = ringFlash[ring]
-                val c = Pal.mix(Pal.shade(base, 0.55f), Pal.WHITE, lit * 0.6f)
-                drawOval(Color(c), Offset(CX - r, CY - r * SQUASH), Size(r * 2f, r * 2f * SQUASH))
-                drawOval(Color(base), Offset(CX - r, CY - r * SQUASH), Size(r * 2f, r * 2f * SQUASH), style = Stroke(3f))
+    private fun drawCabinet(r: Renderer3D) {
+        val white = TexKit.white.full
+        // The pit between ramp and board, and the board's front edge.
+        r.quad(
+            BOARD_L, PIT_Y, BOARD_BOTTOM, BOARD_R, PIT_Y, BOARD_BOTTOM, BOARD_R, PIT_Y, RAMP_TOP + 4f, BOARD_L, PIT_Y, RAMP_TOP + 4f,
+            SkeeArt.pit.full, 0f, 1f, 0f,
+        )
+        r.quad(
+            BOARD_L, BOARD_BASE, BOARD_BOTTOM, BOARD_R, BOARD_BASE, BOARD_BOTTOM, BOARD_R, PIT_Y, BOARD_BOTTOM, BOARD_L, PIT_Y, BOARD_BOTTOM,
+            SkeeArt.boardEdge.full, 0f, 0f, 1f,
+        )
+        // Jump ramp: a curved hump in three strips.
+        val rampTex = SkeeArt.ramp.full
+        val steps = 3
+        for (i in 0 until steps) {
+            val y0 = RAMP_Y - (RAMP_Y - RAMP_TOP) * i / steps
+            val y1 = RAMP_Y - (RAMP_Y - RAMP_TOP) * (i + 1) / steps
+            val h0 = surfaceY(y0)
+            val h1 = surfaceY(y1)
+            val v0 = rampTex.h * (1f - (i + 1f) / steps)
+            val v1 = rampTex.h * (1f - i.toFloat() / steps)
+            r.quad(
+                LANE_L, h1, y1, LANE_R, h1, y1, LANE_R, h0, y0, LANE_L, h0, y0,
+                rampTex, 0f, 0.95f, 0.3f, v0 = v0, v1 = v1,
+            )
+        }
+        // The lane.
+        r.quad(
+            LANE_L, 0f, RAMP_Y, LANE_R, 0f, RAMP_Y, LANE_R, 0f, LANE_END, LANE_L, 0f, LANE_END,
+            laneTex.full, 0f, 1f, 0f,
+        )
+        // Rails along both sides of the lane and ramp.
+        val railTex = SkeeArt.railSide.full
+        val rt = railTop.full
+        r.quad(BOARD_L, RAIL_H, BOARD_BOTTOM, LANE_L, RAIL_H, BOARD_BOTTOM, LANE_L, RAIL_H, LANE_END, BOARD_L, RAIL_H, LANE_END, rt, 0f, 1f, 0f)
+        r.quad(LANE_R, RAIL_H, BOARD_BOTTOM, BOARD_R, RAIL_H, BOARD_BOTTOM, BOARD_R, RAIL_H, LANE_END, LANE_R, RAIL_H, LANE_END, rt, 0f, 1f, 0f, u0 = rt.w.toFloat(), u1 = 0f)
+        r.quad(LANE_L, RAIL_H, BOARD_BOTTOM, LANE_L, RAIL_H, LANE_END, LANE_L, PIT_Y, LANE_END, LANE_L, PIT_Y, BOARD_BOTTOM, railTex, 1f, 0f, 0f)
+        r.quad(LANE_R, RAIL_H, LANE_END, LANE_R, RAIL_H, BOARD_BOTTOM, LANE_R, PIT_Y, BOARD_BOTTOM, LANE_R, PIT_Y, LANE_END, railTex, -1f, 0f, 0f)
+        // The target board, tilted back.
+        val far = BOARD_TOP - 10f
+        r.quad(
+            BOARD_L, boardY(far), far, BOARD_R, boardY(far), far, BOARD_R, BOARD_BASE, BOARD_BOTTOM, BOARD_L, BOARD_BASE, BOARD_BOTTOM,
+            boardTex.full, 0f, SQUASH, 0.626f,
+        )
+        ringWalls.draw(r)
+        // Cabinet sides: tall at the back, sloping down towards the player.
+        val side = SkeeArt.sidePanel.full
+        sidePanel(r, BOARD_L, 1f, side)
+        sidePanel(r, BOARD_R, -1f, side)
+        // Back wall and marquee.
+        val topY = boardY(far)
+        r.quad(BOARD_L, SIGN_TOP + 30f, far, BOARD_R, SIGN_TOP + 30f, far, BOARD_R, topY - 4f, far, BOARD_L, topY - 4f, far, SkeeArt.boardEdge.full, 0f, 0f, 1f)
+        val m = SkeeArt.marquee.full
+        r.quad(BOARD_L + 6f, SIGN_TOP, far + 2f, BOARD_R - 6f, SIGN_TOP, far + 2f, BOARD_R - 6f, SIGN_TOP - 84f, far + 2f, BOARD_L + 6f, SIGN_TOP - 84f, far + 2f, m, 0f, 0f, 1f, emissive = 1f)
+        // Marquee bulbs, chasing.
+        val glow = TexKit.glow.full
+        for (i in 0 until 18) {
+            val bx = BOARD_L + 6f + (9f + i * 17.8f) * (BOARD_R - BOARD_L - 12f) / 320f
+            val on = ((time * 8f).toInt() + i) % 3 == 0
+            val c = if (on) Pal.YELLOW else Pal.shade(Pal.ORANGE, 0.5f)
+            for (row in 0..1) {
+                val by = if (row == 0) SIGN_TOP - 10f * 84f / 90f else SIGN_TOP - 80f * 84f / 90f
+                r.sprite(bx, by, far + 3f, 6f, 6f, white, emissive = 1.2f, tint = c)
+                if (on) r.sprite(bx, by, far + 4f, 22f, 22f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.55f, tint = Pal.YELLOW)
             }
-            drawOval(Color(Pal.BLACK), Offset(CX - 9f, CY - 9f * SQUASH), Size(18f, 18f * SQUASH))
-            for (ring in 1 until SkeeTuning.RING_RADII.size) {
-                val rIn = SkeeTuning.RING_RADII[ring - 1]
-                val rOut = SkeeTuning.RING_RADII[ring]
-                // Alternate labels right and left along the horizontal axis so they never overlap.
-                val side = if (ring % 2 == 1) 1f else -1f
-                val lx = CX + side * (rIn + rOut) / 2f
-                PixelFont.drawCentered(this, SkeeTuning.RING_POINTS[ring].toString(), lx, CY - 7f, 2f, Color.White, 0.9f)
+        }
+        // Bulbs along each side's sloping top edge.
+        for (s in 0..1) {
+            val x = if (s == 0) BOARD_L + 2f else BOARD_R - 2f
+            for (i in 0 until 11) {
+                val t = i / 10f
+                val z = SIDE_BACK_Z + (SIDE_FRONT_Z - SIDE_BACK_Z) * t
+                val y = SIDE_BACK_Y + (SIDE_FRONT_Y - SIDE_BACK_Y) * t - 6f
+                val on = ((time * 6f).toInt() - i) % 4 == 0
+                r.sprite(x, y, z, 7f, 7f, white, emissive = 1.2f, tint = if (on) Pal.YELLOW else Pal.shade(Pal.GOLD, 0.45f))
+                if (on) r.sprite(x, y, z, 26f, 26f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.5f, tint = Pal.GOLD)
             }
-            PixelFont.drawCentered(this, "100", CX, CY - 22f, 2f, Color(Pal.YELLOW), 0.9f)
-            // Bonus corner hole.
-            val blink = 0.5f + 0.5f * sin(time * 9f)
-            drawOval(Color(Pal.GOLD), Offset(BONUS_X - BONUS_R - 4f, BONUS_Y - (BONUS_R + 4f) * SQUASH), Size((BONUS_R + 4f) * 2f, (BONUS_R + 4f) * 2f * SQUASH), alpha = 0.5f + 0.5f * blink)
-            drawOval(Color(Pal.BLACK), Offset(BONUS_X - BONUS_R, BONUS_Y - BONUS_R * SQUASH), Size(BONUS_R * 2f, BONUS_R * 2f * SQUASH))
-            PixelFont.drawCentered(this, "200", BONUS_X, BONUS_Y + 16f, 2f, Color(Pal.GOLD), 0.6f + 0.4f * blink)
-            if (ringFlash[6] > 0f) drawCircle(Color(Pal.GOLD), 40f * (1f + ringFlash[6]), Offset(BONUS_X, BONUS_Y), alpha = ringFlash[6] * 0.5f)
+        }
+        // Guide chevrons pulse up the lane.
+        val chev = SkeeArt.chevron.full
+        for (i in 0 until 3) {
+            val y = 470f - i * 44f
+            val a = 0.2f + 0.3f * (0.5f + 0.5f * sin(time * 5f - i))
+            r.flat(CX, y, 0.5f, 34f, 20f, chev, blend = Blend.ADD, emissive = 1f, alpha = a, tint = Pal.CREAM)
         }
     }
 
-    private fun drawBall(scope: DrawScope, x: Float, y: Float, z: Float, spin: Float, sx: Float = 1f, sy: Float = 1f) {
-        with(scope) {
-            val lift = z * 0.6f
-            val size = BALL_R * (1f + z / 260f)
-            drawOval(Color.Black, Offset(x - BALL_R * 0.9f, y - BALL_R * 0.35f + 4f), Size(BALL_R * 1.8f, BALL_R * 0.8f), alpha = 0.35f / (1f + z / 80f))
-            val cy = y - lift
-            val w = size * sx
-            val h = size * sy
-            drawOval(Color(Pal.DARKRED), Offset(x - w, cy - h * 2f + size), Size(w * 2f, h * 2f))
-            val stripe = (spin % (Math.PI.toFloat() * 2f)) / (Math.PI.toFloat() * 2f)
-            val sy2 = cy - h * 2f + size + h * 2f * stripe
-            drawRect(Color(Pal.RED), Offset(x - w * 0.8f, sy2 - 2f), Size(w * 1.6f, 4f), alpha = 0.6f)
-            drawCircle(Color.White, size * 0.3f, Offset(x - w * 0.35f, cy - h * 2f + size + h * 0.55f), alpha = 0.5f)
+    private fun sidePanel(r: Renderer3D, x: Float, nx: Float, tex: Region) {
+        val w = tex.w.toFloat()
+        val h = tex.h.toFloat()
+        val spanZ = SIDE_FRONT_Z - SIDE_BACK_Z
+        val spanY = SIDE_BACK_Y - PIT_Y
+        r.begin(tex)
+        r.normal(nx, 0f, 0f)
+        r.vertex(x, SIDE_BACK_Y, SIDE_BACK_Z, 0f, 0f)
+        r.vertex(x, SIDE_FRONT_Y, SIDE_FRONT_Z, w, (SIDE_BACK_Y - SIDE_FRONT_Y) / spanY * h)
+        r.vertex(x, RAIL_H, SIDE_FRONT_Z, w, (SIDE_BACK_Y - RAIL_H) / spanY * h)
+        r.vertex(x, PIT_Y, SIDE_FRONT_Z - spanZ * 0.1f, w * 0.9f, h)
+        r.vertex(x, PIT_Y, SIDE_BACK_Z, 0f, h)
+        r.end()
+    }
+
+    /** Ring flashes and the blinking bonus hole, drawn as light on the board. */
+    private fun drawBoardFx(r: Renderer3D) {
+        val white = TexKit.white.full
+        for (ring in 0 until 6) {
+            val f = ringFlash[ring]
+            if (f <= 0f) continue
+            val rIn = if (ring == 0) 9f else SkeeTuning.RING_RADII[ring - 1]
+            val rOut = SkeeTuning.RING_RADII[ring]
+            annulus(r, rIn, rOut, ringColor(ring), f * 0.75f, white)
         }
+        val glow = TexKit.glow.full
+        val blink = 0.5f + 0.5f * sin(time * 9f)
+        val by = boardY(BONUS_Y) + 3f
+        r.sprite(BONUS_X, by, BONUS_Y, 44f, 44f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.25f + 0.35f * blink, tint = Pal.GOLD)
+        val bf = ringFlash[6]
+        if (bf > 0f) r.sprite(BONUS_X, by, BONUS_Y, 90f * (1f + bf), 90f * (1f + bf), glow, blend = Blend.ADD, emissive = 1f, alpha = bf, tint = Pal.GOLD)
+    }
+
+    private fun annulus(r: Renderer3D, rIn: Float, rOut: Float, color: Int, alpha: Float, tex: Region) {
+        val n = 28
+        for (k in 0 until n) {
+            val a0 = k * TAU / n
+            val a1 = (k + 1) * TAU / n
+            val c0 = cos(a0); val s0 = sin(a0)
+            val c1 = cos(a1); val s1 = sin(a1)
+            fun px(c: Float, rr: Float) = CX + c * rr
+            fun py(s: Float, rr: Float) = CY + s * rr * SQUASH
+            val ax = px(c0, rOut); val az = py(s0, rOut)
+            val bx = px(c1, rOut); val bz = py(s1, rOut)
+            val cx = px(c1, rIn); val cz = py(s1, rIn)
+            val dx = px(c0, rIn); val dz = py(s0, rIn)
+            r.quad(
+                ax, boardY(az) + 0.6f, az, bx, boardY(bz) + 0.6f, bz, cx, boardY(cz) + 0.6f, cz, dx, boardY(dz) + 0.6f, dz,
+                tex, 0f, SQUASH, 0.626f, blend = Blend.ADD, emissive = 1f, alpha = alpha, cull = false, tint = color,
+            )
+        }
+    }
+
+    private fun drawBall(r: Renderer3D, x: Float, y: Float, z: Float, spin: Float, sx: Float, sy: Float) {
+        val base = surfaceY(y)
+        // Contact shadow following the surface under the ball.
+        val sh = TexKit.shadow.full
+        val a = 0.55f / (1f + z / 60f)
+        val sw = BALL_R * 1.1f
+        r.quad(
+            x - sw, surfaceY(y - sw) + 0.8f, y - sw, x + sw, surfaceY(y - sw) + 0.8f, y - sw,
+            x + sw, surfaceY(y + sw) + 0.8f, y + sw, x - sw, surfaceY(y + sw) + 0.8f, y + sw,
+            sh, 0f, 1f, 0f, blend = Blend.ALPHA, alpha = a, cull = false,
+        )
+        val frames = SkeeArt.ballFrames
+        val f = ((spin / TAU * frames.size).toInt() % frames.size + frames.size) % frames.size
+        val d = BALL_R * 2f
+        r.sprite(x, base + z + BALL_R * sy, y, d * sx, d * sy, frames[f].full, depthBias = 1.08f)
     }
 
     private fun drawSpeedMeter(scope: DrawScope) {

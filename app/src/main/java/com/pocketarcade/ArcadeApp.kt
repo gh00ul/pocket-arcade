@@ -55,6 +55,9 @@ class ArcadeServices(val repo: ArcadeRepository, val audio: AudioSynth, val hapt
 /** Signals from the Activity lifecycle that screens react to. */
 class AppSignals {
     var paused by mutableStateOf(false)
+
+    /** A machine id to walk straight into (from the launch intent's "play" extra). */
+    var launchGame by mutableStateOf<String?>(null)
 }
 
 private enum class Screen { TITLE, HUB, GAME }
@@ -150,6 +153,18 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             fade.animateTo(0f, tween(420))
             busy = false
         }
+    }
+
+    // Shortcut launch: `adb shell am start -n com.pocketarcade/.MainActivity --es play <id>`.
+    LaunchedEffect(signals.launchGame, save.loaded, busy) {
+        val id = signals.launchGame ?: return@LaunchedEffect
+        if (!save.loaded || busy) return@LaunchedEffect
+        signals.launchGame = null
+        val index = games.indexOfFirst { it.id == id }
+        if (index < 0 || screen == Screen.GAME) return@LaunchedEffect
+        overlay = Overlay.NONE
+        screen = Screen.HUB
+        enterMachine(index)
     }
 
     fun onSpot(spot: Spot) {

@@ -27,7 +27,18 @@ class MainActivity : ComponentActivity() {
         FrameBudget.logging = Log.isLoggable(FrameBudget.TAG, Log.DEBUG)
         val audio = AudioSynth().also { it.start() }
         services = ArcadeServices(ArcadeRepository(applicationContext), audio, Haptics.from(applicationContext))
+        signals.launchGame = intent?.getStringExtra(EXTRA_PLAY)
         setContent { ArcadeApp(services, signals) }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra(EXTRA_PLAY)?.let { signals.launchGame = it }
+    }
+
+    companion object {
+        /** Intent extra naming a machine id to walk straight into. */
+        const val EXTRA_PLAY = "play"
     }
 
     override fun onResume() {

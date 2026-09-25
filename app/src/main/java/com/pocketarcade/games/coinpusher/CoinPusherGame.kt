@@ -1,26 +1,30 @@
 package com.pocketarcade.games.coinpusher
 
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.pocketarcade.engine.Body
 import com.pocketarcade.engine.CircleWorld
 import com.pocketarcade.engine.FIXED_DT
+import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
-import com.pocketarcade.engine.PixelCanvas
 import com.pocketarcade.engine.PixelFont
-import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Segment
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.TAU
 import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.chance
 import com.pocketarcade.engine.clamp01
-import com.pocketarcade.engine.drawPixelImage
+import com.pocketarcade.engine.hash01
+import com.pocketarcade.engine.lerp
+import com.pocketarcade.engine.r3d.Blend
+import com.pocketarcade.engine.r3d.BoxFaces
+import com.pocketarcade.engine.r3d.Model
+import com.pocketarcade.engine.r3d.ModelBuilder
+import com.pocketarcade.engine.r3d.PointLight
+import com.pocketarcade.engine.r3d.Renderer3D
+import com.pocketarcade.engine.r3d.Stage3D
+import com.pocketarcade.engine.r3d.TexKit
 import com.pocketarcade.engine.range
 import com.pocketarcade.games.BaseMiniGame
 import com.pocketarcade.games.CabinetLook
@@ -85,6 +89,20 @@ class CoinPusherGame : BaseMiniGame() {
         const val GUTTER_TOP = 492f
         const val COIN_R = 13f
 
+        // 3D cabinet layout (world units = deck units).
+        const val BACK_Z = DECK_TOP - 40f
+        const val BACK_H = 240f
+        const val GUTTER_W = 18f
+        const val GUTTER_DEPTH = 40f
+        const val TRAY_FRONT = 620f
+        const val TRAY_Y = -40f
+        const val SIDE_H = 40f
+        const val SHELF_H = 30f
+        const val GLASS_H = 50f
+        const val COIN_THICK = 3f
+        const val DROP_Z = BACK_Z + 6f
+        const val SLOT_Y = 70f
+
         const val COIN = 0
         const val GEM = 1
         const val TICKETS = 2
@@ -125,8 +143,6 @@ class CoinPusherGame : BaseMiniGame() {
     private var spillCount = 0
     private var trayFlash = 0f
     private var lowCoinWarned = false
-
-    private val sprites: Array<ImageBitmap> by lazy { buildSprites() }
 
     init {
         world.constraint = { b -> pushBody(b) }
@@ -215,7 +231,7 @@ class CoinPusherGame : BaseMiniGame() {
 
     override fun onTouch(type: TouchType, id: Long, x: Float, y: Float, timeMs: Long) {
         if (type != TouchType.DOWN || timeUp || endedEarly) return
-        if (y > FRONT_EDGE + 10f) return
+        if (y > frontScreenY + 10f) return
         if (coinsLeft <= 0) {
             play(Sfx.ERROR, 0.4f)
             popups.add("NO COINS", GAME_W / 2f, 300f, Color(Pal.GRAY), size = 3f)
@@ -225,7 +241,9 @@ class CoinPusherGame : BaseMiniGame() {
         cooldown = PusherTuning.DROP_COOLDOWN
         coinsLeft--
         sinceLastDrop = 0f
-        val dx = x.coerceIn(PF_L + COIN_R + 4f, PF_R - COIN_R - 4f)
+        // Drop above the spot on the deck under the finger.
+        val deckX = if (stage.touchToPlane(x, y, 0f, pt)) pt[0] else x
+        val dx = deckX.coerceIn(PF_L + COIN_R + 4f, PF_R - COIN_R - 4f)
         launchDrop(dx, COIN)
         if (rng.chance(PusherTuning.ITEM_DROP_CHANCE)) {
             val kind = 1 + rng.nextInt(4)
@@ -271,7 +289,8 @@ class CoinPusherGame : BaseMiniGame() {
                 b.vy = 120f
                 b.vx = rng.range(-30f, 30f)
                 play(Sfx.CLINK, 0.5f, rng.range(0.8f, 1.2f))
-                particles.burst(d.x, landY, 5, 20f, 80f, intArrayOf(Pal.YELLOW, Pal.WHITE), 0.3f, 3f)
+                stage.toField(d.x, 0f, landY, pt)
+                particles.burst(pt[0], pt[1], 5, 20f, 80f, intArrayOf(Pal.YELLOW, Pal.WHITE), 0.3f, 3f)
             }
         }
 
@@ -289,7 +308,8 @@ class CoinPusherGame : BaseMiniGame() {
                 collect(b.kind, b.x)
             } else {
                 lost++
-                popups.add("LOST", b.x.coerceIn(40f, 320f), GUTTER_TOP + 20f, Color(Pal.GRAY), size = 2f)
+                stage.toField(b.x, 0f, GUTTER_TOP + 20f, pt)
+                popups.add("LOST", pt[0].coerceIn(40f, 320f), pt[1], Color(Pal.GRAY), size = 2f)
                 play(Sfx.GUTTER, 0.35f, 1.6f)
             }
             val f = fallers.firstOrNull { !it.active } ?: continue
@@ -316,12 +336,15 @@ class CoinPusherGame : BaseMiniGame() {
         }
     }
 
-    private fun collect(kind: Int, x: Float) {
+    private fun collect(kind: Int, deckX: Float) {
         won++
         trayFlash = 1f
         recentSpills[spillCount % recentSpills.size] = PusherTuning.AVALANCHE_WINDOW
         spillCount++
-        val y = FRONT_EDGE + 20f
+        // Effects happen where the lip is on screen.
+        stage.toField(deckX, 0f, FRONT_EDGE, pt)
+        val x = pt[0]
+        val y = pt[1] + 20f
         when (kind) {
             GEM -> {
                 addScore(PusherTuning.GEM_POINTS, x, y - 30f, Color(Pal.CYAN))
@@ -376,155 +399,183 @@ class CoinPusherGame : BaseMiniGame() {
         }
     }
 
-    // ---------------------------------------------------------------- drawing
+    // ---------------------------------------------------------------- 3D presentation
+
+    /**
+     * The machine in 3D, seen from where you'd stand. The deck simulation is top-down, so its
+     * x and y become the world's x and depth; items lie on the deck at height 0.
+     */
+    private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt(), "pusher").apply {
+        look(180f, 520f, 900f, 180f, 0f, 330f, fovDeg = 50f)
+    }
+    private val pt = FloatArray(3)
+    private val frontScreenY: Float = run {
+        stage.toField(GAME_W / 2f, 0f, FRONT_EDGE, pt)
+        pt[1]
+    }
+    private val deckTex by lazy { PusherArt.deck((PF_R - PF_L).toInt(), (FRONT_EDGE - DECK_TOP).toInt()) }
+    private val coinsPanel = PusherArt.Panel(96, 22)
+    private val wonPanel = PusherArt.Panel(96, 22)
+
+    private val cabinet: Model by lazy {
+        val b = ModelBuilder()
+        val cab = PusherArt.cabinet.full
+        val dark = PusherArt.dark.full
+        val gold = PusherArt.gold.full
+        b.quad(PF_L, 0f, DECK_TOP, PF_R, 0f, DECK_TOP, PF_R, 0f, FRONT_EDGE, PF_L, 0f, FRONT_EDGE, deckTex.full, 0f, 1f, 0f)
+        // Under the shelf, behind the deck.
+        b.quad(PF_L, 0f, BACK_Z, PF_R, 0f, BACK_Z, PF_R, 0f, DECK_TOP, PF_L, 0f, DECK_TOP, dark, 0f, 1f, 0f)
+        b.quad(0f, BACK_H, BACK_Z, GAME_W, BACK_H, BACK_Z, GAME_W, 0f, BACK_Z, 0f, 0f, BACK_Z, PusherArt.backWall.full, 0f, 0f, 1f)
+        // Side gutters beside the front of the deck, and their floors.
+        for (s in 0..1) {
+            val x0 = if (s == 0) PF_L - GUTTER_W else PF_R
+            val x1 = x0 + GUTTER_W
+            b.quad(x0, -GUTTER_DEPTH, GUTTER_TOP, x1, -GUTTER_DEPTH, GUTTER_TOP, x1, -GUTTER_DEPTH, TRAY_FRONT, x0, -GUTTER_DEPTH, TRAY_FRONT, dark, 0f, 1f, 0f)
+            b.quad(x0, 0f, GUTTER_TOP, x1, 0f, GUTTER_TOP, x1, -GUTTER_DEPTH, GUTTER_TOP, x0, -GUTTER_DEPTH, GUTTER_TOP, dark, 0f, 0f, 1f)
+        }
+        // Cabinet walls outside the gutters, full length.
+        b.box(0f, -140f, BACK_Z, PF_L - GUTTER_W, SIDE_H, TRAY_FRONT, BoxFaces(top = cab, right = cab, front = cab))
+        b.box(PF_R + GUTTER_W, -140f, BACK_Z, GAME_W, SIDE_H, TRAY_FRONT, BoxFaces(top = cab, left = cab, front = cab))
+        // Solid side ledges along the back of the deck (where the sim's side walls are).
+        b.box(PF_L - GUTTER_W, 0f, BACK_Z, PF_L, 10f, GUTTER_TOP, BoxFaces(top = gold, right = gold, front = gold))
+        b.box(PF_R, 0f, BACK_Z, PF_R + GUTTER_W, 10f, GUTTER_TOP, BoxFaces(top = gold, left = gold, front = gold))
+        // Front lip, the drop to the tray, and the tray.
+        b.box(PF_L - GUTTER_W, -4f, FRONT_EDGE, PF_R + GUTTER_W, 3f, FRONT_EDGE + 6f, BoxFaces(top = gold, front = gold))
+        b.quad(PF_L - GUTTER_W, -4f, FRONT_EDGE + 6f, PF_R + GUTTER_W, -4f, FRONT_EDGE + 6f, PF_R + GUTTER_W, TRAY_Y, FRONT_EDGE + 6f, PF_L - GUTTER_W, TRAY_Y, FRONT_EDGE + 6f, PusherArt.lipFace.full, 0f, 0f, 1f)
+        b.quad(PF_L - GUTTER_W, TRAY_Y, FRONT_EDGE + 6f, PF_R + GUTTER_W, TRAY_Y, FRONT_EDGE + 6f, PF_R + GUTTER_W, TRAY_Y, TRAY_FRONT, PF_L - GUTTER_W, TRAY_Y, TRAY_FRONT, PusherArt.tray.full, 0f, 1f, 0f)
+        b.box(PF_L - GUTTER_W, TRAY_Y - 60f, TRAY_FRONT, PF_R + GUTTER_W, TRAY_Y + 14f, TRAY_FRONT + 8f, BoxFaces(top = gold, front = cab))
+        b.build()
+    }
+
+    private val warm = PointLight(180f, 380f, 320f, 1f, 0.9f, 0.75f, 720f, 1f)
+    private val backGlow = PointLight(180f, 150f, 80f, 1f, 0.45f, 0.6f, 320f, 0.7f)
+    private val trayLight = PointLight(180f, TRAY_Y + 40f, FRONT_EDGE + 40f, 1f, 0.85f, 0.3f, 300f, 0f)
 
     override fun render(scope: DrawScope) {
-        with(scope) {
-            drawRect(Color(Pal.shade(Pal.ORANGE, 0.35f)), Offset(-40f, -40f), Size(GAME_W + 80f, GAME_H + 80f))
-            // Cabinet side panels with chasing lights.
-            for (i in 0 until 16) {
-                val on = ((time * 8f).toInt() - i) % 4 == 0
-                val c = Color(if (on) Pal.YELLOW else Pal.shade(Pal.GOLD, 0.35f))
-                drawCircle(c, 5f, Offset(14f, 110f + i * 28f))
-                drawCircle(c, 5f, Offset(GAME_W - 14f, 110f + i * 28f))
-            }
-            // Deck.
-            drawRect(Color(Pal.NAVY), Offset(PF_L, DECK_TOP), Size(PF_R - PF_L, FRONT_EDGE - DECK_TOP))
+        val r = stage.begin()
+        val l = r.lighting
+        l.ambR = 0.55f; l.ambG = 0.5f; l.ambB = 0.6f
+        l.setDirection(0.2f, 1f, 0.6f)
+        l.dirR = 0.35f; l.dirG = 0.32f; l.dirB = 0.28f
+        l.points.clear()
+        l.points += warm
+        l.points += backGlow
+        trayLight.intensity = trayFlash * 1.6f
+        if (trayFlash > 0f) l.points += trayLight
+        r.gradient(0xFF0C0610.toInt(), Pal.shade(Pal.ORANGE, 0.2f))
+
+        cabinet.draw(r)
+        drawShelf(r)
+        drawTrayPile(r)
+        drawPanels(r)
+        for (b in world.bodies) drawItem(r, b.kind, b.x, b.y, 0f, b.angle, 1f)
+        for (f in fallers) {
+            if (!f.active) continue
+            // Tipping over the lip and dropping into the tray (or a gutter).
+            val d = (f.y - (if (f.lost) GUTTER_TOP else FRONT_EDGE)).coerceAtLeast(0f)
+            val z = if (f.lost) f.y else FRONT_EDGE + minOf(d * 0.6f, 24f)
+            val y = -minOf(d * 1.4f, if (f.lost) GUTTER_DEPTH - 4f else -TRAY_Y - 4f)
+            val tip = minOf(d / 20f, 1.3f)
+            drawTumbling(r, f.kind, f.x, z, y, tip, f.angle)
+        }
+        for (d in drops) {
+            if (!d.active) continue
+            val t = clamp01(d.t / 0.32f)
+            val z = lerp(DROP_Z, pusherFront + 20f, t)
+            val y = SLOT_Y * (1f - t * t) + 4f
+            drawTumbling(r, d.kind, d.x, z, y, time * 9f, time * 12f)
+        }
+        drawBulbs(r)
+        // Glass side panels over the back of the deck.
+        val glass = PusherArt.glass.full
+        for (x in floatArrayOf(PF_L - GUTTER_W, PF_R + GUTTER_W)) {
+            r.quad(x, 10f + GLASS_H, BACK_Z, x, 10f + GLASS_H, GUTTER_TOP, x, 10f, GUTTER_TOP, x, 10f, BACK_Z, glass, 1f, 0f, 0f, blend = Blend.ALPHA, cull = false)
+        }
+        stage.present(scope)
+
+        val cl = coinsLeft.coerceAtLeast(0)
+        if (cl > 0 && !timeUp) {
+            val a = 0.4f + 0.4f * sin(time * 6f)
+            PixelFont.drawCentered(scope, "TAP TO DROP ${PixelFont.DOWN}", GAME_W / 2f, 150f, 2f, Color.White, a)
+        }
+    }
+
+    /** Winnings pile up in the tray. */
+    private fun drawTrayPile(r: Renderer3D) {
+        val n = won.coerceAtMost(60)
+        for (i in 0 until n) {
+            val x = PF_L + 10f + hash01(i, 41) * (PF_R - PF_L - 20f)
+            val z = FRONT_EDGE + 16f + hash01(i, 42) * (TRAY_FRONT - FRONT_EDGE - 26f)
+            val layer = i / 20
+            r.flat(x, z, TRAY_Y + 1f + layer * 3f, COIN_R * 2f, COIN_R * 2f, PusherArt.coin.full, hash01(i, 43) * TAU)
+        }
+    }
+
+    private fun drawShelf(r: Renderer3D) {
+        val front = pusherFront
+        r.quad(PF_L, SHELF_H, front, PF_R, SHELF_H, front, PF_R, 0f, front, PF_L, 0f, front, PusherArt.shelfFront.full, 0f, 0f, 1f)
+        r.quad(PF_L, SHELF_H, BACK_Z, PF_R, SHELF_H, BACK_Z, PF_R, SHELF_H, front, PF_L, SHELF_H, front, PusherArt.shelfTop.full, 0f, 1f, 0f)
+        val white = TexKit.white.full
+        val glow = TexKit.glow.full
+        for (i in 0 until 6) {
+            val on = ((time * 4f).toInt() + i) % 2 == 0
+            val x = PF_L + 25f + i * (PF_R - PF_L - 50f) / 5f
+            r.sprite(x, SHELF_H + 3f, front - 8f, 7f, 7f, white, emissive = 1.2f, tint = if (on) Pal.CYAN else Pal.TEAL)
+            if (on) r.sprite(x, SHELF_H + 3f, front - 7f, 24f, 24f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.5f, tint = Pal.CYAN)
+        }
+    }
+
+    private fun drawPanels(r: Renderer3D) {
+        val cl = coinsLeft.coerceAtLeast(0)
+        coinsPanel.paint("COINS $cl", if (cl <= 5) Pal.ORANGE else Pal.YELLOW)
+        r.quad(120f, 118f, BACK_Z + 1f, 240f, 118f, BACK_Z + 1f, 240f, 90f, BACK_Z + 1f, 120f, 90f, BACK_Z + 1f, coinsPanel.tex.full, 0f, 0f, 1f, emissive = 1f)
+        // The coin slot the drops come out of.
+        r.quad(150f, SLOT_Y + 8f, BACK_Z + 1f, 210f, SLOT_Y + 8f, BACK_Z + 1f, 210f, SLOT_Y - 2f, BACK_Z + 1f, 150f, SLOT_Y - 2f, BACK_Z + 1f, PusherArt.dark.full, 0f, 0f, 1f)
+        wonPanel.paint("WON $won", Pal.YELLOW)
+        r.quad(130f, TRAY_Y - 8f, TRAY_FRONT + 8.5f, 230f, TRAY_Y - 8f, TRAY_FRONT + 8.5f, 230f, TRAY_Y - 32f, TRAY_FRONT + 8.5f, 130f, TRAY_Y - 32f, TRAY_FRONT + 8.5f, wonPanel.tex.full, 0f, 0f, 1f, emissive = 1f)
+    }
+
+    private fun drawBulbs(r: Renderer3D) {
+        val white = TexKit.white.full
+        val glow = TexKit.glow.full
+        for (s in 0..1) {
+            val x = if (s == 0) (PF_L - GUTTER_W) / 2f else (PF_R + GUTTER_W + GAME_W) / 2f
             for (i in 0 until 12) {
-                val y = DECK_TOP + i * 40f
-                drawRect(Color(Pal.INDIGO), Offset(PF_L, y), Size(PF_R - PF_L, 2f), alpha = 0.6f)
-            }
-            // Side gutters.
-            drawRect(Color(Pal.BLACK), Offset(PF_L - 18f, GUTTER_TOP), Size(18f, FRONT_EDGE - GUTTER_TOP + 20f))
-            drawRect(Color(Pal.BLACK), Offset(PF_R, GUTTER_TOP), Size(18f, FRONT_EDGE - GUTTER_TOP + 20f))
-            // Back wall with drop guide.
-            drawRect(Color(Pal.PLUM), Offset(PF_L, 30f), Size(PF_R - PF_L, DECK_TOP - 30f))
-            val cl = coinsLeft.coerceAtLeast(0)
-            PixelFont.drawCentered(this, "COINS $cl", GAME_W / 2f, 40f, 3f, Color(if (cl <= 5) Pal.ORANGE else Pal.YELLOW))
-            if (cl > 0 && !timeUp) {
-                val a = 0.4f + 0.4f * sin(time * 6f)
-                PixelFont.drawCentered(this, "TAP TO DROP ${PixelFont.DOWN}", GAME_W / 2f, 66f, 2f, Color.White, a)
-            }
-
-            // Coins resting on the deck.
-            for (b in world.bodies) drawItem(this, b.kind, b.x, b.y, b.angle, 1f, 1f)
-
-            // Pusher shelf.
-            val top = DECK_TOP - 6f
-            drawRect(Color(Pal.GRAY), Offset(PF_L, top), Size(PF_R - PF_L, pusherFront - top))
-            drawRect(Color(Pal.LIGHTGRAY), Offset(PF_L, top), Size(PF_R - PF_L, 6f))
-            val stripes = 12
-            for (i in 0 until stripes) {
-                val x = PF_L + i * (PF_R - PF_L) / stripes
-                drawRect(Color(if (i % 2 == 0) Pal.YELLOW else Pal.BLACK), Offset(x, pusherFront - 10f), Size((PF_R - PF_L) / stripes, 10f))
-            }
-            for (i in 0 until 6) {
-                val on = ((time * 4f).toInt() + i) % 2 == 0
-                drawCircle(Color(if (on) Pal.CYAN else Pal.TEAL), 5f, Offset(PF_L + 30f + i * 48f, pusherFront - 26f))
-            }
-
-            // Front edge lip and win tray.
-            drawRect(Color(Pal.GOLD), Offset(PF_L, FRONT_EDGE), Size(PF_R - PF_L, 6f))
-            drawRoundRect(Color(Pal.BLACK), Offset(PF_L - 10f, FRONT_EDGE + 16f), Size(PF_R - PF_L + 20f, GAME_H - FRONT_EDGE - 20f), CornerRadius(10f, 10f))
-            if (trayFlash > 0f) {
-                drawRoundRect(Color(Pal.YELLOW), Offset(PF_L - 10f, FRONT_EDGE + 16f), Size(PF_R - PF_L + 20f, GAME_H - FRONT_EDGE - 20f), CornerRadius(10f, 10f), alpha = trayFlash * 0.35f)
-            }
-            PixelFont.drawCentered(this, "WON $won", GAME_W / 2f, FRONT_EDGE + 36f, 3f, Color(Pal.YELLOW))
-
-            for (f in fallers) {
-                if (!f.active) continue
-                val s = (1f - f.t * 1.2f).coerceAtLeast(0.2f)
-                drawItem(this, f.kind, f.x, f.y, f.angle, s, if (f.lost) 0.5f else 1f)
-            }
-            for (d in drops) {
-                if (!d.active) continue
-                val t = clamp01(d.t / 0.32f)
-                val z = 1f - t
-                val y = lerpY(t)
-                drawOval(Color.Black, Offset(d.x - 12f, y - 4f), Size(24f, 10f), alpha = 0.3f * t)
-                drawItem(this, d.kind, d.x, y - z * 60f, time * 12f, 1f + z * 0.8f, 1f)
+                val z = BACK_Z + 20f + i * (TRAY_FRONT - BACK_Z - 40f) / 11f
+                val on = ((time * 8f).toInt() - i) % 4 == 0
+                r.sprite(x, SIDE_H + 4f, z, 7f, 7f, white, emissive = 1.2f, tint = if (on) Pal.YELLOW else Pal.shade(Pal.GOLD, 0.4f))
+                if (on) r.sprite(x, SIDE_H + 5f, z, 26f, 26f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.55f, tint = Pal.GOLD)
             }
         }
     }
 
-    private fun lerpY(t: Float): Float = 60f + (pusherFront + 20f - 60f) * t
-
-    private fun drawItem(scope: DrawScope, kind: Int, x: Float, y: Float, angle: Float, scale: Float, alpha: Float) {
-        val img = sprites[kind.coerceIn(0, sprites.size - 1)]
-        val r = radiusFor(kind) * scale
-        val px = (r * 2f + 2f) / img.width
-        if (kind == COIN || kind == BIG) {
-            // Coins show a subtle rim flicker as they spin.
-            val squish = 0.85f + 0.15f * abs(cos(angle))
-            scope.drawPixelImage(img, x - r - 1f, y - (r + 1f) * squish, px, alpha)
-        } else {
-            scope.drawPixelImage(img, x - r - 1f, y - r - 1f, px, alpha)
+    /** An item lying flat on the deck at ([x], [z]). */
+    private fun drawItem(r: Renderer3D, kind: Int, x: Float, z: Float, y: Float, angle: Float, scale: Float) {
+        val rad = radiusFor(kind) * scale
+        when (kind) {
+            COIN, BIG -> {
+                // A darker disc under the face reads as the coin's edge.
+                r.flat(x, z + 1.2f, y + 0.4f, rad * 2f, rad * 2f, PusherArt.coinEdge.full, angle)
+                r.flat(x, z, y + COIN_THICK, rad * 2f, rad * 2f, (if (kind == BIG) PusherArt.bigCoin else PusherArt.coin).full, angle)
+            }
+            TICKETS -> r.flat(x, z, y + 3f, rad * 2.2f, rad * 1.6f, PusherArt.tickets.full, angle)
+            GEM -> r.billboard(x, y, z, rad * 2f, rad * 2f, PusherArt.gem.full, lean = 0.4f)
+            else -> r.billboard(x, y, z, rad * 2.2f, rad * 2.2f, PusherArt.star.full, lean = 0.4f)
         }
     }
 
-    private fun buildSprites(): Array<ImageBitmap> {
-        fun coin(size: Int, face: Int, rim: Int, mark: Boolean): ImageBitmap {
-            val c = PixelCanvas(size, size)
-            val mid = size / 2f
-            c.disc(mid, mid, mid - 0.5f, rim)
-            c.disc(mid, mid, mid - 2f, face)
-            c.set((mid - 3).toInt(), (mid - 3).toInt(), Pal.WHITE)
-            c.set((mid - 2).toInt(), (mid - 3).toInt(), Pal.WHITE)
-            c.set((mid - 3).toInt(), (mid - 2).toInt(), Pal.WHITE)
-            if (mark) {
-                val m = mid.toInt()
-                c.vline(m, m - 3, m + 2, rim)
-                c.hline(m - 2, m + 2, m - 1, rim)
-            } else {
-                c.ring(mid, mid, mid - 3f, 1f, Pal.shade(face, 0.85f))
+    /** An item in the air: coins show their face turning edge-on as they tumble. */
+    private fun drawTumbling(r: Renderer3D, kind: Int, x: Float, z: Float, y: Float, tumble: Float, spin: Float) {
+        val rad = radiusFor(kind)
+        when (kind) {
+            COIN, BIG -> {
+                val h = rad * 2f * (0.25f + 0.75f * abs(cos(tumble)))
+                r.sprite(x, y + rad, z, rad * 2f, h, (if (kind == BIG) PusherArt.bigCoin else PusherArt.coin).full, roll = spin * 0.1f)
             }
-            return c.toImageBitmap()
+            TICKETS -> r.sprite(x, y + rad, z, rad * 2.2f, rad * 1.6f, PusherArt.tickets.full, roll = spin * 0.2f)
+            GEM -> r.sprite(x, y + rad, z, rad * 2f, rad * 2f, PusherArt.gem.full)
+            else -> r.sprite(x, y + rad, z, rad * 2.2f, rad * 2.2f, PusherArt.star.full, roll = spin * 0.3f)
         }
-
-        val gem = PixelCanvas(12, 12).apply {
-            for (y in 0 until 12) {
-                val half = if (y < 4) 2 + y else 11 - y
-                hline(6 - half, 5 + half, y, if (y < 4) Pal.CYAN else Pal.SKY)
-            }
-            hline(2, 9, 4, Pal.WHITE)
-            set(4, 2, Pal.WHITE)
-            outline(Pal.NAVY)
-        }
-        val tickets = PixelCanvas(16, 16).apply {
-            fill(1, 3, 14, 10, Pal.ORANGE)
-            fill(2, 1, 14, 10, Pal.GOLD)
-            rect(2, 1, 14, 10, Pal.ORANGE)
-            text("T", 6, 3, Pal.DARKRED)
-            outline(Pal.DARKBROWN)
-        }
-        val star = PixelCanvas(14, 14).apply {
-            val rows = arrayOf(
-                "......##......",
-                "......##......",
-                ".....####.....",
-                ".....####.....",
-                "##############",
-                ".############.",
-                "..##########..",
-                "...########...",
-                "...########...",
-                "..####..####..",
-                "..###....###..",
-                ".###......###.",
-                ".##........##.",
-                "..............",
-            )
-            sprite(rows, 0, 0, mapOf('#' to Pal.YELLOW))
-            set(6, 5, Pal.WHITE); set(7, 5, Pal.WHITE)
-            outline(Pal.ORANGE)
-        }
-        return arrayOf(
-            coin(14, Pal.GOLD, Pal.ORANGE, mark = false),
-            gem.toImageBitmap(),
-            tickets.toImageBitmap(),
-            star.toImageBitmap(),
-            coin(20, Pal.YELLOW, Pal.ORANGE, mark = true),
-        )
     }
 
     // ---------------------------------------------------------------- attract mode
