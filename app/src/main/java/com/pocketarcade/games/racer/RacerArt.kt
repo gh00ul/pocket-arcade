@@ -172,6 +172,29 @@ internal object RacerArt {
     }
     val post: Texture by lazy { TexKit.solid(4, 4, Pal.DARKGRAY) }
 
+    /** Black and white chequers painted across the road at the start/finish line. */
+    val checker: Texture by lazy {
+        paintTexture(32, 4, 4) {
+            fill(Pal.WHITE)
+            for (x in 0 until 16) for (y in 0 until 2) if ((x + y) % 2 == 0) rect(x * 2f, y * 2f, 2f, 2f, Pal.BLACK)
+        }
+    }
+
+    /** The neon FINISH banner on the start/finish gantry, chequered at both ends. */
+    val banner: Texture by lazy {
+        paintTexture(120, 20, 6) {
+            fill(0xFF08060C.toInt())
+            for (x in 0 until 4) for (y in 0 until 4) {
+                val c = if ((x + y) % 2 == 0) Pal.WHITE else Pal.BLACK
+                rect(x * 4f, y * 5f, 4f, 5f, c)
+                rect(104f + x * 4f, y * 5f, 4f, 5f, c)
+            }
+            strokeRound(17f, 1f, 86f, 18f, 2f, 1f, Pal.CYAN)
+            glow(1.4f, Pal.withAlpha(Pal.PINK, 0.8f)) { label("FINISH", 60f, 5f, 10f, -1) }
+            label("FINISH", 60f, 5f, 10f, Pal.mix(Pal.PINK, Pal.WHITE, 0.3f))
+        }
+    }
+
     /** A spinning token pickup (drawn squashed to fake the spin). */
     val token: Texture by lazy {
         paintTexture(14, 14, 10) {
