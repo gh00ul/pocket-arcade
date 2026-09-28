@@ -46,6 +46,15 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
     var exposure = 1f
     var bloom = 0.8f
 
+    // Look: see the matching fields on Renderer3D.
+    var bloomThreshold = Look.BLOOM_THRESHOLD
+    var bloomRadius = Look.BLOOM_RADIUS
+    var grade = Look.GRADE
+    var sharpen = Look.SHARPEN
+    var vignette = Look.VIGNETTE
+    var rim = Look.RIM
+    var floorGlow = 0f
+
     /** UI-thread time spent recording this pass (startFrame → finishFrame), for frame stats. */
     var recordNs = 0L
     internal var statsTaken = false
@@ -82,6 +91,13 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
         fogFloor = 0f
         exposure = 1f
         bloom = 0.8f
+        bloomThreshold = Look.BLOOM_THRESHOLD
+        bloomRadius = Look.BLOOM_RADIUS
+        grade = Look.GRADE
+        sharpen = Look.SHARPEN
+        vignette = Look.VIGNETTE
+        rim = Look.RIM
+        floorGlow = 0f
         recordNs = 0L
         statsTaken = false
         gridW = 0

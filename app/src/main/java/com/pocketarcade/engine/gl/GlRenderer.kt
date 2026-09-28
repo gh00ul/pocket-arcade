@@ -26,6 +26,10 @@ internal class GlRenderer {
         private const val FAR = 9000f
         private const val GL_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FE
         private const val GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF
+        /** Bloom octaves: 1/4, 1/8, 1/16 and 1/32 of the render size. */
+        private const val BLOOM_LEVELS = 4
+        /** Share of the sharp quarter-size bright pass kept under the wider octaves. */
+        private const val BLOOM_CORE = 0.5f
     }
 
     /**
@@ -38,7 +42,8 @@ internal class GlRenderer {
     private var sceneProg = 0
     private var bgProg = 0
     private var brightProg = 0
-    private var blurProg = 0
+    private var downProg = 0
+    private var upProg = 0
     private var compProg = 0
 
     /** A linked program with its uniform locations looked up once each. */
@@ -49,7 +54,8 @@ internal class GlRenderer {
     private var scene = Prog(0)
     private var bg = Prog(0)
     private var bright = Prog(0)
-    private var blur = Prog(0)
+    private var down = Prog(0)
+    private var up = Prog(0)
     private var comp = Prog(0)
     private var streamVbo = 0
     private var streamVao = 0
@@ -74,12 +80,11 @@ internal class GlRenderer {
         var sceneFbo = 0
         var sceneTex = 0
         var sceneDepth = 0
-        var bloomW = 0
-        var bloomH = 0
-        var bloomFboA = 0
-        var bloomTexA = 0
-        var bloomFboB = 0
-        var bloomTexB = 0
+        val bloomW = IntArray(BLOOM_LEVELS)
+        val bloomH = IntArray(BLOOM_LEVELS)
+        val bloomFbo = IntArray(BLOOM_LEVELS)
+        val bloomTex = IntArray(BLOOM_LEVELS)
+        var bloomLevels = 0
         var lastUsed = 0L
     }
     private val targets = ArrayList<Targets>()
@@ -123,12 +128,14 @@ internal class GlRenderer {
         sceneProg = program(GlShaders.SCENE_VS, GlShaders.SCENE_FS)
         bgProg = program(GlShaders.BG_VS, GlShaders.BG_FS)
         brightProg = program(GlShaders.POST_VS, GlShaders.BRIGHT_FS)
-        blurProg = program(GlShaders.POST_VS, GlShaders.BLUR_FS)
+        downProg = program(GlShaders.POST_VS, GlShaders.DOWN_FS)
+        upProg = program(GlShaders.POST_VS, GlShaders.UP_FS)
         compProg = program(GlShaders.POST_VS, GlShaders.COMPOSITE_FS)
         scene = Prog(sceneProg)
         bg = Prog(bgProg)
         bright = Prog(brightProg)
-        blur = Prog(blurProg)
+        down = Prog(downProg)
+        up = Prog(upProg)
         comp = Prog(compProg)
 
         GLES30.glGetIntegerv(GLES30.GL_MAX_SAMPLES, tmp, 0)
@@ -446,16 +453,21 @@ internal class GlRenderer {
             GLES30.glRenderbufferStorage(GLES30.GL_RENDERBUFFER, GLES30.GL_DEPTH_COMPONENT24, w, h)
             GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, t.sceneDepth)
         }
-        t.bloomW = max(1, w / 4)
-        t.bloomH = max(1, h / 4)
-        GLES30.glGenFramebuffers(1, tmp, 0); t.bloomFboA = tmp[0]
-        t.bloomTexA = colorTexture(t.bloomW, t.bloomH)
-        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFboA)
-        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, t.bloomTexA, 0)
-        GLES30.glGenFramebuffers(1, tmp, 0); t.bloomFboB = tmp[0]
-        t.bloomTexB = colorTexture(t.bloomW, t.bloomH)
-        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFboB)
-        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, t.bloomTexB, 0)
+        // The bloom chain: each octave half the size of the one before, down to about 1/32.
+        var bw = w / 4
+        var bh = h / 4
+        for (i in 0 until BLOOM_LEVELS) {
+            if (i > 0 && (bw < 2 || bh < 2)) break
+            t.bloomW[i] = max(1, bw)
+            t.bloomH[i] = max(1, bh)
+            GLES30.glGenFramebuffers(1, tmp, 0); t.bloomFbo[i] = tmp[0]
+            t.bloomTex[i] = colorTexture(t.bloomW[i], t.bloomH[i])
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFbo[i])
+            GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, t.bloomTex[i], 0)
+            t.bloomLevels = i + 1
+            bw /= 2
+            bh /= 2
+        }
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         targets += t
         return t
@@ -476,7 +488,9 @@ internal class GlRenderer {
         fun tex(id: Int) { if (id != 0) { tmp[0] = id; GLES30.glDeleteTextures(1, tmp, 0) } }
         fbo(t.msFbo); rb(t.msColor); rb(t.msDepth)
         fbo(t.sceneFbo); tex(t.sceneTex); rb(t.sceneDepth)
-        fbo(t.bloomFboA); tex(t.bloomTexA); fbo(t.bloomFboB); tex(t.bloomTexB)
+        for (i in 0 until t.bloomLevels) {
+            fbo(t.bloomFbo[i]); tex(t.bloomTex[i])
+        }
     }
 
     // ------------------------------------------------------------------ frame
@@ -571,33 +585,49 @@ internal class GlRenderer {
         GLES30.glDisable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
         GLES30.glBindVertexArray(quadVao)
 
-        // Bloom: bright parts at quarter size, blurred twice each way.
+        // Bloom: bright parts at quarter size, halved octave by octave with a dual filter, then
+        // added back up with tent filters so glows get a tight core and a wide soft halo.
         if (p.bloom > 0f) {
-            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFboA)
-            GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardColor, 0)
-            GLES30.glViewport(0, 0, t.bloomW, t.bloomH)
-            GLES30.glUseProgram(brightProg)
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFbo[0])
+            GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardColor, 0)
+            GLES30.glViewport(0, 0, t.bloomW[0], t.bloomH[0])
+            GLES30.glUseProgram(brightProg)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.sceneTex)
             GLES30.glUniform1i(bright.loc("uTex"), 0)
             GLES30.glUniform2f(bright.loc("uTexel"), 1f / rw, 1f / rh)
-            GLES30.glUniform1f(bright.loc("uThreshold"), 0.62f)
+            GLES30.glUniform1f(bright.loc("uThreshold"), p.bloomThreshold)
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
-            GLES30.glUseProgram(blurProg)
-            GLES30.glUniform1i(blur.loc("uTex"), 0)
-            repeat(2) { pass ->
-                val spread = 1f + pass
-                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFboB)
+            val levels = t.bloomLevels
+            GLES30.glUseProgram(downProg)
+            GLES30.glUniform1i(down.loc("uTex"), 0)
+            for (i in 1 until levels) {
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFbo[i])
                 GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardColor, 0)
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTexA)
-                GLES30.glUniform2f(blur.loc("uDir"), spread / t.bloomW, 0f)
-                GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
-                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFboA)
-                GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardColor, 0)
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTexB)
-                GLES30.glUniform2f(blur.loc("uDir"), 0f, spread / t.bloomH)
+                GLES30.glViewport(0, 0, t.bloomW[i], t.bloomH[i])
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTex[i - 1])
+                GLES30.glUniform2f(down.loc("uTexel"), 1f / t.bloomW[i - 1], 1f / t.bloomH[i - 1])
                 GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             }
+            GLES30.glUseProgram(upProg)
+            GLES30.glUniform1i(up.loc("uTex"), 0)
+            GLES30.glUniform1f(up.loc("uWeight"), p.bloomRadius)
+            GLES30.glEnable(GLES30.GL_BLEND)
+            GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_ONE)
+            for (i in levels - 2 downTo 0) {
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFbo[i])
+                GLES30.glViewport(0, 0, t.bloomW[i], t.bloomH[i])
+                if (i == 0) {
+                    // The quarter-size bright pass is barely blurred: keep only part of it, so
+                    // lettering on bright signs isn't washed out by its own glow.
+                    GLES30.glBlendColor(0f, 0f, 0f, BLOOM_CORE)
+                    GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_CONSTANT_ALPHA)
+                }
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTex[i + 1])
+                GLES30.glUniform2f(up.loc("uTexel"), 1f / t.bloomW[i + 1], 1f / t.bloomH[i + 1])
+                GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+            }
+            GLES30.glDisable(GLES30.GL_BLEND)
         }
 
         // Composite into the window at the pass's rectangle (GL's origin is bottom-left).
@@ -612,10 +642,24 @@ internal class GlRenderer {
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.sceneTex)
         GLES30.glUniform1i(comp.loc("uScene"), 0)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
-        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTexA)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTex[0])
         GLES30.glUniform1i(comp.loc("uBloom"), 1)
-        GLES30.glUniform1f(comp.loc("uBloomAmount"), p.bloom)
-        GLES30.glUniform1f(comp.loc("uVignette"), 0.22f)
+        // The octaves add up: scale back so the glow's total light stays what one level gave
+        // (a little more, since the wide halo is fainter per pixel, but not so much that big
+        // bright areas such as a daytime sky turn hazy).
+        val w = p.bloomRadius
+        var sum = if (t.bloomLevels > 1) BLOOM_CORE else 1f
+        var wk = 1f
+        for (i in 1 until t.bloomLevels) {
+            wk *= w
+            sum += wk
+        }
+        val bloomNorm = 1.25f / sum
+        GLES30.glUniform1f(comp.loc("uBloomAmount"), p.bloom * bloomNorm)
+        GLES30.glUniform2f(comp.loc("uTexel"), 1f / rw, 1f / rh)
+        GLES30.glUniform1f(comp.loc("uVignette"), p.vignette)
+        GLES30.glUniform1f(comp.loc("uSharpen"), p.sharpen)
+        GLES30.glUniform1f(comp.loc("uGrade"), p.grade)
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
@@ -677,6 +721,8 @@ internal class GlRenderer {
         GLES30.glUniform3f(scene.loc("uDirCol"), p.dirCol[0], p.dirCol[1], p.dirCol[2])
         GLES30.glUniform3f(scene.loc("uFog"), p.fogNear, p.fogFar, p.fogFloor)
         GLES30.glUniform1f(scene.loc("uExposure"), p.exposure)
+        GLES30.glUniform1f(scene.loc("uRim"), p.rim)
+        GLES30.glUniform1f(scene.loc("uFloorGlow"), p.floorGlow)
         for (i in 0 until p.lightCount) {
             val o = i * 8
             lightPos[i * 4] = p.lights[o]; lightPos[i * 4 + 1] = p.lights[o + 1]

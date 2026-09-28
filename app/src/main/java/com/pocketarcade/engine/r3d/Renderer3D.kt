@@ -44,6 +44,27 @@ class Renderer3D(w: Int, h: Int) {
     var exposure = 1f
     var bloom = 0.8f
 
+    /** Brightness (0..1, after tone mapping) above which things glow. */
+    var bloomThreshold = Look.BLOOM_THRESHOLD
+
+    /** How far glows spread (0 = a tight halo, 1 = wide and hazy). */
+    var bloomRadius = Look.BLOOM_RADIUS
+
+    /** Strength of the colour grade (saturation, contrast, cool shadows / warm highlights). */
+    var grade = Look.GRADE
+
+    /** Sharpening of the upscaled image (0 = off). */
+    var sharpen = Look.SHARPEN
+
+    /** Darkening towards the corners. */
+    var vignette = Look.VIGNETTE
+
+    /** Fresnel rim light on lit surfaces, tinted by the lights nearby (0 = off). */
+    var rim = Look.RIM
+
+    /** Blacklight: how much saturated colours on the floor (y ≈ 0, facing up) glow. */
+    var floorGlow = 0f
+
     var polysDrawn = 0
         private set
 
@@ -402,6 +423,13 @@ class Renderer3D(w: Int, h: Int) {
         p.fogFloor = fogUsedFloor
         p.exposure = exposure
         p.bloom = bloom
+        p.bloomThreshold = bloomThreshold
+        p.bloomRadius = bloomRadius
+        p.grade = grade
+        p.sharpen = sharpen
+        p.vignette = vignette
+        p.rim = rim
+        p.floorGlow = floorGlow
         packLights(p)
 
         // Opaque buckets first, then the see-through geometry in order.
@@ -683,6 +711,16 @@ class Renderer3D(w: Int, h: Int) {
             blend = blend, emissive = emissive, alpha = alpha, cull = false, tint = tint,
         )
     }
+}
+
+/** Default post-processing and shading settings shared by [Renderer3D] and [RenderPass]. */
+object Look {
+    const val BLOOM_THRESHOLD = 0.62f
+    const val BLOOM_RADIUS = 0.65f
+    const val GRADE = 1f
+    const val SHARPEN = 0.25f
+    const val VIGNETTE = 0.22f
+    const val RIM = 0.3f
 }
 
 /** Blends two ARGB colours. */
