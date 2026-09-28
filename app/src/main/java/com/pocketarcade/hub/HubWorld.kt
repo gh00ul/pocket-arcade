@@ -112,6 +112,21 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         }
     }
 
+    /** The prompt spot of machine [index]'s cabinet nearest the player, or null if it has none. */
+    fun nearestMachineSpot(index: Int): Spot? {
+        var best: Spot? = null
+        var bestD = Float.MAX_VALUE
+        for (s in map.spots) {
+            if (s.type != SpotType.MACHINE || s.machine != index) continue
+            val d = abs(s.area.centerX - player.x) + abs(s.area.centerY - player.y)
+            if (d < bestD) {
+                bestD = d
+                best = s
+            }
+        }
+        return best
+    }
+
     /** Points the camera's dive at a machine's screen (used for the enter/exit transition). */
     fun setDive(spot: Spot?, amount: Float) {
         if (spot == null || amount <= 0f) {

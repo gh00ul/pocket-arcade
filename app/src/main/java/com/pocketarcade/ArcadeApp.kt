@@ -114,8 +114,14 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         }
     }
 
-    fun enterMachine(index: Int) {
+    /**
+     * Spends a token and dives into machine [index] through [at], the cabinet whose prompt was
+     * tapped; without one (a launch shortcut) it dives into the copy nearest the player. The
+     * cabinet is picked before the token is spent.
+     */
+    fun enterMachine(index: Int, at: Spot?) {
         if (busy) return
+        val spot = at ?: world.nearestMachineSpot(index) ?: return
         scope.launch {
             if (!services.repo.spendToken()) {
                 audio.play(Sfx.ERROR)
@@ -127,7 +133,6 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             audio.play(Sfx.TOKEN)
             audio.play(Sfx.WHOOSH, 0.8f)
             services.haptics.hit()
-            val spot = world.map.spots.first { it.type == SpotType.MACHINE && it.machine == index }
             diveSpot = spot
             world.cancelInput()
             launch {
@@ -167,12 +172,12 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         if (index < 0 || screen == Screen.GAME) return@LaunchedEffect
         overlay = Overlay.NONE
         screen = Screen.HUB
-        enterMachine(index)
+        enterMachine(index, null)
     }
 
     fun onSpot(spot: Spot) {
         when (spot.type) {
-            SpotType.MACHINE -> enterMachine(spot.machine)
+            SpotType.MACHINE -> enterMachine(spot.machine, spot)
             SpotType.TOKENS -> {
                 world.cancelInput()
                 overlay = Overlay.TOKENS
