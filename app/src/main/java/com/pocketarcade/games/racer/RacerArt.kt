@@ -168,11 +168,23 @@ internal object RacerArt {
         arrayOf(
             sign("ARCADE", Pal.CYAN),
             sign("TURBO!", Pal.PINK),
-            sign("TOKENS", Pal.YELLOW),
+            sign("DRIFT!", Pal.YELLOW),
             sign("HI-SCORE", Pal.LIME),
         )
     }
     val post: Texture by lazy { TexKit.solid(4, 4, Pal.DARKGRAY) }
+
+    /** Start light lenses, lit red and green and dark, and the black box they sit in. */
+    private fun lamp(color: Int, lit: Boolean) = paintTexture(16, 16, 8) {
+        clear(0)
+        circle(8f, 8f, 7.2f, Pal.shade(color, if (lit) 0.7f else 0.25f))
+        circle(8f, 8f, 5.6f, Pal.shade(color, if (lit) 1f else 0.35f))
+        if (lit) circle(6.5f, 6.5f, 2f, Pal.mix(color, Pal.WHITE, 0.6f))
+    }
+    val lampRed: Texture by lazy { lamp(0xFFFF2020.toInt(), true) }
+    val lampGreen: Texture by lazy { lamp(0xFF20FF50.toInt(), true) }
+    val lampOff: Texture by lazy { lamp(Pal.GRAY, false) }
+    val lampBox: Texture by lazy { TexKit.solid(4, 4, 0xFF06040A.toInt()) }
 
     /** Black and white chequers painted across the road at the start/finish line. */
     val checker: Texture by lazy {

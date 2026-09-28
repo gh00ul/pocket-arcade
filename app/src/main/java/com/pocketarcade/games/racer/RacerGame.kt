@@ -669,7 +669,8 @@ class RacerGame : BaseMiniGame() {
         buildTrack()
         camY = carY + CAM_UP
         val px = me.x
-        stage.look(px * 0.55f, camY, CAM_BACK, px * 0.2f, carY + 20f, -420f, fovDeg = if (boostT > 0f) 60f else 56f, centerYFrac = 0.44f)
+        // The camera follows the car most of the way across, so it stays in view off the road.
+        stage.look(px * 0.8f, camY, CAM_BACK, px * 0.5f, carY + 20f, -420f, fovDeg = if (boostT > 0f) 60f else 56f, centerYFrac = 0.44f)
         val r = stage.begin()
         val l = r.lighting
         l.ambR = 0.55f; l.ambG = 0.5f; l.ambB = 0.7f
@@ -836,10 +837,13 @@ class RacerGame : BaseMiniGame() {
             r.quad(x - span, y + 160f, z, x + span, y + 160f, z, x + span, y + 124f, z, x - span, y + 124f, z, RacerArt.banner.full, 0f, 0f, 1f, emissive = 1.1f, cull = false)
             for (n in -2..2) {
                 val lx = x + n * 34f
-                r.quad(lx - 13f, y + 124f, z + 0.5f, lx + 13f, y + 124f, z + 0.5f, lx + 13f, y + 102f, z + 0.5f, lx - 13f, y + 102f, z + 0.5f, RacerArt.post.full, 0f, 0f, 1f, cull = false)
+                r.quad(lx - 13f, y + 124f, z + 0.5f, lx + 13f, y + 124f, z + 0.5f, lx + 13f, y + 102f, z + 0.5f, lx - 13f, y + 102f, z + 0.5f, RacerArt.lampBox.full, 0f, 0f, 1f, cull = false)
                 if (lightColor != 0) {
-                    r.sprite(lx, y + 113f, z + 2f, 20f, 20f, glow, blend = Blend.ADD, emissive = 1.2f, tint = lightColor)
-                    r.sprite(lx, y + 113f, z + 3f, 60f, 60f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.4f, tint = lightColor)
+                    val lens = if (lightColor == Pal.RED) RacerArt.lampRed.full else RacerArt.lampGreen.full
+                    r.sprite(lx, y + 113f, z + 1.5f, 18f, 18f, lens, emissive = 1f)
+                    r.sprite(lx, y + 113f, z + 3f, 56f, 56f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.3f, tint = lightColor)
+                } else {
+                    r.sprite(lx, y + 113f, z + 1.5f, 18f, 18f, RacerArt.lampOff.full, emissive = 0.6f)
                 }
             }
         }
