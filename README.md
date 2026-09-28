@@ -1,8 +1,8 @@
 # Pocket Arcade
 
-A 3D arcade for Android that you walk around in. Stroll a blacklight-carpeted arcade floor with a floating joystick, past banks of claw machines, skee-ball alleys, linked racers and a coin-pusher island. Step up to a glowing cabinet, spend a token, and the camera dives into the machine's screen. Play a 40–60 second round, watch your tickets print out of the slot, then trade them at the prize counter for hats, outfits and decorations that show up in the hall.
+A 3D arcade for Android that you walk around in. Stroll a blacklight-carpeted arcade floor with a floating joystick, past banks of claw machines, skee-ball alleys, linked racers, light-gun cabinets, pinball tables, fishing tubs and a coin-pusher island. Step up to a glowing cabinet, spend a token, and the camera dives into the machine's screen. Play a 40–75 second round, watch your tickets print out of the slot, then trade them at the prize counter for hats, outfits and decorations that show up in the hall.
 
-Everything is made in code. The hall and every machine are rendered on the GPU with OpenGL ES 3 at full resolution: per-pixel lighting from dozens of coloured lights, 4× anti-aliasing and a bloom glow on neon and screens. Every model, texture, font glyph and sound is generated at runtime. Textures are painted with Android's 2D canvas, and sounds are synthesized through `AudioTrack`. The app ships no image or audio files and uses no third-party libraries beyond AndroidX/Compose.
+Everything is made in code. The hall and every machine are rendered on the GPU with OpenGL ES 3: per-pixel lighting from dozens of coloured lights with rim light, 4× anti-aliasing, a multi-scale bloom glow on neon and screens, and colour grading. Every model, texture, font glyph and sound is generated at runtime. Textures are painted with Android's 2D canvas, and sounds are synthesized through `AudioTrack`. The app ships no image or audio files and uses no third-party libraries beyond AndroidX/Compose.
 
 <p>
   <img src="docs/screenshots/title.png" width="160" alt="Title screen">
@@ -19,6 +19,11 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
   <img src="docs/screenshots/racer.png" width="160" alt="Turbo racer">
   <img src="docs/screenshots/stacker.png" width="160" alt="Stacker">
 </p>
+<p>
+  <img src="docs/screenshots/shooter.png" width="160" alt="Shootout light-gun shooter">
+  <img src="docs/screenshots/pinball.png" width="160" alt="Star Flipper pinball">
+  <img src="docs/screenshots/fishing.png" width="160" alt="Gone Fishing">
+</p>
 
 ## Features
 
@@ -26,24 +31,28 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 - A real arcade floor plan:
   - at the back, a prize counter with a wall of plushies, flanked by banks of claw machines and stackers;
   - across the floor, skee-ball and basketball alleys, air hockey tables, a whack-a-mole row, a four-machine coin-pusher island and linked racers in the middle;
+  - further toward the doors, a row of light-gun cabinets, pinball tables along the right wall and fishing tubs on the left, with two spare banks ready for new machines;
   - around the edges, a snack bar with café tables and vending machines, and a photo booth;
   - by the doors, a token kiosk and kiddie rides.
 - Every cabinet is modelled for its game, from glass claw boxes with a working gantry to long lanes, basketball cages, racer seats and pusher shelves that sweep. Each has a live attract-mode screen, a marquee with chasing bulbs, a neon glow and its own coloured light.
 - Blacklight carpet, terrazzo at the entrance, walls rising into the dark with acoustic panels, uplights and a backlit mural, and the street outside through the cut-away shopfront.
 - 3D kids with a walk cycle, poses for playing, cheering and sitting, and hats. Yours follows a floating joystick that appears wherever your thumb lands. The other kids find their way between machines, play them and sit down at the snack bar.
 - Collision against walls, cabinets and furniture, with sliding along edges.
-- Walk up to a machine and a **▶ PLAY (1 token)** prompt pops up. Tap it and the camera flies into the cabinet's screen. Exiting flies you back out to exactly where you stood.
+- Walk up to a machine and a **▶ PLAY (1 token)** prompt pops up. Tap it and the camera flies into the screen of the cabinet you're standing at. Exiting flies you back out to exactly where you stood.
 - An ambient arcade soundscape: mains hum, crowd murmur and distant machine bleeps.
 
-**Eight machines**, each a full 3D game that pays out tickets:
+**Eleven machines**, each a full 3D game that pays out tickets:
 1. **Claw machine**: a glass box full of 3D plushies, with a gantry and a claw that swings on its cable (a real variable-length pendulum), with hinged prongs that open and close. Prizes are a physics pile. Whether a prize holds depends on the machine's grip for that grab and how centred you were, and it can slip on the way up. Now and then you get a gold **lucky claw** turn. Prizes you win go into your plush collection (11 to find, including a rare golden cat).
 2. **Skee-ball**: a player's-eye alley with a tilted target board and raised ring walls. Drag the ball to aim, then flick up. Flick speed sets how far it jumps. Rings are worth 10–100, with a 200-point bonus hole in the corner.
 3. **Whack-a-mole**: a table with real holes. Moles, golden moles and bombs rise out of them and you bonk them with a 3D mallet. It speeds up as the round goes on, and hits in a row build a combo.
 4. **Coin pusher**: tap to drop coins onto a packed deck while the shelf sweeps back and forth. Coins that spill over the lip land in the win tray. Gems, big coins, ticket bundles and coin-shower stars are mixed in, and five spills in quick succession trigger an avalanche bonus.
 5. **Hoop shot**: flick to shoot at a real 3D rim, net and backboard, with rim bounces and banks. Makes in a row multiply your points up to ×5, and the hoop starts moving in the second half.
-6. **Air hockey** (new): drag your mallet and smash the puck past the CPU on an air table with rounded corners. The CPU speeds up as you pull ahead. Goals in a row score more, and the first to 7 wins.
-7. **Turbo racer** (new): a synthwave road race into the sunset. Drag to steer through curves and over hills, dodge traffic, skim past cars for bonus points and grab tokens off the road.
-8. **Stacker** (new): tap to drop each sliding slab onto the tower. Any overhang is cut off and tumbles away. Line one up perfectly to keep it whole and build a combo. You get three misses.
+6. **Air hockey**: drag your mallet and smash the puck past the CPU on an air table with rounded corners. The CPU speeds up as you pull ahead. Goals in a row score more, and the first to 7 wins.
+7. **Turbo racer**: a three-lap synthwave race against seven rivals on a closed circuit. Start from the grid under the start lights, drag to steer through the bends and over the hills, and hold a second finger to drift through corners and charge a turbo. Rivals take racing lines, overtake and bump. A live position and lap counter tracks the race, and you're paid for your finishing place, clean passes and time left.
+8. **Stacker**: tap to drop each sliding slab onto the tower. Any overhang is cut off and tumbles away. Line one up perfectly to keep it whole and build a combo. You get three misses.
+9. **Shootout** (new): a light-gun cabinet with two mounted pistols. Tap to shoot exactly where you tap. Targets pop out of cover and fly in: red-ringed gunmen fire back, gold drones are rare and pay big, and hands-up civilians must not be shot. Six shots, then tap the reload bar. Hits in a row build a combo, accuracy pays a bonus, and the round ends with a boss.
+10. **Star Flipper** (new): a pinball table seen down the glass. Hold the left or right half of the screen to flip, pull the plunger down and let go to launch, and nudge with a swipe up (don't tilt). Pop bumpers, slingshots, drop targets for a multiplier and three top lanes that light multiball.
+11. **Gone Fishing** (new): a round pond tub. Hold on the pond to charge a cast and let go at the right power, strike when the bobber dives, then draw circles on the reel to wind the fish in. Ease off when it pulls, or the line snaps. Bigger and rarer fish, up to a golden one, are worth more.
 
 **Game feel**
 - Screen shake, particles, squash and stretch, popping score text and a 3-2-1-GO countdown.
@@ -66,13 +75,17 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 - **Geometry.** Static models live on the GPU as vertex buffers and draw as instances. Polygons are sorted into opaque, alpha-blended and additive passes, so glass, glows, neon and sparks all work.
 - **Lighting.**
   - Per-pixel: ambient, one directional light and up to 64 coloured point lights. A light grid across the floor keeps the many lights cheap.
-  - Glossy highlights, darkening fog and filmic tone mapping.
+  - Glossy highlights with per-material sharpness, rim light that lifts cabinets and kids off the dark floor, darkening fog and filmic tone mapping.
+  - Normals are transformed with the inverse-transpose, so squashed and stretched models light correctly.
 - **Models.** They are built from boxes, cylinders, lathes, spheres, capsules and tori, and move as jointed parts: the claw's prongs, the mallet's swing, the kids' limbs.
 - **Image quality.**
-  - Scenes render with 4× multisampling, alpha-to-coverage for cut-outs, a bloom glow and a vignette.
+  - Scenes render with 4× multisampling, alpha-to-coverage for cut-outs, a multi-scale bloom glow, colour grading with dither, and a vignette.
+  - Textures use premultiplied alpha, so cut-outs and glows have no dark fringes.
+  - The multisampled buffers are discarded after the resolve, which saves memory bandwidth on tile-based phone GPUs.
   - The render resolution eases down if frames run long.
-- **Textures.** They are painted with Android's `Canvas` (gradients, real fonts, glows and grain). A texture can be stored at a finer resolution than the texel size the code maps it in.
+- **Textures.** They are painted with Android's `Canvas` (gradients, real fonts, glows and grain). A texture can be stored at a finer resolution than the texel size the code maps it in. Live textures such as cabinet screens reuse their upload buffers instead of allocating a copy every frame.
 - **Stage3D.** Gives each game a 3D view that maps touches onto world planes and world points back to the screen.
+- **GL context loss.** GPU resources are tagged with a process-wide generation, so models and textures cached for the whole app are re-uploaded after the activity is recreated.
 
 ## Install the APK on your phone
 
@@ -100,9 +113,9 @@ To jump straight into a machine (it still costs a token), pass its id:
 adb shell am start -n com.pocketarcade/.MainActivity --es play racer
 ```
 
-The ids are `claw`, `whack`, `skeeball`, `hoops`, `pusher`, `airhockey`, `racer` and `stacker`. To log frame times, run `adb shell setprop log.tag.PocketArcade3D DEBUG` and restart the app.
+The ids are `claw`, `whack`, `skeeball`, `hoops`, `pusher`, `airhockey`, `racer`, `stacker`, `shooter`, `pinball` and `fishing`. To log frame times once a second, run `adb shell setprop log.tag.PocketArcade3D DEBUG` and restart the app. Each line shows the UI-thread record time, the GL draw time, the swap interval, GPU time where the driver supports timer queries, and the render scale. To compare builds like for like, also run `adb shell setprop log.tag.PocketArcade3DPin DEBUG`, which holds the render scale at 0.8.
 
-The headless payout simulation plays every machine with bots of different skill and prints average tickets per round:
+The unit tests play every machine headlessly with seeded bots of different skill, check that every round finishes and pays out within the target bands, and print average tickets per round. They also check the hall floor plan (no overlaps, every cabinet reachable on the same walk grid the kids use):
 
 ```bash
 ./gradlew testDebugUnitTest
@@ -110,7 +123,7 @@ The headless payout simulation plays every machine with bots of different skill 
 
 ## Add a new machine
 
-Write one class and register it in one place. The hall gives it a cabinet, a play mat, a prompt, a high-score table and an attract screen automatically, and grows a new row when it needs room.
+Write one class and register it in one place. The hall gives it a cabinet, a play mat, a prompt, a high-score table and an attract screen automatically, and puts it in one of the spare banks near the doors. If every bank is taken, the floor plan fails loudly instead of overlapping anything: add a `Slot` to `HubLayout.slots`.
 
 1. Create `app/src/main/java/com/pocketarcade/games/<name>/<Name>Game.kt` and extend `BaseMiniGame`, which implements the `MiniGame` interface and provides particles, screen shake, popups, a score and a round clock. Draw with a `Stage3D`, or straight onto the Compose `DrawScope` for a flat game:
 
@@ -137,6 +150,7 @@ class BowlingGame : BaseMiniGame() {
     override fun onTouch(type: TouchType, id: Long, x: Float, y: Float, timeMs: Long) {
         // x, y are field units (360 x 640); stage.touchToPlane(x, y, 0f, out) finds the spot in the world
     }
+    override fun cancelInput() { /* the host stopped forwarding touches (pause): forget every tracked pointer */ }
     override fun ticketsFor(score: Int) = 1 + score / 20
     override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) { /* tiny cabinet screen */ }
 }
@@ -148,11 +162,16 @@ class BowlingGame : BaseMiniGame() {
 fun createAll(): List<MiniGame> = listOf(
     ClawMachineGame(), WhackAMoleGame(), SkeeBallGame(), HoopsGame(),
     CoinPusherGame(), AirHockeyGame(), RacerGame(), StackerGame(),
+    ShooterGame(), PinballGame(), FishingGame(),
     BowlingGame(),
 )
 ```
 
-That's all. The host takes care of the intro card, countdown, timer, pause/quit, results, ticket printing, token spending and saving. Override `isSettled()` if your round has things still in motion after the clock runs out, and set `endedEarly = true` to finish a round before the clock does.
+That's all. The host takes care of the intro card, countdown, timer, pause/quit, results, ticket printing, token spending and saving. Override `isSettled()` if your round has things still in motion after the clock runs out, and set `endedEarly = true` to finish a round before the clock does. `cancelInput()` is called whenever the host stops forwarding touches (pause, Back, the app going to the background, the round ending), so a finger lifted meanwhile can't leave a control stuck.
+
+To give the machine its own hall cabinet instead of a generic one, point `override val cabinet` at an object implementing `CabinetDesign` (`hub/CabinetDesign.kt`) in the game's package. It declares the footprint, the camera dive point and the attract screen size, and builds the model from shared pieces (side panels, a marquee with chase bulbs, an LED display, glass, posts, lights and a live screen). `RacerCabinet`, `ShooterCabinet`, `PinballCabinet` and `FishingCabinet` are examples.
+
+Each game gets a headless test in `app/src/test/java/com/pocketarcade/games/<name>/` built on `SimHarness`, which plays rounds exactly like the host (including the 1.2 s ending) and checks the payout bands.
 
 ## Project layout
 
@@ -164,13 +183,15 @@ app/src/main/java/com/pocketarcade/
 │   │                      particles, shake/springs, haptics, the game's type and icons
 │   ├── r3d/               scene recorder, camera, lighting, models, painted textures, Stage3D
 │   └── gl/                OpenGL ES 3 thread, renderer, shaders and the render surface
-├── hub/                   hall floor plan, scene, cabinets, fixtures, 3D kids, camera, joystick
+├── hub/                   hall floor plan and banks, scene, cabinets and the CabinetDesign seam,
+│                          fixtures, 3D kids, camera, joystick
 ├── games/                 MiniGame interface, BaseMiniGame, GameRegistry
 │   ├── claw/  skeeball/  whackamole/  coinpusher/  hoops/
-│   └── airhockey/  racer/  stacker/
+│   ├── airhockey/  racer/  stacker/
+│   └── shooter/  pinball/  fishing/
 ├── data/                  DataStore repository, save state, prize catalog
 └── ui/                    HUD, title, prize counter, token machine, profile, game host, widgets,
                            and the thumbnail studio
 ```
 
-Tuning knobs for every game (difficulty and payouts) are grouped at the top of each game file in a `*Tuning` object: `ClawTuning`, `SkeeTuning`, `WhackTuning`, `PusherTuning`, `HoopsTuning`, `HockeyTuning`, `RacerTuning` and `StackerTuning`.
+Tuning knobs for every game (difficulty and payouts) are grouped at the top of each game file in a `*Tuning` object: `ClawTuning`, `SkeeTuning`, `WhackTuning`, `PusherTuning`, `HoopsTuning`, `HockeyTuning`, `RacerTuning`, `StackerTuning`, `ShooterTuning`, `PinballTuning` and `FishingTuning`.
