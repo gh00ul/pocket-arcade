@@ -11,6 +11,7 @@ import java.lang.ref.WeakReference
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.nio.IntBuffer
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -27,7 +28,10 @@ internal class GlRenderer {
         private const val GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF
     }
 
-    /** Bumped whenever the GL context is (re)created, so every resource knows to re-upload. */
+    /**
+     * This context's number from [GlGeneration] (process-wide), so textures and models cached
+     * across activities know to re-upload after any context is (re)created.
+     */
     var generation = 0
         private set
 
@@ -37,7 +41,16 @@ internal class GlRenderer {
     private var blurProg = 0
     private var compProg = 0
 
-    private val su = HashMap<String, Int>()
+    /** A linked program with its uniform locations looked up once each. */
+    private class Prog(val id: Int) {
+        private val locs = HashMap<String, Int>()
+        fun loc(name: String): Int = locs.getOrPut(name) { GLES30.glGetUniformLocation(id, name) }
+    }
+    private var scene = Prog(0)
+    private var bg = Prog(0)
+    private var bright = Prog(0)
+    private var blur = Prog(0)
+    private var comp = Prog(0)
     private var streamVbo = 0
     private var streamVao = 0
     private var bgVbo = 0
@@ -45,6 +58,8 @@ internal class GlRenderer {
     private var quadVbo = 0
     private var quadVao = 0
     private var gridTex = 0
+    private var gridTexW = 0
+    private var gridTexH = 0
     private var whiteTex = 0
     private var samples = 0
     private var anisotropy = 1f
@@ -75,6 +90,7 @@ internal class GlRenderer {
     private val texRefs = ArrayList<Pair<WeakReference<Texture>, Int>>()
 
     private var upload: ByteBuffer = ByteBuffer.allocateDirect(4 * 1024 * 1024).order(ByteOrder.nativeOrder())
+    private var uploadInts: IntBuffer = upload.asIntBuffer()
     private var vertBuf: FloatBuffer = ByteBuffer.allocateDirect(4 * 256 * 1024).order(ByteOrder.nativeOrder()).asFloatBuffer()
     private val tmp = IntArray(4)
     private var swizzle = IntArray(0)
@@ -82,23 +98,38 @@ internal class GlRenderer {
     private val lightPos = FloatArray(RenderPass.MAX_LIGHTS * 4)
     private val lightCol = FloatArray(RenderPass.MAX_LIGHTS * 4)
     private val ident = FloatArray(16).also { it[0] = 1f; it[5] = 1f; it[10] = 1f; it[15] = 1f }
+    private val discardColorDepth = intArrayOf(GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_DEPTH_ATTACHMENT)
+    private val discardColor = intArrayOf(GLES30.GL_COLOR_ATTACHMENT0)
+    private val discardDepth = intArrayOf(GLES30.GL_DEPTH_ATTACHMENT)
+
+    // GL state tracked while drawing the scene, to skip redundant calls.
+    private var boundTex = -1
+    private var boundBlend = -1
+    private var cullOn = false
+    private var uCut = -1
 
     // ------------------------------------------------------------------ setup
 
     /** Creates programs and buffers for a fresh context. */
     fun init() {
-        generation++
+        generation = GlGeneration.next()
         targets.clear()
         snapFbo = 0
         snapTex = 0
+        gridTexW = 0
+        gridTexH = 0
         meshRefs.clear()
         texRefs.clear()
-        su.clear()
         sceneProg = program(GlShaders.SCENE_VS, GlShaders.SCENE_FS)
         bgProg = program(GlShaders.BG_VS, GlShaders.BG_FS)
         brightProg = program(GlShaders.POST_VS, GlShaders.BRIGHT_FS)
         blurProg = program(GlShaders.POST_VS, GlShaders.BLUR_FS)
         compProg = program(GlShaders.POST_VS, GlShaders.COMPOSITE_FS)
+        scene = Prog(sceneProg)
+        bg = Prog(bgProg)
+        bright = Prog(brightProg)
+        blur = Prog(blurProg)
+        comp = Prog(compProg)
 
         GLES30.glGetIntegerv(GLES30.GL_MAX_SAMPLES, tmp, 0)
         samples = minOf(4, tmp[0])
@@ -185,8 +216,6 @@ internal class GlRenderer {
         return p
     }
 
-    private fun loc(prog: Int, name: String): Int = su.getOrPut("$prog:$name") { GLES30.glGetUniformLocation(prog, name) }
-
     private fun texParams(minF: Int, magF: Int, repeat: Boolean) {
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, minF)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, magF)
@@ -198,52 +227,59 @@ internal class GlRenderer {
     // ------------------------------------------------------------------ resources
 
     private fun ensureUpload(bytes: Int) {
-        if (upload.capacity() < bytes) upload = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder())
+        if (upload.capacity() < bytes) {
+            upload = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder())
+            uploadInts = upload.asIntBuffer()
+        }
         upload.clear()
     }
 
-    /** Binds [t], uploading it first if it is new or has changed. */
+    /** Binds [t] to texture unit 0, uploading it first if it is new or has changed. */
     private fun bindTexture(t: Texture) {
-        val wantVersion = t.snapVersion
-        if (t.glGen != generation || t.glId == 0) {
+        if (!GlGeneration.isCurrent(t.glGen, generation) || t.glId == 0) {
             GLES30.glGenTextures(1, tmp, 0)
             t.glId = tmp[0]
             t.glGen = generation
             t.glVersion = -1
             texRefs += WeakReference(t) to t.glId
         }
-        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.glId)
+        // A changing texture's newest frozen copy; the one it replaces goes back for reuse.
+        val fresh = t.takeSnapshot()
+        if (fresh != null) {
+            t.glSnap?.let { t.recycle(it) }
+            t.glSnap = fresh
+        }
+        val snap = t.glSnap
+        val wantVersion = snap?.version ?: 0
+        if (boundTex != t.glId) {
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.glId)
+            boundTex = t.glId
+        }
         if (t.glVersion != wantVersion) {
             val first = t.glVersion == -1
-            val src = t.uploadSource()
+            val src = snap?.pixels ?: t.pixels
             val count = minOf(t.pixelWidth * t.pixelHeight, src.size)
             ensureUpload(t.pixelWidth * t.pixelHeight * 4)
-            // ARGB ints to RGBA bytes: swap red and blue, then store little-endian.
+            // ARGB ints to premultiplied RGBA bytes (stored little-endian).
             if (swizzle.size < count) swizzle = IntArray(count)
-            val sw = swizzle
-            for (i in 0 until count) {
-                val c = src[i]
-                sw[i] = (c and -0xff0100) or (c shr 16 and 0xFF) or (c and 0xFF shl 16)
-            }
-            upload.asIntBuffer().put(sw, 0, count)
+            Texture.premultiplyToRgba(src, swizzle, count)
+            uploadInts.clear()
+            uploadInts.put(swizzle, 0, count)
             upload.position(0)
-            // Textures that keep changing skip mipmaps; static ones get the full chain.
-            val dynamic = wantVersion != 0
             if (first) {
                 GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, t.pixelWidth, t.pixelHeight, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, upload)
                 if (!t.smooth) {
                     texParams(GLES30.GL_NEAREST, GLES30.GL_NEAREST, t.repeat)
-                } else if (dynamic) {
-                    texParams(GLES30.GL_LINEAR, GLES30.GL_LINEAR, t.repeat)
                 } else {
+                    // Changing textures (live cabinet screens) get mipmaps too: they are small,
+                    // and seen from across the hall they would shimmer without them.
                     texParams(GLES30.GL_LINEAR_MIPMAP_LINEAR, GLES30.GL_LINEAR, t.repeat)
                     if (anisotropy > 1f) GLES30.glTexParameterf(GLES30.GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy)
                     GLES30.glGenerateMipmap(GLES30.GL_TEXTURE_2D)
                 }
             } else {
                 GLES30.glTexSubImage2D(GLES30.GL_TEXTURE_2D, 0, 0, 0, t.pixelWidth, t.pixelHeight, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, upload)
-                if (t.smooth && !dynamic) GLES30.glGenerateMipmap(GLES30.GL_TEXTURE_2D)
-                if (t.smooth && dynamic) texParams(GLES30.GL_LINEAR, GLES30.GL_LINEAR, t.repeat)
+                if (t.smooth) GLES30.glGenerateMipmap(GLES30.GL_TEXTURE_2D)
             }
             t.glVersion = wantVersion
         }
@@ -251,7 +287,7 @@ internal class GlRenderer {
 
     /** Builds (once) the GPU copy of a model: triangles grouped by texture, blend and culling. */
     private fun meshFor(m: Model): Mesh {
-        (m.glMesh as? Mesh)?.let { if (m.glGen == generation) return it }
+        (m.glMesh as? Mesh)?.let { if (GlGeneration.isCurrent(m.glGen, generation)) return it }
         val S = RenderPass.STRIDE
         data class Key(val tex: Texture, val blend: Int, val cull: Boolean)
         val groups = LinkedHashMap<Key, ArrayList<FloatArray>>()
@@ -519,11 +555,15 @@ internal class GlRenderer {
         drawBackground(p)
         drawScene(p)
 
-        // Resolve the multisampled image.
+        // Resolve the multisampled image, then tell the driver the samples and depth can be
+        // thrown away (tilers otherwise write them back to memory).
         if (t.msFbo != 0) {
             GLES30.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, t.msFbo)
             GLES30.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, t.sceneFbo)
             GLES30.glBlitFramebuffer(0, 0, rw, rh, 0, 0, rw, rh, GLES30.GL_COLOR_BUFFER_BIT, GLES30.GL_NEAREST)
+            GLES30.glInvalidateFramebuffer(GLES30.GL_READ_FRAMEBUFFER, 2, discardColorDepth, 0)
+        } else {
+            GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardDepth, 0)
         }
         GLES30.glDisable(GLES30.GL_DEPTH_TEST)
         GLES30.glDisable(GLES30.GL_BLEND)
@@ -534,25 +574,28 @@ internal class GlRenderer {
         // Bloom: bright parts at quarter size, blurred twice each way.
         if (p.bloom > 0f) {
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFboA)
+            GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardColor, 0)
             GLES30.glViewport(0, 0, t.bloomW, t.bloomH)
             GLES30.glUseProgram(brightProg)
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.sceneTex)
-            GLES30.glUniform1i(loc(brightProg, "uTex"), 0)
-            GLES30.glUniform2f(loc(brightProg, "uTexel"), 1f / rw, 1f / rh)
-            GLES30.glUniform1f(loc(brightProg, "uThreshold"), 0.62f)
+            GLES30.glUniform1i(bright.loc("uTex"), 0)
+            GLES30.glUniform2f(bright.loc("uTexel"), 1f / rw, 1f / rh)
+            GLES30.glUniform1f(bright.loc("uThreshold"), 0.62f)
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             GLES30.glUseProgram(blurProg)
-            GLES30.glUniform1i(loc(blurProg, "uTex"), 0)
+            GLES30.glUniform1i(blur.loc("uTex"), 0)
             repeat(2) { pass ->
                 val spread = 1f + pass
                 GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFboB)
+                GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardColor, 0)
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTexA)
-                GLES30.glUniform2f(loc(blurProg, "uDir"), spread / t.bloomW, 0f)
+                GLES30.glUniform2f(blur.loc("uDir"), spread / t.bloomW, 0f)
                 GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
                 GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFboA)
+                GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardColor, 0)
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTexB)
-                GLES30.glUniform2f(loc(blurProg, "uDir"), 0f, spread / t.bloomH)
+                GLES30.glUniform2f(blur.loc("uDir"), 0f, spread / t.bloomH)
                 GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             }
         }
@@ -567,12 +610,12 @@ internal class GlRenderer {
         GLES30.glUseProgram(compProg)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.sceneTex)
-        GLES30.glUniform1i(loc(compProg, "uScene"), 0)
+        GLES30.glUniform1i(comp.loc("uScene"), 0)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTexA)
-        GLES30.glUniform1i(loc(compProg, "uBloom"), 1)
-        GLES30.glUniform1f(loc(compProg, "uBloomAmount"), p.bloom)
-        GLES30.glUniform1f(loc(compProg, "uVignette"), 0.22f)
+        GLES30.glUniform1i(comp.loc("uBloom"), 1)
+        GLES30.glUniform1f(comp.loc("uBloomAmount"), p.bloom)
+        GLES30.glUniform1f(comp.loc("uVignette"), 0.22f)
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
@@ -622,18 +665,18 @@ internal class GlRenderer {
         val prog = sceneProg
         GLES30.glUseProgram(prog)
         val c = p.cam
-        GLES30.glUniform3f(loc(prog, "uEye"), c[0], c[1], c[2])
-        GLES30.glUniform3f(loc(prog, "uRight"), c[3], c[4], c[5])
-        GLES30.glUniform3f(loc(prog, "uUp"), c[6], c[7], c[8])
-        GLES30.glUniform3f(loc(prog, "uFwd"), c[9], c[10], c[11])
+        GLES30.glUniform3f(scene.loc("uEye"), c[0], c[1], c[2])
+        GLES30.glUniform3f(scene.loc("uRight"), c[3], c[4], c[5])
+        GLES30.glUniform3f(scene.loc("uUp"), c[6], c[7], c[8])
+        GLES30.glUniform3f(scene.loc("uFwd"), c[9], c[10], c[11])
         // ndc.x = 2 f/W · x/z + (2 cx/W − 1); ndc.y = 2 f/H · y/z + (1 − 2 cy/H)
-        GLES30.glUniform4f(loc(prog, "uProj"), 2f * c[12], 2f * c[13] - 1f, 2f * c[15], 1f - 2f * c[14])
-        GLES30.glUniform2f(loc(prog, "uDepth"), (FAR + NEAR) / (FAR - NEAR), -2f * FAR * NEAR / (FAR - NEAR))
-        GLES30.glUniform3f(loc(prog, "uAmbient"), p.ambient[0], p.ambient[1], p.ambient[2])
-        GLES30.glUniform3f(loc(prog, "uDirDir"), p.dirDir[0], p.dirDir[1], p.dirDir[2])
-        GLES30.glUniform3f(loc(prog, "uDirCol"), p.dirCol[0], p.dirCol[1], p.dirCol[2])
-        GLES30.glUniform3f(loc(prog, "uFog"), p.fogNear, p.fogFar, p.fogFloor)
-        GLES30.glUniform1f(loc(prog, "uExposure"), p.exposure)
+        GLES30.glUniform4f(scene.loc("uProj"), 2f * c[12], 2f * c[13] - 1f, 2f * c[15], 1f - 2f * c[14])
+        GLES30.glUniform2f(scene.loc("uDepth"), (FAR + NEAR) / (FAR - NEAR), -2f * FAR * NEAR / (FAR - NEAR))
+        GLES30.glUniform3f(scene.loc("uAmbient"), p.ambient[0], p.ambient[1], p.ambient[2])
+        GLES30.glUniform3f(scene.loc("uDirDir"), p.dirDir[0], p.dirDir[1], p.dirDir[2])
+        GLES30.glUniform3f(scene.loc("uDirCol"), p.dirCol[0], p.dirCol[1], p.dirCol[2])
+        GLES30.glUniform3f(scene.loc("uFog"), p.fogNear, p.fogFar, p.fogFloor)
+        GLES30.glUniform1f(scene.loc("uExposure"), p.exposure)
         for (i in 0 until p.lightCount) {
             val o = i * 8
             lightPos[i * 4] = p.lights[o]; lightPos[i * 4 + 1] = p.lights[o + 1]
@@ -642,8 +685,8 @@ internal class GlRenderer {
             lightCol[i * 4 + 2] = p.lights[o + 6]; lightCol[i * 4 + 3] = p.lights[o + 7]
         }
         if (p.lightCount > 0) {
-            GLES30.glUniform4fv(loc(prog, "uLightPos"), p.lightCount, lightPos, 0)
-            GLES30.glUniform4fv(loc(prog, "uLightCol"), p.lightCount, lightCol, 0)
+            GLES30.glUniform4fv(scene.loc("uLightPos"), p.lightCount, lightPos, 0)
+            GLES30.glUniform4fv(scene.loc("uLightCol"), p.lightCount, lightCol, 0)
         }
         // Light grid.
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
@@ -652,16 +695,21 @@ internal class GlRenderer {
             val bytes = p.gridW * 2 * p.gridH * 4
             ensureUpload(bytes)
             upload.put(p.grid, 0, bytes).position(0)
-            GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
-            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, p.gridW * 2, p.gridH, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, upload)
-            GLES30.glUniform4f(loc(prog, "uGridInfo"), p.gridX0, p.gridZ0, p.gridInvCell, 0f)
-            GLES30.glUniform2i(loc(prog, "uGridSize"), p.gridW, p.gridH)
+            if (gridTexW == p.gridW * 2 && gridTexH == p.gridH) {
+                GLES30.glTexSubImage2D(GLES30.GL_TEXTURE_2D, 0, 0, 0, p.gridW * 2, p.gridH, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, upload)
+            } else {
+                GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, p.gridW * 2, p.gridH, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, upload)
+                gridTexW = p.gridW * 2
+                gridTexH = p.gridH
+            }
+            GLES30.glUniform4f(scene.loc("uGridInfo"), p.gridX0, p.gridZ0, p.gridInvCell, 0f)
+            GLES30.glUniform2i(scene.loc("uGridSize"), p.gridW, p.gridH)
         } else {
-            GLES30.glUniform2i(loc(prog, "uGridSize"), 0, 0)
+            GLES30.glUniform2i(scene.loc("uGridSize"), 0, 0)
         }
-        GLES30.glUniform1i(loc(prog, "uGrid"), 1)
+        GLES30.glUniform1i(scene.loc("uGrid"), 1)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-        GLES30.glUniform1i(loc(prog, "uTex"), 0)
+        GLES30.glUniform1i(scene.loc("uTex"), 0)
 
         // Stream the immediate geometry.
         if (p.vertCount > 0) {
@@ -676,38 +724,15 @@ internal class GlRenderer {
         GLES30.glDepthFunc(GLES30.GL_LEQUAL)
         GLES30.glFrontFace(GLES30.GL_CCW)
         GLES30.glCullFace(GLES30.GL_BACK)
-        var boundBlend = -1
+        boundBlend = -1
+        boundTex = -1
+        cullOn = false
+        GLES30.glDisable(GLES30.GL_CULL_FACE)
         var boundModelMatrix = false
-        val uModel = loc(prog, "uModel")
-        val uTint = loc(prog, "uTint")
-        val uEm = loc(prog, "uEmissiveMul")
-        val uCut = loc(prog, "uAlphaCut")
-        fun setBlend(b: Int) {
-            if (b == boundBlend) return
-            boundBlend = b
-            when (b) {
-                Blend.OPAQUE.ordinal -> {
-                    GLES30.glDisable(GLES30.GL_BLEND)
-                    GLES30.glDepthMask(true)
-                    if (samples > 1) GLES30.glEnable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
-                    GLES30.glUniform1f(uCut, if (samples > 1) 0.08f else 0.5f)
-                }
-                Blend.ALPHA.ordinal -> {
-                    GLES30.glDisable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
-                    GLES30.glEnable(GLES30.GL_BLEND)
-                    GLES30.glBlendFuncSeparate(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA, GLES30.GL_ONE, GLES30.GL_ONE_MINUS_SRC_ALPHA)
-                    GLES30.glDepthMask(false)
-                    GLES30.glUniform1f(uCut, 0.003f)
-                }
-                else -> {
-                    GLES30.glDisable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
-                    GLES30.glEnable(GLES30.GL_BLEND)
-                    GLES30.glBlendFuncSeparate(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE, GLES30.GL_ZERO, GLES30.GL_ONE)
-                    GLES30.glDepthMask(false)
-                    GLES30.glUniform1f(uCut, 0.003f)
-                }
-            }
-        }
+        val uModel = scene.loc("uModel")
+        val uTint = scene.loc("uTint")
+        val uEm = scene.loc("uEmissiveMul")
+        uCut = scene.loc("uAlphaCut")
         GLES30.glUniformMatrix4fv(uModel, 1, false, ident, 0)
         GLES30.glUniform4f(uTint, 1f, 1f, 1f, 1f)
         GLES30.glUniform1f(uEm, 1f)
@@ -724,7 +749,7 @@ internal class GlRenderer {
                     GLES30.glUniform1f(uEm, 1f)
                     boundModelMatrix = false
                 }
-                GLES30.glDisable(GLES30.GL_CULL_FACE)
+                setCull(false)
                 bindTexture(p.textures[index])
                 GLES30.glBindVertexArray(streamVao)
                 GLES30.glDrawArrays(GLES30.GL_TRIANGLES, p.draws[o + 3], p.draws[o + 4])
@@ -740,7 +765,7 @@ internal class GlRenderer {
                 val g = mesh.groups
                 for (k in 0 until g.size / 5) {
                     if (g[k * 5 + 1] != blend) continue
-                    if (g[k * 5 + 2] == 1) GLES30.glEnable(GLES30.GL_CULL_FACE) else GLES30.glDisable(GLES30.GL_CULL_FACE)
+                    setCull(g[k * 5 + 2] == 1)
                     bindTexture(mesh.textures[g[k * 5]])
                     GLES30.glDrawArrays(GLES30.GL_TRIANGLES, g[k * 5 + 3], g[k * 5 + 4])
                 }
@@ -751,5 +776,38 @@ internal class GlRenderer {
         GLES30.glDisable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
         GLES30.glDepthMask(true)
         GLES30.glBindVertexArray(0)
+    }
+
+    private fun setCull(on: Boolean) {
+        if (on == cullOn) return
+        cullOn = on
+        if (on) GLES30.glEnable(GLES30.GL_CULL_FACE) else GLES30.glDisable(GLES30.GL_CULL_FACE)
+    }
+
+    private fun setBlend(b: Int) {
+        if (b == boundBlend) return
+        boundBlend = b
+        when (b) {
+            Blend.OPAQUE.ordinal -> {
+                GLES30.glDisable(GLES30.GL_BLEND)
+                GLES30.glDepthMask(true)
+                if (samples > 1) GLES30.glEnable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
+                GLES30.glUniform1f(uCut, if (samples > 1) 0.08f else 0.5f)
+            }
+            Blend.ALPHA.ordinal -> {
+                GLES30.glDisable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
+                GLES30.glEnable(GLES30.GL_BLEND)
+                GLES30.glBlendFuncSeparate(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA, GLES30.GL_ONE, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+                GLES30.glDepthMask(false)
+                GLES30.glUniform1f(uCut, 0.003f)
+            }
+            else -> {
+                GLES30.glDisable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
+                GLES30.glEnable(GLES30.GL_BLEND)
+                GLES30.glBlendFuncSeparate(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE, GLES30.GL_ZERO, GLES30.GL_ONE)
+                GLES30.glDepthMask(false)
+                GLES30.glUniform1f(uCut, 0.003f)
+            }
+        }
     }
 }

@@ -26,7 +26,11 @@ out float vDepth;
 void main() {
     vec4 w = uModel * vec4(aPos, 1.0);
     vWorld = w.xyz;
-    vNormal = mat3(uModel) * aNormal;
+    // Normals go through the cofactor (inverse transpose × det) of the model matrix so they
+    // stay perpendicular under non-uniform stretch; flipped back when the matrix mirrors.
+    mat3 m = mat3(uModel);
+    mat3 cof = mat3(cross(m[1], m[2]), cross(m[2], m[0]), cross(m[0], m[1]));
+    vNormal = cof * aNormal * (dot(m[0], cof[0]) < 0.0 ? -1.0 : 1.0);
     vec3 d = w.xyz - uEye;
     float x = dot(d, uRight);
     float y = dot(d, uUp);
@@ -69,10 +73,11 @@ vec3 tonemap(vec3 c) {
 }
 
 void main() {
+    // Textures are stored premultiplied (clean filtering at cut-out edges); undo it here.
     vec4 tex = texture(uTex, vUV);
     float alpha = tex.a * vColor.a;
     if (alpha < uAlphaCut) discard;
-    vec3 base = tex.rgb * vColor.rgb;
+    vec3 base = tex.rgb / max(tex.a, 0.004) * vColor.rgb;
     vec3 col;
     if (vExtra.x > 0.0) {
         col = base * vExtra.x;

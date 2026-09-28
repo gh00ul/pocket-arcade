@@ -330,6 +330,10 @@ class Renderer3D(w: Int, h: Int) {
         val wantAlpha = model.hasAlpha && (only == null || only == Blend.ALPHA)
         val wantAdd = model.hasAdd && (only == null || only == Blend.ADD)
         if (!wantOpaque && !wantAlpha && !wantAdd) return
+        // Models always take fog, so a frame drawn only from models still needs its settings.
+        if (fogNear < 1e7f) {
+            fogUsedNear = fogNear; fogUsedFar = fogFar; fogUsedFloor = fogFloor
+        }
         for (tex in modelTextures(model)) noteTexture(tex)
         val mi = p.models.size
         p.models += model
@@ -432,6 +436,10 @@ class Renderer3D(w: Int, h: Int) {
         return p
     }
 
+    // Scratch for the light grid, reused between frames.
+    private var cellCount = IntArray(0)
+    private var cellWeakest = FloatArray(0)
+
     /** Copies the lights and builds the grid telling each patch of floor which lights reach it. */
     private fun packLights(p: RenderPass) {
         val l = lighting
@@ -465,8 +473,13 @@ class Renderer3D(w: Int, h: Int) {
         val size = gw * 2 * gh * 4
         if (p.grid.size < size) p.grid = ByteArray(size)
         java.util.Arrays.fill(p.grid, 0, size, 0)
-        val cellCount = IntArray(gw * gh)
-        val cellWeakest = FloatArray(gw * gh)
+        if (cellCount.size < gw * gh) {
+            cellCount = IntArray(gw * gh)
+            cellWeakest = FloatArray(gw * gh)
+        }
+        val cellCount = cellCount
+        val cellWeakest = cellWeakest
+        java.util.Arrays.fill(cellCount, 0, gw * gh, 0)
         for (i in 0 until count) {
             val pl = l.points[i]
             if (pl.intensity <= 0f) continue
