@@ -140,6 +140,63 @@ class RacerSimulationTest {
         assertTrue("a casual driver should usually run out of time: $casual", casual.finishes * 2 <= rounds)
     }
 
+    /** Plays [rounds] rounds with a fresh [bot] each, from fixed seeds. */
+    private fun playRounds(rounds: Int, name: String, seed: Long, bot: (RacerGame) -> ((Float, Long) -> Unit)): Stats {
+        val out = Stats(name)
+        val game = RacerGame()
+        repeat(rounds) { r ->
+            val b = bot(game)
+            playRound(game, seed + r, out) { t, ms -> b(t, ms) }
+        }
+        println(out)
+        return out
+    }
+
+    /** A good driver's steering thumb with a second finger put down at the start and never lifted. */
+    private fun steerAndHoldDrift(game: RacerGame, drives: Boolean): (Float, Long) -> Unit {
+        val driver = Driver(game, Random(3), 0.1f, 6f, racingLine = true, avoids = true, drifts = false)
+        var started = false
+        return { t, ms ->
+            if (!started) {
+                started = true
+                if (!drives) game.onTouch(TouchType.DOWN, 1L, 180f, 400f, ms)
+                game.onTouch(TouchType.DOWN, 999L, 300f, 500f, ms)
+            }
+            if (drives) driver.drive(t, ms)
+        }
+    }
+
+    @Test
+    fun zeroEffortAndEndlessDriftPayLessThanDriving() {
+        val rounds = 8
+        val idle = playRounds(rounds, "racer never touch", 100L) { { _, _ -> } }
+        val resting = playRounds(rounds, "racer rest + hold drift", 100L) { steerAndHoldDrift(it, drives = false) }
+        val endless = playRounds(rounds, "racer steer + hold drift", 100L) { steerAndHoldDrift(it, drives = true) }
+        val noDrift = playRounds(rounds, "racer steer no drift", 100L) {
+            val d = Driver(it, Random(3), 0.1f, 6f, racingLine = true, avoids = true, drifts = false)
+            d::drive
+        }
+        val full = playRounds(rounds, "racer full kit", 100L) {
+            val d = Driver(it, Random(3), 0.1f, 6f, racingLine = true, avoids = true, drifts = true)
+            d::drive
+        }
+        val casualRng = Random(16)
+        val casual = playRounds(rounds, "racer casual", 100L) { casualDriver(it, casualRng)::drive }
+        assertTrue("never touching the screen pays too much: $idle", idle.avgTickets <= 3.0)
+        assertTrue("resting two fingers should pay less than casual driving: $resting vs $casual", resting.avgTickets < casual.avgTickets)
+        assertTrue("holding the drift all race should pay less than the full kit: $endless vs $full", endless.avgTickets < full.avgTickets)
+        assertTrue("holding the drift all race should pay no more than not drifting: $endless vs $noDrift", endless.avgTickets <= noDrift.avgTickets + 1.0)
+    }
+
+    @Test
+    fun theGridStartsWithoutContact() {
+        for (seed in 1L..8L) {
+            val game = RacerGame()
+            RoundDriver(game, seed).play(0.5f)
+            assertEquals("contacts in the first 0.5 s with no input (seed $seed)", 0, game.botContacts)
+        }
+    }
+
     @Test
     fun crossingTheLineEndsTheRoundEarlyAndRanksByFinishOrder() {
         val game = RacerGame()

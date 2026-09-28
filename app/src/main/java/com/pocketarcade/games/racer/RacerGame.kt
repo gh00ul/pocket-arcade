@@ -60,6 +60,10 @@ object RacerTuning {
     const val DRIFT_GRIP = 0.35f
     /** Share of the corner scrub still felt while drifting. */
     const val DRIFT_SCRUB = 0.25f
+    /** Below this bend a drift has nothing to slide on and drags instead: holding one all race costs. */
+    const val DRIFT_MIN_BEND = 0.3f
+    /** Share of top speed a drift gives up where the road runs (nearly) straight. */
+    const val DRIFT_DRAG = 0.15f
     /** Boost charge per second of drifting through a curve of bend 1 at top speed. */
     const val DRIFT_CHARGE = 1f
     const val BOOST_CHARGE_1 = 1f
@@ -88,7 +92,7 @@ object RacerTuning {
     const val CLEAN_SECONDS = 1.2f
 
     /** One point per this many world units driven. */
-    const val UNITS_PER_POINT = 150f
+    const val UNITS_PER_POINT = 350f
     const val OVERTAKE_POINTS = 25
     /** Points for finishing 1st, 2nd, ... */
     val PLACE_POINTS = intArrayOf(500, 380, 290, 220, 160, 110, 70, 40)
@@ -141,7 +145,11 @@ class RacerGame : BaseMiniGame() {
         const val LOOK = 14
         /** Progress gained on the inside of a bend (lost on the outside), per unit of offset and bend. */
         const val INSIDE_GAIN = 0.0002f
-        const val GRID_ROW = 80f
+        /**
+         * Grid rows are far enough apart that a car launching at once can't reach the one ahead
+         * of it within half a second, even if that one hasn't moved yet (0.5 * ACCEL * 0.5 s^2 = 65).
+         */
+        const val GRID_ROW = CAR_LEN + 70f
         const val AVOID_RANGE = 260f
         const val PASS_GAP = 58f
         const val CARS = RacerTuning.CARS
@@ -393,6 +401,8 @@ class RacerGame : BaseMiniGame() {
         }
         // Bends scrub speed off; a drift carries most of it through.
         top *= 1f - minOf(abs(bend), 2.5f) * RacerTuning.CORNER_SCRUB * (if (drifting) RacerTuning.DRIFT_SCRUB else 1f)
+        // ...but sliding sideways down a straight only scrubs speed off.
+        if (drifting && abs(bend) < RacerTuning.DRIFT_MIN_BEND) top *= 1f - RacerTuning.DRIFT_DRAG
         if (offroad) top = minOf(top, RacerTuning.OFFROAD_SPEED)
         me.v = if (me.v < top) {
             (me.v + (RacerTuning.ACCEL + if (boostT > 0f) RacerTuning.BOOST_ACCEL else 0f) * dt).coerceAtMost(top)
@@ -427,7 +437,8 @@ class RacerGame : BaseMiniGame() {
 
         val before = me.d
         me.d += me.v * dt * (1f + me.x * bend * INSIDE_GAIN)
-        if (racing && me.d > 0f) {
+        // Distance only pays on the road: a car left to wander along the verge earns nothing.
+        if (racing && me.d > 0f && !offroad) {
             pointsCarry += (me.d - maxOf(before, 0f)) / RacerTuning.UNITS_PER_POINT
             val whole = pointsCarry.toInt()
             if (whole > 0) {
