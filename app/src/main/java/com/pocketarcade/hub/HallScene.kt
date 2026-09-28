@@ -182,13 +182,14 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         b.quad(wl, hgt - 8f, back + 0.3f, w - wl, hgt - 8f, back + 0.3f, w - wl, hgt - 10f, back + 0.3f, wl, hgt - 10f, back + 0.3f, neonPink, 0f, 0f, 1f, emissive = 1.8f)
         b.quad(wl + 0.3f, hgt - 8f, front, wl + 0.3f, hgt - 8f, back, wl + 0.3f, hgt - 10f, back, wl + 0.3f, hgt - 10f, front, neonCyan, 1f, 0f, 0f, emissive = 1.8f)
         b.quad(w - wl - 0.3f, hgt - 8f, back, w - wl - 0.3f, hgt - 8f, front, w - wl - 0.3f, hgt - 10f, front, w - wl - 0.3f, hgt - 10f, back, neonCyan, -1f, 0f, 0f, emissive = 1.8f)
-        // Posters on the side walls.
-        for (k in 0 until 4) {
-            val pz = 300f + k * 130f
+        // Posters on the side walls, clear of the zone signs and the tall banks against them.
+        for ((k, pz) in floatArrayOf(320f, 430f, 670f, 880f, 1000f).withIndex()) {
             val tex = HallArt.poster(k).full
             b.quad(wl + 0.4f, 100f, pz - 12f, wl + 0.4f, 100f, pz + 12f, wl + 0.4f, 64f, pz + 12f, wl + 0.4f, 64f, pz - 12f, tex, 1f, 0f, 0f, gloss = 0.5f)
-            val tex2 = HallArt.poster(k + 1).full
-            b.quad(w - wl - 0.4f, 100f, pz + 12f, w - wl - 0.4f, 100f, pz - 12f, w - wl - 0.4f, 64f, pz - 12f, w - wl - 0.4f, 64f, pz + 12f, tex2, -1f, 0f, 0f, gloss = 0.5f)
+        }
+        for ((k, pz) in floatArrayOf(320f, 430f, 560f, 1000f).withIndex()) {
+            val tex = HallArt.poster(k + 1).full
+            b.quad(w - wl - 0.4f, 100f, pz + 12f, w - wl - 0.4f, 100f, pz - 12f, w - wl - 0.4f, 64f, pz - 12f, w - wl - 0.4f, 64f, pz + 12f, tex, -1f, 0f, 0f, gloss = 0.5f)
         }
         // Big neon signs on the back wall.
         b.quad(22f, 132f, back + 0.5f, 164f, 132f, back + 0.5f, 164f, 96f, back + 0.5f, 22f, 96f, back + 0.5f, HallArt.neon("POCKET ARCADE", 0xFF39E6F2.toInt(), 768, 160, 96f).full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1.7f, cull = false)

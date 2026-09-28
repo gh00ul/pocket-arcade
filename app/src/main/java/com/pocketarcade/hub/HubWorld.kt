@@ -52,7 +52,9 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         player.x = map.spawnX
         player.y = map.spawnY
         camera.snapTo(player.x, player.y)
-        repeat(13) { i ->
+        // About as many kids per square metre as before the hall grew; each one is a lot of
+        // vertices, and only the ones in view are drawn.
+        repeat(16) { i ->
             val look = Looks.randomKid(i + 3)
             var tx: Int
             var ty: Int

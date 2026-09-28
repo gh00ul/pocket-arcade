@@ -74,8 +74,8 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
         }
         if (target >= 0) {
             val h = map.hangouts[target]
-            goalX = (h.x / HubLayout.TILE).toInt()
-            goalY = (h.z / HubLayout.TILE).toInt()
+            goalX = h.tileX
+            goalY = h.tileY
         } else {
             var tries = 0
             do {
