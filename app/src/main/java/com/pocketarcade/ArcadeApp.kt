@@ -122,14 +122,16 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     fun enterMachine(index: Int, at: Spot?) {
         if (busy) return
         val spot = at ?: world.nearestMachineSpot(index) ?: return
+        // Claimed before the suspending spend, so a quick second tap can't spend a second token.
+        busy = true
         scope.launch {
             if (!services.repo.spendToken()) {
                 audio.play(Sfx.ERROR)
                 services.haptics.tick()
                 banner = "OUT OF TOKENS! TRY THE TOKEN MACHINE"
+                busy = false
                 return@launch
             }
-            busy = true
             audio.play(Sfx.TOKEN)
             audio.play(Sfx.WHOOSH, 0.8f)
             services.haptics.hit()
