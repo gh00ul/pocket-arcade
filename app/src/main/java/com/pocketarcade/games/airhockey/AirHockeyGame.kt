@@ -130,7 +130,17 @@ class AirHockeyGame : BaseMiniGame() {
         cpuGoals = 0
         streak = 0
         goalFlash = 0f
+        goalByPlayer = false
+        // PLAY AGAIN reuses this instance: clear the CPU's view of the puck and every timer too,
+        // so a replay plays out exactly like a fresh machine.
+        cpuSeeX = CX; cpuSeeY = CY; cpuSeeVX = 0f; cpuSeeVY = 0f
+        cpuThinkT = 0f
+        hitCooldown = 0f
+        stuckT = 0f
+        trailX.fill(0f)
+        trailY.fill(0f)
         trailN = 0
+        trailT = 0f
         serve(toCpu = false, delay = 0.6f)
     }
 
@@ -148,8 +158,9 @@ class AirHockeyGame : BaseMiniGame() {
 
     override fun isSettled(): Boolean = goalFlash <= 0.3f
 
+    /** The buzzer freezes the player's mallet; a puck still in play can no longer score (see [goal]). */
     override fun onTimeUp() {
-        dragging = -1L
+        cancelInput()
     }
 
     /** Lets go of the mallet: it stops where it is instead of chasing the lost finger. */
@@ -375,6 +386,11 @@ class AirHockeyGame : BaseMiniGame() {
 
     private fun goal(byPlayer: Boolean) {
         puckLive = false
+        if (timeUp) {
+            // After the buzzer the puck just drops into the slot: no score, no goal flash to wait on.
+            trailN = 0
+            return
+        }
         goalFlash = 1.2f
         goalByPlayer = byPlayer
         trailN = 0
@@ -571,6 +587,12 @@ class AirHockeyGame : BaseMiniGame() {
     internal val botCpuX get() = cpu.x
     internal val botCpuY get() = cpu.y
     internal val botGoals get() = playerGoals to cpuGoals
+
+    /** Puts the puck in play at ([x], [y]) moving at ([vx], [vy]), for tests of edge cases. */
+    internal fun botPlacePuck(x: Float, y: Float, vx: Float, vy: Float) {
+        puck.x = x; puck.y = y; puck.vx = vx; puck.vy = vy
+        puckLive = true
+    }
 
     /** Where the table point ([x], [y]) is on screen, for bots that play by touch. */
     internal fun botScreen(x: Float, y: Float): Pair<Float, Float> {
