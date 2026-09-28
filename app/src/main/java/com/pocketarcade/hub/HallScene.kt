@@ -11,6 +11,7 @@ import com.pocketarcade.engine.r3d.PointLight
 import com.pocketarcade.engine.r3d.Renderer3D
 import com.pocketarcade.engine.r3d.TexPaint
 import com.pocketarcade.engine.r3d.Texture
+import com.pocketarcade.games.CabinetShape
 import com.pocketarcade.games.MiniGame
 import kotlin.math.abs
 import kotlin.math.cos
@@ -198,6 +199,13 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         b.quad(wl + 0.6f, 124f, 190f, wl + 0.6f, 124f, 290f, wl + 0.6f, 100f, 290f, wl + 0.6f, 100f, 190f, HallArt.neon("SKEE-BALL", 0xFFFFD84D.toInt(), 640, 160, 100f).full, 1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
         b.quad(w - wl - 0.6f, 124f, 280f, w - wl - 0.6f, 124f, 180f, w - wl - 0.6f, 100f, 180f, w - wl - 0.6f, 100f, 280f, HallArt.neon("HOOPS", 0xFFFF8A3D.toInt(), 512, 160, 110f).full, -1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
         b.quad(wl + 0.6f, 116f, 510f, wl + 0.6f, 116f, 630f, wl + 0.6f, 92f, 630f, wl + 0.6f, 92f, 510f, HallArt.neon("SNACK BAR", 0xFF5CF08A.toInt(), 640, 160, 100f).full, 1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
+        // Signs over the front floor's banks by the side walls, when those machines are in.
+        if (games.any { it.look.shape == CabinetShape.PINBALL }) {
+            b.quad(w - wl - 0.6f, 124f, 700f, w - wl - 0.6f, 124f, 610f, w - wl - 0.6f, 100f, 610f, w - wl - 0.6f, 100f, 700f, HallArt.neon("PINBALL", 0xFFFF77C8.toInt(), 512, 160, 100f).full, -1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
+        }
+        if (games.any { it.look.shape == CabinetShape.FISHING }) {
+            b.quad(wl + 0.6f, 124f, 700f, wl + 0.6f, 124f, 800f, wl + 0.6f, 100f, 800f, wl + 0.6f, 100f, 700f, HallArt.neon("FISHING", 0xFF4DA6FF.toInt(), 512, 160, 100f).full, 1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
+        }
         // Baseboards.
         val base = HallArt.darkMetal.full
         b.box(wl, 0f, back, w - wl, 4f, back + 1f, BoxFaces(front = base, top = base))

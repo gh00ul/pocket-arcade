@@ -150,11 +150,14 @@ class MachineArt(val game: MiniGame) {
         tp.update(display)
     }
 
-    /** Screen size in painter units for this cabinet shape (portrait for the tower). */
-    fun screenUnits(): Pair<Int, Int> = when (game.look.shape) {
-        CabinetShape.TOWER -> 16 to 24
-        CabinetShape.RACER -> 26 to 18
-        else -> 24 to 18
+    /** Screen size in painter units: the game's own cabinet design's, else by shape (portrait for the tower). */
+    fun screenUnits(): Pair<Int, Int> {
+        val design = game.cabinet
+        if (design != null) return design.screenUnits ?: error("${game.id}'s cabinet has no live screen")
+        return when (game.look.shape) {
+            CabinetShape.TOWER -> 16 to 24
+            else -> 24 to 18
+        }
     }
 }
 

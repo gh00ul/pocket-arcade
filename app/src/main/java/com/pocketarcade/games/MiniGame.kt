@@ -5,6 +5,7 @@ import com.pocketarcade.engine.AudioSynth
 import com.pocketarcade.engine.Haptics
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.TouchType
+import com.pocketarcade.hub.CabinetDesign
 
 /** Every mini-game plays inside a fixed portrait field of GAME_W x GAME_H units. */
 const val GAME_W = 360f
@@ -33,6 +34,12 @@ enum class CabinetShape {
     RACER,
     /** Tall upright with a vertical screen and a big button (stacker). */
     TOWER,
+    /** Light-gun cabinet: a big screen with two guns mounted on the control shelf (shooter). */
+    GUN,
+    /** Pinball table: a slanted glass playfield on legs with a lit backbox at the far end. */
+    PINBALL,
+    /** A big round fishing tub with rods around the rim and a sign on a post (fishing). */
+    FISHING,
 }
 
 /** How a machine looks in the hall: body and trim colours, the neon glow it casts, and its shape. */
@@ -68,6 +75,14 @@ interface MiniGame {
     /** Short how-to-play lines for the intro card. */
     val instructions: List<String>
     val look: CabinetLook
+
+    /**
+     * The machine's own hall cabinet (size, camera dive point, model, lights, live screen and
+     * moving parts), or null for the built-in cabinet of [CabinetLook.shape]. Keep a design's
+     * art in the game's own package.
+     */
+    val cabinet: CabinetDesign? get() = null
+
     /** Length of a round in seconds. */
     val roundSeconds: Float
 

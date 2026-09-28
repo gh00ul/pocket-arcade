@@ -270,6 +270,24 @@ class GameSimulationTest {
         println("plush won by claw bots: ${simCollected.size - plushBefore}")
     }
 
+    /** Every registered machine, new ones included, must run headless and finish a round under random play. */
+    @Test
+    fun everyRegisteredMachineFinishesARound() {
+        val rng = Random(99)
+        for (game in GameRegistry.createAll()) {
+            var next = 0.3f
+            var id = 1L
+            playRound(game, roundSeed++) { t, ms ->
+                if (t >= next) {
+                    next = t + 0.25f
+                    val x = 20f + rng.nextFloat() * 320f
+                    val y = 60f + rng.nextFloat() * 560f
+                    if (rng.nextBoolean()) tap(game, id++, x, y, ms) else flick(game, id++, x, y, rng.nextFloat() * 400f - 200f, -900f, ms)
+                }
+            }
+        }
+    }
+
     @Test
     fun pusherNeverScoresBeforeTheFirstCoin() {
         val game = CoinPusherGame()

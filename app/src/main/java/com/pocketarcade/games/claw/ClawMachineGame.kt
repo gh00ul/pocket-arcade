@@ -603,7 +603,7 @@ class ClawMachineGame : BaseMiniGame() {
 
     private fun depthOf(b: Body): Float = ((System.identityHashCode(b) ushr 3) % 7 - 3) * 5f
 
-    private val cabinet: Model by lazy {
+    private val cabinetModel: Model by lazy {
         val b = ModelBuilder()
         val cab = ClawArt.cabinet.full
         val top = wy(BOX_TOP) + 60f
@@ -686,7 +686,7 @@ class ClawMachineGame : BaseMiniGame() {
             l.points += luckyLight
         }
         r.gradient(0xFF07030E.toInt(), Pal.shade(Pal.PLUM, 0.5f))
-        cabinet.draw(r)
+        cabinetModel.draw(r)
         marqueeFront.draw(r)
 
         for ((i, b) in world.bodies.withIndex()) {

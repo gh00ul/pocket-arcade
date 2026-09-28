@@ -420,7 +420,7 @@ class CoinPusherGame : BaseMiniGame() {
     private val coinsPanel = PusherArt.Panel(96, 22)
     private val wonPanel = PusherArt.Panel(96, 22)
 
-    private val cabinet: Model by lazy {
+    private val cabinetModel: Model by lazy {
         val b = ModelBuilder()
         val cab = PusherArt.cabinet.full
         val dark = PusherArt.dark.full
@@ -467,7 +467,7 @@ class CoinPusherGame : BaseMiniGame() {
         if (trayFlash > 0f) l.points += trayLight
         r.gradient(0xFF0C0610.toInt(), Pal.shade(Pal.ORANGE, 0.2f))
 
-        cabinet.draw(r)
+        cabinetModel.draw(r)
         drawShelf(r)
         drawTrayPile(r)
         drawPanels(r)

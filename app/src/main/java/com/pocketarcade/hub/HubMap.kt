@@ -80,17 +80,21 @@ class HubMap(
     val hangouts: List<Hangout>,
     val discoX: Float,
     val discoY: Float,
+    /** The bank each machine was given, by game index. */
+    val machineSlots: List<Slot>,
 ) {
     fun tileWalkable(tx: Int, ty: Int): Boolean =
         tx in 0 until cols && ty in 0 until rows && walkable[ty * cols + tx]
 }
 
 /**
- * A pre-sized stretch of floor for one machine's bank: [count] cabinets, each in a cell of at
- * most [maxW] wide, [maxD] deep and [maxH] tall, [gap] apart, starting at [x0] with their backs
- * at [back]. The cells and the play spots in front of them are kept clear of everything else, so
- * any cabinet that fits a cell can't overlap anything. A slot with a [shape] is that shape's
- * bank; a spare slot (no shape) takes the first machine that has no bank of its own.
+ * A pre-sized stretch of floor for one machine's bank: room for [count] cabinets of at most
+ * [maxW] wide, [maxD] deep and [maxH] tall, [gap] apart, from [x0] with their backs at [back].
+ * That floor and the play spots in front of it are kept clear of everything else, so any
+ * cabinet that fits can't overlap anything. The cabinets stand [gap] apart whatever their size,
+ * packed against the [anchor] side (-1 the left end, 1 the right end, 0 centred), so a slot by
+ * a wall keeps its cabinets against the wall. A slot with a [shape] is that shape's bank; a
+ * spare slot (no shape) takes the first machine that has no bank of its own.
  */
 class Slot(
     val shape: CabinetShape?,
@@ -101,14 +105,23 @@ class Slot(
     val maxW: Float,
     val maxD: Float,
     val maxH: Float,
+    val anchor: Int = 0,
 ) {
     val x1: Float get() = x0 + count * maxW + (count - 1) * gap
 
-    /** The floor the slot reserves: every cell plus the play spots in front of them. */
+    /** The floor the slot reserves: every cabinet at its largest plus the play spots in front. */
     val area: Box get() = Box(x0, back, x1, back + maxD + HubLayout.PROMPT_DEPTH)
 
-    /** Left edge of cell [k]. */
-    fun cellX(k: Int): Float = x0 + k * (maxW + gap)
+    /** Left edge of cabinet [k] when each is [w] wide. */
+    fun cabinetX(k: Int, w: Float): Float {
+        val span = count * w + (count - 1) * gap
+        val start = when {
+            anchor < 0 -> x0
+            anchor > 0 -> x1 - span
+            else -> (x0 + x1 - span) / 2f
+        }
+        return start + k * (w + gap)
+    }
 }
 
 /**
@@ -152,7 +165,19 @@ object HubLayout {
         CabinetShape.AIR_HOCKEY -> Triple(36f, 66f, 62f)
         CabinetShape.RACER -> Triple(32f, 50f, 62f)
         CabinetShape.TOWER -> Triple(28f, 26f, 76f)
+        // These machines bring their own design; the sizes are for the stand-in cabinet.
+        CabinetShape.GUN -> Triple(40f, 36f, 80f)
+        CabinetShape.PINBALL -> Triple(28f, 54f, 70f)
+        CabinetShape.FISHING -> Triple(60f, 60f, 56f)
     }
+
+    /** Width, depth and height of [game]'s cabinet: its own design's, else its shape's. */
+    fun cabinetSize(game: MiniGame): Triple<Float, Float, Float> =
+        game.cabinet?.let { Triple(it.width, it.depth, it.height) } ?: cabinetSize(game.look.shape)
+
+    /** The camera dive point for [game]'s cabinet: its own design's, else its shape's. */
+    fun focus(game: MiniGame): Pair<Float, Float> =
+        game.cabinet?.let { it.focusHeight to it.focusSetBack } ?: focus(game.look.shape)
 
     /** Where the camera flies to when entering: height and how far behind the cabinet front. */
     fun focus(shape: CabinetShape): Pair<Float, Float> {
@@ -160,7 +185,7 @@ object HubLayout {
         return when (shape) {
             CabinetShape.CLAW -> 38f to 3f
             CabinetShape.TOWER -> 48f to 4f
-            CabinetShape.UPRIGHT -> 40f to 6f
+            CabinetShape.UPRIGHT, CabinetShape.GUN -> 40f to 6f
             CabinetShape.WIDE -> 38f to 4f
             CabinetShape.PUSHER -> 36f to 6f
             CabinetShape.WHACK -> 44f to d - 4f
@@ -168,7 +193,7 @@ object HubLayout {
             CabinetShape.SKEEBALL -> 36f to d - 10f
             CabinetShape.HOOPS -> 56f to d - 10f
             CabinetShape.LANE -> 34f to d - 10f
-            CabinetShape.AIR_HOCKEY, CabinetShape.TABLE -> 46f to d - 2f
+            CabinetShape.AIR_HOCKEY, CabinetShape.TABLE, CabinetShape.PINBALL, CabinetShape.FISHING -> 46f to d - 2f
         }
     }
 
@@ -193,14 +218,15 @@ object HubLayout {
         // Across the middle: the whack row, the pusher island and the linked racers.
         bank(CabinetShape.WHACK, 3, 26f, 360f, 6f),
         bank(CabinetShape.PUSHER, 4, 218f, 356f, 4f),
-        bank(CabinetShape.RACER, 4, 236f, 520f, 2f),
-        // The front floor: a centre row of wide cabinets, tall ones along the right wall, two
-        // big round ones on the left, and two more banks behind them.
-        Slot(null, 3, 232f, 630f, 6f, maxW = 44f, maxD = 40f, maxH = 86f),
-        Slot(null, 4, 448f, 620f, 4f, maxW = 30f, maxD = 60f, maxH = 78f),
-        Slot(null, 2, 24f, 720f, 16f, maxW = 64f, maxD = 64f, maxH = 64f),
+        // The racers bring their own cabinet design, so their cells leave it room to grow.
+        Slot(CabinetShape.RACER, 4, 232f, 516f, 2f, maxW = 34f, maxD = 58f, maxH = 72f),
+        // The front floor: light-gun cabinets in the middle, pinball tables along the right
+        // wall, two big fishing tubs on the left, and two spare banks for machines to come.
+        Slot(CabinetShape.GUN, 3, 232f, 630f, 6f, maxW = 44f, maxD = 40f, maxH = 86f),
+        Slot(CabinetShape.PINBALL, 4, 448f, 620f, 4f, maxW = 30f, maxD = 60f, maxH = 78f, anchor = 1),
+        Slot(CabinetShape.FISHING, 2, 24f, 720f, 24f, maxW = 64f, maxD = 64f, maxH = 64f, anchor = -1),
         Slot(null, 3, 236f, 740f, 6f, maxW = 40f, maxD = 60f, maxH = 86f),
-        Slot(null, 3, 448f, 750f, 6f, maxW = 40f, maxD = 60f, maxH = 86f),
+        Slot(null, 3, 448f, 750f, 6f, maxW = 40f, maxD = 60f, maxH = 86f, anchor = 1),
     )
 
     /** Spots for bought decorations: centre x, front z, facing. */
@@ -242,6 +268,7 @@ object HubLayout {
         // Machines, bank by bank. A game whose shape has no bank (or whose bank another game
         // already took) gets the next spare slot; when none is left the build fails loudly.
         val used = BooleanArray(slots.size)
+        val machineSlots = ArrayList<Slot>()
         for ((index, g) in games.withIndex()) {
             val shape = g.look.shape
             val si = slots.indices.firstOrNull { !used[it] && slots[it].shape == shape }
@@ -249,14 +276,14 @@ object HubLayout {
                 ?: error("No room on the hall floor for '${g.id}': every bank and spare slot is taken. Add a Slot to HubLayout.slots.")
             used[si] = true
             val slot = slots[si]
-            val (cw, cd, ch) = cabinetSize(shape)
+            machineSlots += slot
+            val (cw, cd, ch) = cabinetSize(g)
             check(cw <= slot.maxW && cd <= slot.maxD && ch <= slot.maxH) {
                 "'${g.id}' cabinet $cw x $cd x $ch doesn't fit its slot's ${slot.maxW} x ${slot.maxD} x ${slot.maxH} cells"
             }
             for (k in 0 until slot.count) {
-                // Centred in its cell, backs in line.
-                val x0 = slot.cellX(k) + (slot.maxW - cw) / 2f
-                addMachine(props, spots, hangouts, index, shape, x0, slot.back, cw, cd, ch, k)
+                val x0 = slot.cabinetX(k, cw)
+                addMachine(props, spots, hangouts, index, shape, x0, slot.back, cw, cd, ch, focus(g), k)
             }
         }
 
@@ -352,17 +379,19 @@ object HubLayout {
             clerkX = 304f, clerkY = 58f,
             hangouts = hangouts,
             discoX = discoX, discoY = discoY,
+            machineSlots = machineSlots,
         )
     }
 
     private fun addMachine(
         props: MutableList<Prop>, spots: MutableList<Spot>, hangouts: MutableList<Hangout>,
-        index: Int, shape: CabinetShape, x0: Float, back: Float, cw: Float, cd: Float, ch: Float, copy: Int,
+        index: Int, shape: CabinetShape, x0: Float, back: Float, cw: Float, cd: Float, ch: Float,
+        focus: Pair<Float, Float>, copy: Int,
     ) {
         val cx = x0 + cw / 2f
         val front = back + cd
         props += Prop(PropKind.MACHINE, x0, back, x0 + cw, front, ch, machine = index, shape = shape, variant = copy)
-        val (fy, setBack) = focus(shape)
+        val (fy, setBack) = focus
         val half = maxOf(cw / 2f - 1f, 12f)
         spots += Spot(
             SpotType.MACHINE, index,

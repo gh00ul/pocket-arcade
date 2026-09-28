@@ -69,6 +69,7 @@ class RacerGame : BaseMiniGame() {
         "SKIM PAST CARS FOR MORE",
         "STAY ON THE ROAD!",
     )
+    override val cabinet get() = RacerCabinet
     override val look = CabinetLook(body = Pal.DARKRED, trim = Pal.WHITE, glow = Pal.RED, shape = CabinetShape.RACER)
     override val roundSeconds = RacerTuning.ROUND_SECONDS
 

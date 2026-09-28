@@ -21,7 +21,7 @@ class TitleShowcase(private val games: List<MiniGame>) {
     private val spacing = 58f
     private val rowWidth = spacing * (games.size - 1)
     private val units: List<MachineUnit> = games.mapIndexed { i, g ->
-        val (w, d, h) = HubLayout.cabinetSize(g.look.shape)
+        val (w, d, h) = HubLayout.cabinetSize(g)
         val cx = i * spacing - rowWidth / 2f
         // Long machines sit further back so every front lines up.
         val front = 20f
