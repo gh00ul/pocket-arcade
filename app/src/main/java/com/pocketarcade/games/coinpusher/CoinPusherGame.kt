@@ -229,6 +229,9 @@ class CoinPusherGame : BaseMiniGame() {
 
     override fun isSettled(): Boolean = drops.none { it.active } && fallers.none { it.active }
 
+    /** Every coin is a single tap: there is no pointer to forget. */
+    override fun cancelInput() {}
+
     override fun onTouch(type: TouchType, id: Long, x: Float, y: Float, timeMs: Long) {
         if (type != TouchType.DOWN || timeUp || endedEarly) return
         if (y > frontScreenY + 10f) return
@@ -577,6 +580,10 @@ class CoinPusherGame : BaseMiniGame() {
             else -> r.sprite(x, y + rad, z, rad * 2.2f, rad * 2.2f, PusherArt.star.full, roll = spin * 0.3f)
         }
     }
+
+    // ---------------------------------------------------------------- simulation-test hooks
+
+    internal val botCoinsLeft: Int get() = coinsLeft
 
     // ---------------------------------------------------------------- attract mode
 

@@ -89,6 +89,15 @@ interface MiniGame {
     /** Touch input in field units. Coordinates may fall outside the field (on the bezel). */
     fun onTouch(type: TouchType, id: Long, x: Float, y: Float, timeMs: Long)
 
+    /**
+     * The host calls this whenever it stops forwarding touches: on pause (Back, the close
+     * button, the app going to the background) and when the round ends. A finger lifted
+     * meanwhile never sends its UP, so forget every tracked pointer and let go of every held
+     * control; the next touch must start fresh. Keep the simulation state (a ball in flight, a
+     * prize in the claw) exactly as it is.
+     */
+    fun cancelInput()
+
     val score: Int
 
     /** True once the round is over (clock expired or the game ended itself) and nothing is still moving. */

@@ -222,6 +222,9 @@ class WhackAMoleGame : BaseMiniGame() {
         play(Sfx.POP, 0.45f, if (m.kind == Kind.GOLD) 1.5f else rng.range(0.9f, 1.1f))
     }
 
+    /** Every bonk is a single tap: there is no pointer to forget. */
+    override fun cancelInput() {}
+
     override fun onTouch(type: TouchType, id: Long, x: Float, y: Float, timeMs: Long) {
         if (type != TouchType.DOWN || timeUp) return
         malletT = 0f

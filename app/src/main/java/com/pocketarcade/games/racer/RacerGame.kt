@@ -174,7 +174,10 @@ class RacerGame : BaseMiniGame() {
 
     override fun isSettled(): Boolean = speed < 60f
 
-    override fun onTimeUp() {
+    override fun onTimeUp() = cancelInput()
+
+    /** Forgets the steering finger; the car holds its line until a new drag. */
+    override fun cancelInput() {
         dragging = -1L
     }
 
@@ -545,6 +548,8 @@ class RacerGame : BaseMiniGame() {
     // ---------------------------------------------------------------- simulation-test hooks
 
     internal val botPX: Float get() = px
+    /** Road position the car is steering for. */
+    internal val botSteerTarget: Float get() = steerTarget
     internal val botSpeed: Float get() = speed
     internal val botCrashed: Boolean get() = graceT > 0f
 

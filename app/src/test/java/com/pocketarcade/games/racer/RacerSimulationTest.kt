@@ -1,9 +1,12 @@
 package com.pocketarcade.games.racer
 
+import com.pocketarcade.engine.TouchType
+import com.pocketarcade.games.RoundDriver
 import com.pocketarcade.games.Stats
 import com.pocketarcade.games.assertPayoutBands
 import com.pocketarcade.games.gaussian
 import com.pocketarcade.games.playRound
+import org.junit.Assert.assertEquals
 import org.junit.Test
 import kotlin.random.Random
 
@@ -37,6 +40,26 @@ class RacerSimulationTest {
             }
         }
         return stats
+    }
+
+    @Test
+    fun steeringSurvivesAPause() {
+        val game = RacerGame()
+        val d = RoundDriver(game, 21L)
+        d.play(0.5f)
+        game.onTouch(TouchType.DOWN, 1L, 180f, 400f, d.ms)
+        game.onTouch(TouchType.MOVE, 1L, 150f, 400f, d.ms + 16)
+        assertEquals(-48f, game.botSteerTarget, 0.01f)
+        d.pause()
+        d.play(0.3f)
+        // The lost finger's late events change nothing.
+        game.onTouch(TouchType.MOVE, 1L, 60f, 400f, d.ms)
+        game.onTouch(TouchType.UP, 1L, 60f, 400f, d.ms)
+        assertEquals(-48f, game.botSteerTarget, 0.01f)
+        // A new finger steers on from where the car was heading.
+        game.onTouch(TouchType.DOWN, 2L, 200f, 400f, d.ms)
+        game.onTouch(TouchType.MOVE, 2L, 250f, 400f, d.ms + 16)
+        assertEquals(32f, game.botSteerTarget, 0.01f)
     }
 
     @Test

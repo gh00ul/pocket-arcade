@@ -528,7 +528,10 @@ class ClawMachineGame : BaseMiniGame() {
         respawnTimers = respawnTimers.copyOf(keep)
     }
 
-    override fun onTimeUp() {
+    override fun onTimeUp() = cancelInput()
+
+    /** Lets go of the joystick buttons; a prize already in the claw stays in it. */
+    override fun cancelInput() {
         leftPointer = -1L
         rightPointer = -1L
     }

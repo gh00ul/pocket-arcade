@@ -152,6 +152,13 @@ class AirHockeyGame : BaseMiniGame() {
         dragging = -1L
     }
 
+    /** Lets go of the mallet: it stops where it is instead of chasing the lost finger. */
+    override fun cancelInput() {
+        dragging = -1L
+        targetX = me.x
+        targetY = me.y
+    }
+
     override fun onTouch(type: TouchType, id: Long, x: Float, y: Float, timeMs: Long) {
         when (type) {
             TouchType.DOWN -> if (dragging < 0 && !timeUp && !endedEarly) {

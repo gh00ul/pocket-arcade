@@ -163,7 +163,10 @@ class SkeeBallGame : BaseMiniGame() {
 
     override fun isSettled(): Boolean = balls.none { it.active }
 
-    override fun onTimeUp() {
+    override fun onTimeUp() = cancelInput()
+
+    /** Drops the ball being dragged; it eases back to its resting spot. */
+    override fun cancelInput() {
         dragging = -1L
     }
 
@@ -692,6 +695,14 @@ class SkeeBallGame : BaseMiniGame() {
             ArcadeFont.drawCentered(this, "PWR", x + 17f, top + h + 6f, 2f, Color.White, a)
         }
     }
+
+    // ---------------------------------------------------------------- simulation-test hooks
+
+    /** Lane position of the ball waiting to be rolled. */
+    internal val botReadyX: Float get() = readyX
+    internal val botHasReady: Boolean get() = hasReady
+    /** Balls still rolling, flying or settling into a cup. */
+    internal val botBallsActive: Int get() = balls.count { it.active }
 
     // ---------------------------------------------------------------- attract mode
 

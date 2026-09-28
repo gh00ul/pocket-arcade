@@ -175,6 +175,8 @@ fun GameHostScreen(
         if (state.phase == HostPhase.PLAYING || state.phase == HostPhase.COUNTDOWN || state.phase == HostPhase.ENDING) {
             state.resumePhase = state.phase
             state.phase = HostPhase.PAUSED
+            // Touches stop reaching the game here, so a finger lifted while paused never sends its UP.
+            game.cancelInput()
             audio.play(Sfx.SELECT, 0.6f, 0.8f)
         }
     }
@@ -237,6 +239,7 @@ fun GameHostScreen(
                 if (game.finished) {
                     state.endedEarly = state.timeLeft > 0f
                     if (state.endedEarly) audio.play(Sfx.BUZZER, 0.7f, 1.2f)
+                    game.cancelInput()
                     state.phase = HostPhase.ENDING
                     state.phaseT = 0f
                 }

@@ -35,7 +35,8 @@ internal const val ENDING_SECONDS = 1.2f
 
 /**
  * Drives one round of [game] step by step the way the host does: [play] is the PLAYING phase
- * (the clock runs down, touches reach the game) and [end] is the ENDING tail.
+ * (the clock runs down, touches reach the game), [pause] is what happens on Back, the close
+ * button or the app going to the background, and [end] is the ENDING tail.
  */
 internal class RoundDriver(val game: MiniGame, seed: Long) {
     /** Simulated seconds of PLAYING so far. */
@@ -53,9 +54,9 @@ internal class RoundDriver(val game: MiniGame, seed: Long) {
     }
 
     /**
-     * Steps PLAYING for up to [seconds], stopping early once the game reports finished. [bot]
-     * runs before every step with (simulated seconds, simulated millis). Returns whether the
-     * round finished.
+     * Steps PLAYING for up to [seconds], stopping early once the game reports finished (which
+     * also cancels input, as the host does when it switches to ENDING). [bot] runs before every
+     * step with (simulated seconds, simulated millis). Returns whether the round finished.
      */
     fun play(seconds: Float, bot: ((Float, Long) -> Unit)? = null): Boolean {
         val until = steps + (seconds / FIXED_DT).toInt()
@@ -66,8 +67,15 @@ internal class RoundDriver(val game: MiniGame, seed: Long) {
             t += FIXED_DT
             steps++
         }
+        if (game.finished) game.cancelInput()
         return game.finished
     }
+
+    /**
+     * The host pauses mid-round: it stops forwarding touches and tells the game. The clock
+     * doesn't move and nothing steps while paused, so a finger lifted meanwhile is simply lost.
+     */
+    fun pause() = game.cancelInput()
 
     /** The host's ENDING tail: [ENDING_SECONDS] of `update(dt, 0f)` whatever the game is doing. */
     fun end() {
