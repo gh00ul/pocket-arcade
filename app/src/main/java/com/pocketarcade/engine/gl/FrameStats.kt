@@ -16,6 +16,8 @@ import com.pocketarcade.engine.r3d.RenderPass
 internal class FrameStats {
     companion object {
         const val TAG = "PocketArcade3D"
+        /** `adb shell setprop log.tag.PocketArcade3DPin DEBUG` holds the render scale steady. */
+        const val PIN_TAG = "PocketArcade3DPin"
         private const val GL_TIME_ELAPSED_EXT = 0x88BF
         private const val GL_GPU_DISJOINT_EXT = 0x8FBB
         private const val RING = 4
@@ -23,6 +25,10 @@ internal class FrameStats {
 
     /** Whether logging is on; re-read from the log property every few seconds. */
     var enabled = false
+        private set
+
+    /** Whether the adaptive resolution is held at its ceiling, so runs compare like for like. */
+    var pinScale = false
         private set
     private var checkedAt = 0L
 
@@ -56,6 +62,7 @@ internal class FrameStats {
             val on = Log.isLoggable(TAG, Log.DEBUG)
             if (on && !enabled) reset()
             enabled = on
+            pinScale = Log.isLoggable(PIN_TAG, Log.DEBUG)
         }
         if (!enabled) return
         if (gen != generation) {

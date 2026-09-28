@@ -133,6 +133,10 @@ internal class GlThread : Thread("ArcadeGL") {
 
     /** Lowers the render resolution when frames run long and raises it again when there's headroom. */
     private fun pace() {
+        if (stats.pinScale) {
+            renderer.renderScale = 0.8f
+            return
+        }
         val now = SystemClock.elapsedRealtimeNanos()
         if (lastSwap != 0L) {
             val ms = (now - lastSwap) / 1_000_000f
