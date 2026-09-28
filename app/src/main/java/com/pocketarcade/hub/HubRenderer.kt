@@ -25,6 +25,7 @@ import kotlin.math.sin
 class HubRenderer {
     companion object {
         const val SLOT = "hub"
+        private const val FLOOR_GLOW = 0.45f
     }
 
     private val r = Renderer3D(1, 1)
@@ -41,6 +42,8 @@ class HubRenderer {
 
         r.startFrame()
         r.resize(w, h)
+        // The blacklight carpet: its neon print fluoresces a little.
+        r.floorGlow = FLOOR_GLOW
         world.camera.apply(r.camera, w, h)
         sc.render(r, world, save)
         Gfx.submit(SLOT, r.finishFrame(0, 0, w, h))

@@ -43,6 +43,18 @@ object HallArt {
                 draw(cx, cy)
             }
         }
+        // Worn, mottled pile: broad soft patches a shade lighter or darker.
+        for (i in 0 until 18) {
+            val r = 50f + hash01(i, 61) * 70f
+            val c = if (i % 2 == 0) 0x0E6A4AB0 else 0x16000000
+            wrapped(hash01(i, 62) * n, hash01(i, 63) * n, r) { cx, cy -> tp.radial(cx, cy, r, c, 0) }
+        }
+        // Blacklight bleed: each motif's ink glows faintly into the fibres around it.
+        for (i in 0 until 46) {
+            val size = 10f + hash01(i, 13) * 18f
+            val halo = alpha(colors[i % colors.size], 0.16f)
+            wrapped(hash01(i, 11) * n, hash01(i, 12) * n, size * 1.7f) { cx, cy -> tp.radial(cx, cy, size * 1.7f, halo, 0) }
+        }
         for (i in 0 until 46) {
             val x = hash01(i, 11) * n
             val y = hash01(i, 12) * n
@@ -118,12 +130,15 @@ object HallArt {
                 }
             }
         }
-        // Tiny stars everywhere.
+        // Tiny stars everywhere, a few with a glint of their own.
         for (i in 0 until 400) {
             val x = hash01(i, 21) * n
             val y = hash01(i, 22) * n
+            if (i % 9 == 0) tp.radial(x, y, 6f, alpha(colors[i % colors.size], 0.22f), 0)
             tp.circle(x, y, 0.8f + hash01(i, 23) * 1.2f, alpha(colors[i % colors.size], 0.7f))
         }
+        // Fine fibre speckle over everything.
+        tp.grain(0.12f, 29)
         tp.toTexture().also { it.repeat = true; tp.recycle() }
     }
 
