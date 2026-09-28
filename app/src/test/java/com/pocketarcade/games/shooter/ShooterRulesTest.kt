@@ -505,4 +505,26 @@ class ShooterRulesTest {
         assertTrue(g.score >= 0)
         assertTrue(g.ticketsFor(g.score) >= ShooterTuning.BASE_TICKETS)
     }
+
+    @Test
+    fun aFingerBeyondTheHeldSlotsIsIgnoredNotFiredTwice() {
+        val g = ShooterGame()
+        val d = RoundDriver(g, 3L)
+        g.botHoldSpawns(60f)
+        d.play(0.5f)
+        // Six fingers held on the empty sky take every pointer slot.
+        for (i in 1..6) g.onTouch(TouchType.DOWN, i.toLong(), 30f + i * 40f, 60f, d.ms)
+        assertEquals(6, g.botPointers)
+        val before = g.botShots
+        // A seventh finger has no slot: it must not fire at all, even when its DOWN repeats.
+        g.onTouch(TouchType.DOWN, 8L, 180f, 60f, d.ms)
+        g.onTouch(TouchType.DOWN, 8L, 180f, 60f, d.ms)
+        assertEquals(before, g.botShots)
+        // Once a finger lifts, a new one fires exactly once.
+        g.onTouch(TouchType.UP, 1L, 70f, 60f, d.ms)
+        g.onTouch(TouchType.DOWN, 9L, 180f, 60f, d.ms)
+        g.onTouch(TouchType.DOWN, 9L, 180f, 60f, d.ms)
+        assertEquals(6, g.botPointers)
+        assertTrue("a freed slot should take the next finger", g.botShots <= before + 1)
+    }
 }

@@ -192,9 +192,9 @@ class ShooterGame : BaseMiniGame() {
     override val instructions = listOf(
         "TAP TO SHOOT WHERE YOU TAP",
         "6 SHOTS: TAP THE RELOAD BAR",
-        "SHOOT RED RINGS FIRST: THEY FIRE BACK",
+        "RED RINGS FIRE BACK: HIT FIRST",
         "DON'T SHOOT HANDS-UP CIVILIANS",
-        "GOLD DRONES PAY BIG, THEN THE BOSS!",
+        "GOLD DRONES PAY BIG, THEN BOSS",
     )
     override val look = CabinetLook(body = Pal.NAVY, trim = Pal.ORANGE, glow = Pal.ORANGE, shape = CabinetShape.GUN)
     override val cabinet: CabinetDesign get() = ShooterCabinet
@@ -858,15 +858,17 @@ class ShooterGame : BaseMiniGame() {
         when (type) {
             TouchType.DOWN -> {
                 // Each finger fires once, when it lands; a repeated DOWN for a held id is ignored.
+                // With every slot held there is nowhere to remember this id, so the finger is
+                // ignored rather than left free to fire again on a repeated DOWN.
                 if (pointer(id) >= 0) return
                 for (k in 0 until POINTERS) if (!ptrUsed[k]) {
                     ptrUsed[k] = true
                     ptrId[k] = id
                     ptrX[k] = x
                     ptrY[k] = y
-                    break
+                    press(x, y)
+                    return
                 }
-                press(x, y)
             }
             TouchType.MOVE -> {
                 val k = pointer(id)

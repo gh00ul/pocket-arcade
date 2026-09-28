@@ -75,6 +75,8 @@ internal object PinballTable {
     const val SLING_BY = 464f
     const val SLING_CX = 84f
     const val SLING_CY = 488f
+    /** Where the inlane guide turns into the sloped floor that feeds the flipper. */
+    const val INLANE_BEND_Y = 476f
 
     // Collider kinds.
     const val WALL = 0
@@ -169,8 +171,10 @@ internal object PinballTable {
         // Deflectors that turn a ball running down a side wall into the playfield.
         pair(0f, 350f, 20f, 378f, 0.35f)
         // Inlane guides and the inlane floors that feed the flippers; outlanes run outside them.
-        pair(22f, 398f, 22f, 466f, 0.35f)
-        pair(22f, 466f, 64f, 506f, 0.25f)
+        // The floor bends low enough to leave a ball (18) about 4 units to spare under the
+        // sling's bottom post (50, 464, r 4); bending at 466 left 16.8 and trapped it there.
+        pair(22f, 398f, 22f, INLANE_BEND_Y, 0.35f)
+        pair(22f, INLANE_BEND_Y, 64f, 506f, 0.25f)
         postPair(22f, 398f, 4f)
         // Slingshots: two plain rubber sides and a kicking face.
         pair(SLING_AX, SLING_AY, SLING_BX, SLING_BY, 0.5f, RUBBER, STYLE_RUBBER)
