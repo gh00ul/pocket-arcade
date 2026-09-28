@@ -17,6 +17,11 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
 
+// Attract-mode props, looked up once rather than per frame.
+private val skeeBall: Model by lazy { MachineKit.ball(0xFFB0213A.toInt()) }
+private val blueMallet: Model by lazy { MachineKit.hockeyMallet(0xFF2F5BE0.toInt()) }
+private val redMallet: Model by lazy { MachineKit.hockeyMallet(0xFFE8323C.toInt()) }
+
 /**
  * One cabinet on the arcade floor: its model, the parts that move in attract mode (a claw
  * patrolling the prizes, moles popping, a puck gliding...), the chase lights on its marquee and
@@ -415,7 +420,9 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
                 val tableY = 26f
                 val w = x1 - x0
                 val d = z1 - (z0 + 4f)
-                for ((k, hole) in MachineKit.whackHoles.withIndex()) {
+                val holes = MachineKit.whackHoles
+                for (k in holes.indices) {
+                    val hole = holes[k]
                     val cycle = (phase * 0.9f + k * 1.37f) % 4f
                     val rise = if (cycle < 1f) sin(cycle * PI.toFloat()) else 0f
                     if (rise <= 0.02f) continue
@@ -439,8 +446,8 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
                 val px = cx + tri(phase * 0.45f) * w
                 val pz = mz + tri(phase * 0.33f + 0.3f) * d
                 MachineKit.puck.draw(r, Blend.OPAQUE, xf = xf.set(px, top, pz))
-                MachineKit.hockeyMallet(0xFF2F5BE0.toInt()).draw(r, Blend.OPAQUE, xf = xf.set(cx + (px - cx) * 0.6f, top, z1 - 7f))
-                MachineKit.hockeyMallet(0xFFE8323C.toInt()).draw(r, Blend.OPAQUE, xf = xf.set(cx + (px - cx) * 0.7f, top, z0 + 13f))
+                blueMallet.draw(r, Blend.OPAQUE, xf = xf.set(cx + (px - cx) * 0.6f, top, z1 - 7f))
+                redMallet.draw(r, Blend.OPAQUE, xf = xf.set(cx + (px - cx) * 0.7f, top, z0 + 13f))
             }
             CabinetShape.SKEEBALL -> {
                 // Now and then a ball rolls up the lane and jumps into the rings.
@@ -451,7 +458,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
                     val boardZ = z0 + 8f
                     val zz = laneFront - (laneFront - boardZ - 14f) * k
                     val yy = 19.5f + 8f * k + if (k > 0.75f) sin((k - 0.75f) / 0.25f * PI.toFloat()) * 5f else 0f
-                    MachineKit.ball(0xFFB0213A.toInt()).draw(r, Blend.OPAQUE, xf = xf.set(cx + sin(phase * 3f) * 2f, yy + 2f, zz, pitch = -k * 20f, scale = 2.1f))
+                    skeeBall.draw(r, Blend.OPAQUE, xf = xf.set(cx + sin(phase * 3f) * 2f, yy + 2f, zz, pitch = -k * 20f, scale = 2.1f))
                 }
             }
             CabinetShape.HOOPS -> {

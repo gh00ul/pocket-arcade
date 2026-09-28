@@ -22,21 +22,44 @@ import kotlin.math.sin
  * camera can see.
  */
 class HallScene(val map: HubMap, private val games: List<MiniGame>) {
+    private companion object {
+        /** The renderer's point-light budget. */
+        const val MAX_LIGHTS = 64
+        val DISCO_COLORS = intArrayOf(0xFFFF4FA8.toInt(), 0xFF39E6F2.toInt(), 0xFFFFD84D.toInt(), 0xFF9B6BFF.toInt())
+    }
+
     private val arts = games.map { MachineArt(it) }
-    private val units = map.props.filter { it.kind == PropKind.MACHINE }.map { MachineUnit(it, games[it.machine], arts[it.machine]) }
-    private val fixtures = ArrayList<Pair<Prop, Model>>()
+    /** Every cabinet, back to front: the order the see-through pass needs, fixed for the map's life. */
+    private val units = map.props.filter { it.kind == PropKind.MACHINE }
+        .map { MachineUnit(it, games[it.machine], arts[it.machine]) }
+        .sortedBy { it.prop.z0 }
+    private val fixtureProps = ArrayList<Prop>()
+    private val fixtureModels = ArrayList<Model>()
     private val lights = ArrayList<PointLight>()
-    private val baseIntensity = HashMap<PointLight, Float>()
+    /** Each light's steady intensity (the per-frame flicker scales it). */
+    private val baseIntensity: FloatArray
     private val structure: Model
     private val floorShade: Texture
+    private val hasDisco = map.props.any { it.decor == DecorStyle.DISCO_BALL }
     private val figures = HashMap<CharacterLook, Figure>()
     private val corners = FloatArray(2)
     private val bulb = HallArt.solid(-1).full
     private val halo = HallArt.glow.full
     private val shadow = HallArt.shadow.full
 
+    // The part of the floor on screen this frame (plus margins), and the lights picked for it.
+    private var minX = 0f
+    private var maxX = 0f
+    private var minZ = 0f
+    private var maxZ = 0f
+    private val pickIndex = IntArray(MAX_LIGHTS)
+    private val pickKey = FloatArray(MAX_LIGHTS)
+
     init {
-        for (p in map.props) if (p.kind != PropKind.MACHINE) fixtures += p to Props.build(p, lights)
+        for (p in map.props) if (p.kind != PropKind.MACHINE) {
+            fixtureProps += p
+            fixtureModels += Props.build(p, lights)
+        }
         for (u in units) lights += u.lights
         // Ceiling downlights in a grid.
         var z = 90f
@@ -51,9 +74,10 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         // Neon along the walls.
         lights += PointLight(92f, 110f, 40f, 0.3f, 0.9f, 1f, 130f, 0.7f)
         lights += PointLight(534f, 110f, 40f, 0.7f, 0.4f, 1f, 130f, 0.7f)
-        for (l in lights) baseIntensity[l] = l.intensity
+        // The structure adds the street lamps, so read the steady intensities after it.
         structure = buildStructure()
         floorShade = buildFloorShade()
+        baseIntensity = FloatArray(lights.size) { lights[it].intensity }
     }
 
     // ------------------------------------------------------------------ static structure
@@ -204,16 +228,53 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
 
     private fun figureFor(look: CharacterLook): Figure = figures.getOrPut(look) { Figure(look) }
 
+    /** Whether a floor rectangle is in this frame's view. */
+    private fun visible(x0: Float, z0: Float, x1: Float, z1: Float) = x1 > minX && x0 < maxX && z1 > minZ && z0 < maxZ
+
+    /**
+     * Picks the lights that reach the view, nearest the middle of it first, up to the renderer's
+     * budget, and sets their flicker. Allocation-free: this runs every frame.
+     */
+    private fun pickLights(r: Renderer3D, t: Float) {
+        val camX = (minX + maxX) / 2f
+        val camZ = (minZ + maxZ) / 2f
+        var n = 0
+        for (i in lights.indices) {
+            val pl = lights[i]
+            if (pl.x + pl.radius <= minX || pl.x - pl.radius >= maxX || pl.z + pl.radius <= minZ || pl.z - pl.radius >= maxZ) continue
+            val key = abs(pl.x - camX) + abs(pl.z - camZ)
+            if (n == MAX_LIGHTS && key >= pickKey[n - 1]) continue
+            // Insertion into the sorted pick list, dropping the farthest when it's full.
+            var j = if (n < MAX_LIGHTS) n++ else n - 1
+            while (j > 0 && pickKey[j - 1] > key) {
+                pickKey[j] = pickKey[j - 1]
+                pickIndex[j] = pickIndex[j - 1]
+                j--
+            }
+            pickKey[j] = key
+            pickIndex[j] = i
+        }
+        val l = r.lighting
+        for (k in 0 until n) {
+            val i = pickIndex[k]
+            val pl = lights[i]
+            pl.intensity = baseIntensity[i] * (0.94f + 0.06f * sin(t * 2.3f + pl.x * 0.05f + pl.z * 0.03f))
+            l.points += pl
+        }
+    }
+
     fun render(r: Renderer3D, world: HubWorld, save: SaveState) {
         val t = world.time
         val cam = r.camera
 
         // What part of the floor is on screen (plus margins for tall things).
-        var minX = Float.MAX_VALUE
-        var maxX = -Float.MAX_VALUE
-        var minZ = Float.MAX_VALUE
-        var maxZ = -Float.MAX_VALUE
-        for ((sx, sy) in listOf(0f to 0f, r.width.toFloat() to 0f, 0f to r.height.toFloat(), r.width.toFloat() to r.height.toFloat())) {
+        minX = Float.MAX_VALUE
+        maxX = -Float.MAX_VALUE
+        minZ = Float.MAX_VALUE
+        maxZ = -Float.MAX_VALUE
+        for (c in 0 until 4) {
+            val sx = if (c and 1 == 0) 0f else r.width.toFloat()
+            val sy = if (c < 2) 0f else r.height.toFloat()
             if (cam.rayToPlaneY(sx, sy, 0f, corners)) {
                 minX = minOf(minX, corners[0]); maxX = maxOf(maxX, corners[0])
                 minZ = minOf(minZ, corners[1]); maxZ = maxOf(maxZ, corners[1])
@@ -225,7 +286,6 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
             minX = 0f; maxX = HubLayout.WIDTH.toFloat(); minZ = 0f; maxZ = HubLayout.DEPTH.toFloat()
         }
         minX -= 60f; maxX += 60f; minZ -= 140f; maxZ += 60f
-        fun visible(x0: Float, z0: Float, x1: Float, z1: Float) = x1 > minX && x0 < maxX && z1 > minZ && z0 < maxZ
 
         // Lighting: dim hall, warm downlights, every machine glowing its colour.
         val l = r.lighting
@@ -233,16 +293,7 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         l.setDirection(0.1f, 1f, 0.35f)
         l.dirR = 0.16f; l.dirG = 0.15f; l.dirB = 0.18f
         l.points.clear()
-        val camX = (minX + maxX) / 2f
-        val camZ = (minZ + maxZ) / 2f
-        val candidates = lights.filter { it.x + it.radius > minX && it.x - it.radius < maxX && it.z + it.radius > minZ && it.z - it.radius < maxZ }
-            .sortedBy { abs(it.x - camX) + abs(it.z - camZ) }
-        for ((i, pl) in candidates.withIndex()) {
-            if (i >= 64) break
-            val base = baseIntensity[pl] ?: pl.intensity
-            pl.intensity = base * (0.94f + 0.06f * sin(t * 2.3f + pl.x * 0.05f + pl.z * 0.03f))
-            l.points += pl
-        }
+        pickLights(r, t)
         r.fogNear = 760f
         r.fogFar = 1800f
         r.fogFloor = 0.35f
@@ -252,11 +303,13 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
 
         structure.draw(r, Blend.OPAQUE)
 
-        for ((p, m) in fixtures) {
+        for (i in fixtureProps.indices) {
+            val p = fixtureProps[i]
             if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
-            m.draw(r, Blend.OPAQUE)
+            fixtureModels[i].draw(r, Blend.OPAQUE)
         }
-        for (u in units) {
+        for (i in units.indices) {
+            val u = units[i]
             val p = u.prop
             if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
             u.refresh(save.highScore(u.game.id), t)
@@ -266,7 +319,9 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         // The crowd.
         val pl = world.player
         pl.look?.let { figureFor(it).draw(r, pl.x, 0f, pl.y, pl.yaw, pl.pose, pl.phase, t) }
-        for (n in world.npcs) {
+        val npcs = world.npcs
+        for (i in npcs.indices) {
+            val n = npcs[i]
             if (!visible(n.x - 10f, n.y - 10f, n.x + 10f, n.y + 10f)) continue
             figureFor(n.look).draw(r, n.x, 0f, n.y, n.yaw, n.pose, n.phase, t + n.seed)
         }
@@ -275,33 +330,41 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         }
 
         // ---- see-through layers, back to front where it matters.
-        r.decal(304f - 62f, 606f, 304f + 62f, 730f, 0.05f, HallArt.floorLogo.full, blend = Blend.ALPHA)
+        val logoZ = HubLayout.FRONT_WALL - 234f
+        r.decal(304f - 62f, logoZ, 304f + 62f, logoZ + 124f, 0.05f, HallArt.floorLogo.full, blend = Blend.ALPHA)
         r.decal(0f, 0f, HubLayout.WIDTH.toFloat(), HubLayout.DEPTH.toFloat(), 0.08f, floorShade.full, blend = Blend.ALPHA)
-        for (u in units) {
+        for (i in units.indices) {
+            val u = units[i]
             val p = u.prop
             if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
             val pulse = 0.28f + 0.06f * sin(t * 2f + p.centerX * 0.1f)
             r.decal(p.x0 - 12f, p.z1 - 4f, p.x1 + 12f, p.z1 + 40f, 0.15f, halo, Blend.ADD, emissive = 1f, alpha = pulse, tint = u.art.glow)
         }
         shadowAt(r, pl.x, pl.y, 1f)
-        for (n in world.npcs) if (visible(n.x, n.y, n.x, n.y)) shadowAt(r, n.x, n.y, 1f)
-        shadowAt(r, map.clerkX, map.clerkY, 1.1f)
-        for ((p, m) in fixtures) {
-            if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
-            m.draw(r, Blend.ALPHA)
+        for (i in npcs.indices) {
+            val n = npcs[i]
+            if (visible(n.x, n.y, n.x, n.y)) shadowAt(r, n.x, n.y, 1f)
         }
-        for (u in units.sortedBy { it.prop.z0 }) {
+        shadowAt(r, map.clerkX, map.clerkY, 1.1f)
+        for (i in fixtureProps.indices) {
+            val p = fixtureProps[i]
+            if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
+            fixtureModels[i].draw(r, Blend.ALPHA)
+        }
+        for (i in units.indices) {
+            val u = units[i]
             val p = u.prop
             if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
             u.drawTransparent(r)
             u.drawBulbs(r, t, bulb, halo)
         }
         structure.draw(r, Blend.ADD)
-        for ((p, m) in fixtures) {
+        for (i in fixtureProps.indices) {
+            val p = fixtureProps[i]
             if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
-            m.draw(r, Blend.ADD)
+            fixtureModels[i].draw(r, Blend.ADD)
         }
-        if (map.props.any { it.decor == DecorStyle.DISCO_BALL }) drawDiscoSpots(r, t)
+        if (hasDisco) drawDiscoSpots(r, t)
     }
 
     private fun shadowAt(r: Renderer3D, x: Float, z: Float, s: Float) {
@@ -309,7 +372,7 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
     }
 
     private fun drawDiscoSpots(r: Renderer3D, t: Float) {
-        val colors = intArrayOf(0xFFFF4FA8.toInt(), 0xFF39E6F2.toInt(), 0xFFFFD84D.toInt(), 0xFF9B6BFF.toInt())
+        val colors = DISCO_COLORS
         for (k in 0 until 14) {
             val a = t * 0.6f + k * 0.45f
             val d = 60f + hash01(k, 3) * 120f

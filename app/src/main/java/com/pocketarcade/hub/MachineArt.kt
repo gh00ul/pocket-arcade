@@ -129,15 +129,20 @@ class MachineArt(val game: MiniGame) {
     // ------------------------------------------------------------------ live displays
 
     private var displayText = ""
+    private var displayBest = -1
     private val displayPaint by lazy { TexPaint(256, 64) }
 
     /** A red LED score display showing the machine's best score and a "PLAY" call. */
     val display: Texture by lazy { Texture(256, 64) }
 
     fun updateDisplay(best: Int, t: Float) {
-        val text = if ((t % 6f) < 3f) "HI $best" else "PLAY!"
-        if (text == displayText) return
+        // Called every frame for every copy on screen: only build a new string when it changes.
+        val hi = (t % 6f) < 3f
+        if (hi && best == displayBest && displayText.startsWith("HI")) return
+        if (!hi && displayText == "PLAY!") return
+        val text = if (hi) "HI $best" else "PLAY!"
         displayText = text
+        displayBest = best
         val tp = displayPaint
         tp.fill(0xFF0A0404.toInt())
         for (x in 0 until 256 step 4) tp.rect(x.toFloat(), 0f, 1f, 64f, 0xFF140808.toInt())
@@ -164,6 +169,8 @@ class LiveScreen(private val art: MachineArt, private val seed: Int) {
     private val painter by lazy { CanvasPainter(tp, scale) }
     val texture: Texture by lazy { Texture((units.first * scale).toInt(), (units.second * scale).toInt()) }
     private var frame = 0
+    private var bestText = ""
+    private var bestShown = -1
 
     fun paint(best: Int, t: Float) {
         // Screens refresh at 30 fps; that's plenty for attract loops.
@@ -174,7 +181,11 @@ class LiveScreen(private val art: MachineArt, private val seed: Int) {
         if (cycle > 7f) {
             tp.fill(0xFF05040A.toInt())
             tp.glowText("HIGH SCORE", tp.w / 2f, tp.h * 0.36f, tp.h * 0.13f, 0xFFFFE14D.toInt(), 0xFFFF9A3C.toInt(), 5f, Fonts.display)
-            tp.glowText(best.toString(), tp.w / 2f, tp.h * 0.72f, tp.h * 0.26f, -1, art.glow, 8f, Fonts.display)
+            if (best != bestShown) {
+                bestShown = best
+                bestText = best.toString()
+            }
+            tp.glowText(bestText, tp.w / 2f, tp.h * 0.72f, tp.h * 0.26f, -1, art.glow, 8f, Fonts.display)
         } else {
             tp.fill(0xFF000000.toInt())
             art.game.drawAttract(painter, w, h, t + seed * 3.1f)
