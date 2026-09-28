@@ -1,6 +1,12 @@
 package com.pocketarcade.hub
 
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.pocketarcade.data.DecorStyle
+import com.pocketarcade.engine.Painter
+import com.pocketarcade.engine.TouchType
+import com.pocketarcade.games.CabinetLook
+import com.pocketarcade.games.CabinetShape
+import com.pocketarcade.games.GameFx
 import com.pocketarcade.games.GameRegistry
 import com.pocketarcade.games.MiniGame
 import org.junit.Assert.assertFalse
@@ -175,6 +181,79 @@ class HubMapTest {
                 assertTrue("$name: ${games[i].id} has no prompt", map.spots.any { it.type == SpotType.MACHINE && it.machine == i })
             }
         }
+    }
+
+    @Test
+    fun everyCabinetFitsItsBank() {
+        for ((name, map) in maps) {
+            for (i in games.indices) {
+                val g = games[i]
+                val slot = map.machineSlots[i]
+                val d = g.cabinet
+                if (d != null) {
+                    assertTrue(
+                        "$name: ${g.id}'s design ${d.width} x ${d.depth} x ${d.height} doesn't fit its bank's ${slot.maxW} x ${slot.maxD} x ${slot.maxH}",
+                        d.width <= slot.maxW && d.depth <= slot.maxD && d.height <= slot.maxH,
+                    )
+                }
+                for (p in map.props) {
+                    if (p.kind != PropKind.MACHINE || p.machine != i) continue
+                    assertTrue("$name: a ${g.id} cabinet sticks out of its bank", p.x0 >= slot.x0 && p.x1 <= slot.x1 && p.z0 >= slot.back && p.z1 <= slot.back + slot.maxD)
+                }
+            }
+        }
+    }
+
+    /** A do-nothing machine for probing the floor plan's limits. */
+    private class Probe(shape: CabinetShape, private val design: CabinetDesign? = null) : MiniGame {
+        override val id = "probe"
+        override val title = "PROBE"
+        override val marquee = "PROBE"
+        override val instructions = emptyList<String>()
+        override val look = CabinetLook(0, 0, 0, shape)
+        override val cabinet: CabinetDesign? get() = design
+        override val roundSeconds = 1f
+        override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) {}
+        override fun start(fx: GameFx) {}
+        override fun update(dt: Float, timeLeft: Float) {}
+        override fun draw(scope: DrawScope) {}
+        override fun onTouch(type: TouchType, id: Long, x: Float, y: Float, timeMs: Long) {}
+        override fun cancelInput() {}
+        override val score = 0
+        override val finished = true
+        override fun ticketsFor(score: Int) = 0
+        override val bonusTickets = 0
+    }
+
+    private fun buildFails(games: List<MiniGame>): Boolean = try {
+        HubLayout.build(games, emptySet())
+        false
+    } catch (_: IllegalStateException) {
+        true
+    }
+
+    @Test
+    fun machinesTakeSpareBanksThenFailLoudly() {
+        val spares = HubLayout.slots.count { it.shape == null }
+        assertTrue("keep at least two spare banks for new machines", spares >= 2)
+        // Machines without a bank of their own take the spares, one each...
+        assertFalse(buildFails(games + List(spares) { Probe(CabinetShape.UPRIGHT) }))
+        // ...and one more has nowhere to go: the build fails rather than overlap anything.
+        assertTrue(buildFails(games + List(spares + 1) { Probe(CabinetShape.UPRIGHT) }))
+    }
+
+    @Test
+    fun aCabinetTooBigForItsBankFailsTheBuild() {
+        val huge = object : CabinetDesign {
+            override val width = 500f
+            override val depth = 40f
+            override val height = 60f
+            override val focusHeight = 40f
+            override val focusSetBack = 6f
+            override val screenUnits: Pair<Int, Int>? = null
+            override fun build(c: CabinetBuild) {}
+        }
+        assertTrue(buildFails(listOf(Probe(CabinetShape.UPRIGHT, huge))))
     }
 
     @Test
