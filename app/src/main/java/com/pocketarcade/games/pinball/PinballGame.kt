@@ -81,6 +81,10 @@ object PinballTuning {
     const val STUCK_KICK = 480f
     /** After this many kicks in a row the ball is taken off and served again (no ball lost). */
     const val STUCK_KICKS = 3
+    /** A stall within this distance of the last kick counts as the same stuck spot. */
+    const val STUCK_RADIUS = 40f
+    /** Seconds of free play after a kick that clear the kick count. */
+    const val STUCK_FREE_SECONDS = 8f
 
     // Nudge and tilt: a quick upward swipe of a flipper thumb.
     const val NUDGE_DIST = 45f
@@ -190,6 +194,10 @@ class PinballGame : BaseMiniGame() {
         /** Seconds spent crawling (the stuck-ball failsafe). */
         var slowT = 0f
         var searchKicks = 0
+        /** Where the last failsafe kick happened, and seconds of free play since. */
+        var kickX = 0f
+        var kickY = 0f
+        var freeT = 0f
         /** Resting on a raised, held flipper this step: crawling there is on purpose. */
         var cradled = false
     }
@@ -796,20 +804,36 @@ class PinballGame : BaseMiniGame() {
             b.slowT += dt
             if (b.slowT > PinballTuning.STUCK_SECONDS) {
                 b.slowT = 0f
+                // Stalling somewhere new starts the count again; the same spot keeps counting,
+                // however fast the last kick sent it (a kicked ball always moves fast for a moment).
+                val kx = b.x - b.kickX
+                val ky = b.y - b.kickY
+                val r = PinballTuning.STUCK_RADIUS
+                if (kx * kx + ky * ky > r * r) b.searchKicks = 0
                 b.searchKicks++
+                b.kickX = b.x
+                b.kickY = b.y
+                b.freeT = 0f
                 if (b.searchKicks > PinballTuning.STUCK_KICKS) {
                     retire(b)
                 } else {
                     searchKicksTotal++
+                    // Mostly up the table; the sideways part alternates and varies so a kick that
+                    // bounced straight back into the pocket isn't repeated.
+                    val out = if (b.x < T.CX) 1f else -1f
+                    val side = if (b.searchKicks % 2 == 1) out else -out
                     b.vy = -PinballTuning.STUCK_KICK
-                    b.vx = if (b.x < T.CX) 160f else -160f
+                    b.vx = side * (40f + rng.nextFloat() * 120f)
                     play(Sfx.THUD, 0.6f, 1.2f)
                     show(M_SEARCH)
                 }
             }
         } else {
             b.slowT = 0f
-            if (speed > 300f) b.searchKicks = 0
+            if (b.searchKicks > 0) {
+                b.freeT += dt
+                if (b.freeT > PinballTuning.STUCK_FREE_SECONDS) b.searchKicks = 0
+            }
         }
     }
 
@@ -1197,6 +1221,13 @@ class PinballGame : BaseMiniGame() {
         b.autoT = -1f
         b.slowT = 0f
         b.searchKicks = 0
+    }
+
+    /** Holds ball [i] still at ([x], [y]) without touching the failsafe's counters (a trap no kick frees). */
+    internal fun botHold(i: Int, x: Float, y: Float) {
+        val b = balls[i]
+        b.x = x; b.y = y; b.vx = 0f; b.vy = 0f
+        b.px = x; b.py = y
     }
 
     /** Takes ball [i] off the table without any rule firing (test setup). */
