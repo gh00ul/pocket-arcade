@@ -6,6 +6,8 @@ import com.pocketarcade.engine.r3d.TexKit
 import com.pocketarcade.engine.r3d.TexPaint
 import com.pocketarcade.engine.r3d.Texture
 import com.pocketarcade.engine.r3d.paintTexture
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.sin
 
 /** Painted art for the synthwave racer. */
@@ -177,6 +179,29 @@ internal object RacerArt {
         paintTexture(32, 4, 4) {
             fill(Pal.WHITE)
             for (x in 0 until 16) for (y in 0 until 2) if ((x + y) % 2 == 0) rect(x * 2f, y * 2f, 2f, 2f, Pal.BLACK)
+        }
+    }
+
+    /** The hall cabinet's dash: a lit speedo and rev counter either side of a digital readout. */
+    val dash: Texture by lazy {
+        paintTexture(64, 20, 6) {
+            fill(0xFF100C18.toInt())
+            rect(0f, 0f, 64f, 0.8f, Pal.shade(Pal.PINK, 0.7f))
+            for (g in 0..1) {
+                val cx = if (g == 0) 12f else 52f
+                val color = if (g == 0) Pal.CYAN else Pal.PINK
+                circle(cx, 11f, 8f, 0xFF1C1828.toInt())
+                ring(cx, 11f, 7.4f, 0.8f, color)
+                for (k in 0..8) {
+                    val a = (0.75f + k * 0.1875f) * PI.toFloat()
+                    line(cx + cos(a) * 5.6f, 11f + sin(a) * 5.6f, cx + cos(a) * 6.8f, 11f + sin(a) * 6.8f, 0.5f, if (k >= 7) Pal.RED else Pal.WHITE)
+                }
+                val n = (if (g == 0) 1.95f else 2.1f) * PI.toFloat()
+                line(cx, 11f, cx + cos(n) * 6f, 11f + sin(n) * 6f, 0.8f, Pal.ORANGE)
+                circle(cx, 11f, 1.2f, Pal.GRAY)
+            }
+            round(23f, 6f, 18f, 9f, 1f, 0xFF06040A.toInt())
+            label("288", 32f, 7.5f, 6f, Pal.CYAN)
         }
     }
 
