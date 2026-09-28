@@ -54,6 +54,7 @@ class Renderer3D(w: Int, h: Int) {
 
     private val pool = ConcurrentLinkedQueue<RenderPass>()
     private var pass: RenderPass? = null
+    private var frameStartNs = 0L
 
     // Opaque immediate geometry, bucketed by texture.
     private class Bucket(val tex: Texture) {
@@ -84,6 +85,7 @@ class Renderer3D(w: Int, h: Int) {
 
     /** Starts recording a new frame. */
     fun startFrame() {
+        frameStartNs = System.nanoTime()
         val p = pool.poll() ?: RenderPass(pool)
         p.reset()
         pass = p
@@ -420,6 +422,7 @@ class Renderer3D(w: Int, h: Int) {
             p.addDraw(order[o], order[o + 1], order[o + 2], first, order[o + 4])
         }
         p.vertCount = at
+        p.recordNs = System.nanoTime() - frameStartNs
         // Forget buckets for textures that weren't used this frame.
         if (bucketList.size > 64) {
             bucketList.removeAll { it.count == 0 }

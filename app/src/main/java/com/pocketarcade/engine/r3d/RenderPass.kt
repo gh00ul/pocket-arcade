@@ -46,6 +46,10 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
     var exposure = 1f
     var bloom = 0.8f
 
+    /** UI-thread time spent recording this pass (startFrame → finishFrame), for frame stats. */
+    var recordNs = 0L
+    internal var statsTaken = false
+
     // Light grid over the XZ plane: RGBA bytes, two texels per cell holding 8 light indices + 1.
     var gridW = 0
     var gridH = 0
@@ -78,6 +82,8 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
         fogFloor = 0f
         exposure = 1f
         bloom = 0.8f
+        recordNs = 0L
+        statsTaken = false
         gridW = 0
         gridH = 0
         vertCount = 0
