@@ -342,14 +342,23 @@ object HallArt {
 
     // ------------------------------------------------------------------ materials
 
-    fun solid(color: Int): Texture = Texture(4, 4, IntArray(16) { color })
+    // Identical requests share one texture, so models built from them group into fewer draws.
+    private val solids = HashMap<Int, Texture>()
+    private val paints = HashMap<Long, Texture>()
+
+    fun solid(color: Int): Texture = synchronized(solids) {
+        solids.getOrPut(color) { Texture(4, 4, IntArray(16) { color }) }
+    }
 
     /** A plastic/paint surface: soft vertical gradient with fine grain. */
     fun paint(color: Int, top: Float = 0.12f, bottom: Float = 0.8f): Texture {
+        val key = (color.toLong() shl 32) or ((top * 1000f).toInt().toLong() shl 16) or (bottom * 1000f).toInt().toLong()
+        synchronized(paints) { paints[key]?.let { return it } }
         val tp = TexPaint(64, 64)
         tp.vgrad(0f, 0f, 64f, 64f, lift(color, top), dim(color, bottom))
         tp.grain(0.03f, color)
-        return tp.toTexture().also { tp.recycle() }
+        val t = tp.toTexture().also { tp.recycle() }
+        return synchronized(paints) { paints.getOrPut(key) { t } }
     }
 
     val brushedMetal: Texture by lazy {
