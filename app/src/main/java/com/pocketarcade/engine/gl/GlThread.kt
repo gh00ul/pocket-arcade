@@ -31,6 +31,7 @@ internal class GlThread : Thread("ArcadeGL") {
     private var config: EGLConfig? = null
     private var surface: EGLSurface = EGL14.EGL_NO_SURFACE
     private val renderer = GlRenderer()
+    private val stats = FrameStats()
     private val current = LinkedHashMap<String, RenderPass>()
 
     // Frame pacing for the adaptive resolution.
@@ -117,17 +118,25 @@ internal class GlThread : Thread("ArcadeGL") {
                 pass.recycle()
                 Gfx.deliver(onReady, bitmap)
             }
+            stats.beginFrame(renderer.generation)
+            if (stats.enabled) for (p in current.values) stats.notePass(p)
             renderer.drawFrame(current.values, width, height)
+            stats.endFrame()
             if (!EGL14.eglSwapBuffers(display, surface)) {
                 val err = EGL14.eglGetError()
                 if (err == EGL14.EGL_CONTEXT_LOST) recreateContext() else if (err == EGL14.EGL_BAD_SURFACE) destroySurface()
             }
             pace()
+            stats.afterSwap(renderer.renderScale)
         }
     }
 
     /** Lowers the render resolution when frames run long and raises it again when there's headroom. */
     private fun pace() {
+        if (stats.pinScale) {
+            renderer.renderScale = 0.8f
+            return
+        }
         val now = SystemClock.elapsedRealtimeNanos()
         if (lastSwap != 0L) {
             val ms = (now - lastSwap) / 1_000_000f

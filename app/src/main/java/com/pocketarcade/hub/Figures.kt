@@ -249,14 +249,14 @@ class Figure(val look: CharacterLook) {
             }
         }
         // Legs swing from the hips (or stick out forwards when sitting).
-        for (s in intArrayOf(-1, 1)) {
+        for (s in SIDES) {
             val legPitch = if (sit) -1.45f else swing * 0.6f * s
             local.set(s * 3.1f, HIP_Y, 0f, pitch = legPitch)
             part.setProduct(root, local)
             leg.draw(r, Blend.OPAQUE, xf = part)
         }
         // Arms: opposite to the legs when walking, reaching forward at a machine, up when cheering.
-        for (s in intArrayOf(-1, 1)) {
+        for (s in SIDES) {
             val armPitch: Float
             val armRoll: Float
             when (pose) {
@@ -337,6 +337,9 @@ class Figure(val look: CharacterLook) {
     private val faceCache get() = FaceCache.faces
     private val hairCache get() = FaceCache.hairs
 }
+
+/** Left and right, for per-side limbs (a shared array, so drawing allocates nothing). */
+private val SIDES = intArrayOf(-1, 1)
 
 /** Shared face and hair textures (kids with the same colouring reuse them). */
 private object FaceCache {

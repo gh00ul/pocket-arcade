@@ -43,6 +43,18 @@ object HallArt {
                 draw(cx, cy)
             }
         }
+        // Worn, mottled pile: broad soft patches a shade lighter or darker.
+        for (i in 0 until 18) {
+            val r = 50f + hash01(i, 61) * 70f
+            val c = if (i % 2 == 0) 0x0E6A4AB0 else 0x16000000
+            wrapped(hash01(i, 62) * n, hash01(i, 63) * n, r) { cx, cy -> tp.radial(cx, cy, r, c, 0) }
+        }
+        // Blacklight bleed: each motif's ink glows faintly into the fibres around it.
+        for (i in 0 until 46) {
+            val size = 10f + hash01(i, 13) * 18f
+            val halo = alpha(colors[i % colors.size], 0.16f)
+            wrapped(hash01(i, 11) * n, hash01(i, 12) * n, size * 1.7f) { cx, cy -> tp.radial(cx, cy, size * 1.7f, halo, 0) }
+        }
         for (i in 0 until 46) {
             val x = hash01(i, 11) * n
             val y = hash01(i, 12) * n
@@ -118,12 +130,15 @@ object HallArt {
                 }
             }
         }
-        // Tiny stars everywhere.
+        // Tiny stars everywhere, a few with a glint of their own.
         for (i in 0 until 400) {
             val x = hash01(i, 21) * n
             val y = hash01(i, 22) * n
+            if (i % 9 == 0) tp.radial(x, y, 6f, alpha(colors[i % colors.size], 0.22f), 0)
             tp.circle(x, y, 0.8f + hash01(i, 23) * 1.2f, alpha(colors[i % colors.size], 0.7f))
         }
+        // Fine fibre speckle over everything.
+        tp.grain(0.12f, 29)
         tp.toTexture().also { it.repeat = true; tp.recycle() }
     }
 
@@ -342,14 +357,23 @@ object HallArt {
 
     // ------------------------------------------------------------------ materials
 
-    fun solid(color: Int): Texture = Texture(4, 4, IntArray(16) { color })
+    // Identical requests share one texture, so models built from them group into fewer draws.
+    private val solids = HashMap<Int, Texture>()
+    private val paints = HashMap<Long, Texture>()
+
+    fun solid(color: Int): Texture = synchronized(solids) {
+        solids.getOrPut(color) { Texture(4, 4, IntArray(16) { color }) }
+    }
 
     /** A plastic/paint surface: soft vertical gradient with fine grain. */
     fun paint(color: Int, top: Float = 0.12f, bottom: Float = 0.8f): Texture {
+        val key = (color.toLong() shl 32) or ((top * 1000f).toInt().toLong() shl 16) or (bottom * 1000f).toInt().toLong()
+        synchronized(paints) { paints[key]?.let { return it } }
         val tp = TexPaint(64, 64)
         tp.vgrad(0f, 0f, 64f, 64f, lift(color, top), dim(color, bottom))
         tp.grain(0.03f, color)
-        return tp.toTexture().also { tp.recycle() }
+        val t = tp.toTexture().also { tp.recycle() }
+        return synchronized(paints) { paints.getOrPut(key) { t } }
     }
 
     val brushedMetal: Texture by lazy {

@@ -44,6 +44,27 @@ class Renderer3D(w: Int, h: Int) {
     var exposure = 1f
     var bloom = 0.8f
 
+    /** Brightness (0..1, after tone mapping) above which things glow. */
+    var bloomThreshold = Look.BLOOM_THRESHOLD
+
+    /** How far glows spread (0 = a tight halo, 1 = wide and hazy). */
+    var bloomRadius = Look.BLOOM_RADIUS
+
+    /** Strength of the colour grade (saturation, contrast, cool shadows / warm highlights). */
+    var grade = Look.GRADE
+
+    /** Sharpening of the upscaled image (0 = off). */
+    var sharpen = Look.SHARPEN
+
+    /** Darkening towards the corners. */
+    var vignette = Look.VIGNETTE
+
+    /** Fresnel rim light on lit surfaces, tinted by the lights nearby (0 = off). */
+    var rim = Look.RIM
+
+    /** Blacklight: how much saturated colours on the floor (y ≈ 0, facing up) glow. */
+    var floorGlow = 0f
+
     var polysDrawn = 0
         private set
 
@@ -54,6 +75,7 @@ class Renderer3D(w: Int, h: Int) {
 
     private val pool = ConcurrentLinkedQueue<RenderPass>()
     private var pass: RenderPass? = null
+    private var frameStartNs = 0L
 
     // Opaque immediate geometry, bucketed by texture.
     private class Bucket(val tex: Texture) {
@@ -84,6 +106,7 @@ class Renderer3D(w: Int, h: Int) {
 
     /** Starts recording a new frame. */
     fun startFrame() {
+        frameStartNs = System.nanoTime()
         val p = pool.poll() ?: RenderPass(pool)
         p.reset()
         pass = p
@@ -328,6 +351,10 @@ class Renderer3D(w: Int, h: Int) {
         val wantAlpha = model.hasAlpha && (only == null || only == Blend.ALPHA)
         val wantAdd = model.hasAdd && (only == null || only == Blend.ADD)
         if (!wantOpaque && !wantAlpha && !wantAdd) return
+        // Models always take fog, so a frame drawn only from models still needs its settings.
+        if (fogNear < 1e7f) {
+            fogUsedNear = fogNear; fogUsedFar = fogFar; fogUsedFloor = fogFloor
+        }
         for (tex in modelTextures(model)) noteTexture(tex)
         val mi = p.models.size
         p.models += model
@@ -396,6 +423,13 @@ class Renderer3D(w: Int, h: Int) {
         p.fogFloor = fogUsedFloor
         p.exposure = exposure
         p.bloom = bloom
+        p.bloomThreshold = bloomThreshold
+        p.bloomRadius = bloomRadius
+        p.grade = grade
+        p.sharpen = sharpen
+        p.vignette = vignette
+        p.rim = rim
+        p.floorGlow = floorGlow
         packLights(p)
 
         // Opaque buckets first, then the see-through geometry in order.
@@ -420,6 +454,7 @@ class Renderer3D(w: Int, h: Int) {
             p.addDraw(order[o], order[o + 1], order[o + 2], first, order[o + 4])
         }
         p.vertCount = at
+        p.recordNs = System.nanoTime() - frameStartNs
         // Forget buckets for textures that weren't used this frame.
         if (bucketList.size > 64) {
             bucketList.removeAll { it.count == 0 }
@@ -428,6 +463,10 @@ class Renderer3D(w: Int, h: Int) {
         }
         return p
     }
+
+    // Scratch for the light grid, reused between frames.
+    private var cellCount = IntArray(0)
+    private var cellWeakest = FloatArray(0)
 
     /** Copies the lights and builds the grid telling each patch of floor which lights reach it. */
     private fun packLights(p: RenderPass) {
@@ -462,8 +501,13 @@ class Renderer3D(w: Int, h: Int) {
         val size = gw * 2 * gh * 4
         if (p.grid.size < size) p.grid = ByteArray(size)
         java.util.Arrays.fill(p.grid, 0, size, 0)
-        val cellCount = IntArray(gw * gh)
-        val cellWeakest = FloatArray(gw * gh)
+        if (cellCount.size < gw * gh) {
+            cellCount = IntArray(gw * gh)
+            cellWeakest = FloatArray(gw * gh)
+        }
+        val cellCount = cellCount
+        val cellWeakest = cellWeakest
+        java.util.Arrays.fill(cellCount, 0, gw * gh, 0)
         for (i in 0 until count) {
             val pl = l.points[i]
             if (pl.intensity <= 0f) continue
@@ -667,6 +711,16 @@ class Renderer3D(w: Int, h: Int) {
             blend = blend, emissive = emissive, alpha = alpha, cull = false, tint = tint,
         )
     }
+}
+
+/** Default post-processing and shading settings shared by [Renderer3D] and [RenderPass]. */
+object Look {
+    const val BLOOM_THRESHOLD = 0.62f
+    const val BLOOM_RADIUS = 0.65f
+    const val GRADE = 1f
+    const val SHARPEN = 0.25f
+    const val VIGNETTE = 0.22f
+    const val RIM = 0.3f
 }
 
 /** Blends two ARGB colours. */
