@@ -127,7 +127,7 @@ class PinballGame : BaseMiniGame() {
         "HOLD LEFT / RIGHT HALF TO FLIP",
         "PULL THE PLUNGER DOWN, LET GO",
         "LIGHT 3 TOP LANES = MULTIBALL",
-        "DROP TARGETS RAISE THE MULTIPLIER",
+        "DROP TARGETS = MULTIPLIER",
         "SWIPE UP TO NUDGE - DON'T TILT!",
     )
     override val look = CabinetLook(body = Pal.PURPLE, trim = Pal.CYAN, glow = Pal.HOTPINK, shape = CabinetShape.PINBALL)
@@ -1016,7 +1016,7 @@ class PinballGame : BaseMiniGame() {
             xf.set(x, 0f, z)
             PinballArt.bumperBase.draw(r, xf = xf)
             xf.set(x, 0f, z).stretch(1f, pop, 1f)
-            PinballArt.bumperCap.draw(r, xf = xf, tint = BUMPER_COLORS[i], emissiveBoost = 1f + f * 1.6f)
+            PinballArt.bumperCap.draw(r, xf = xf, tint = BUMPER_COLORS[i], emissiveBoost = 1.35f + 0.15f * sin(time * 4f + i * 2f) + f * 1.5f)
             val a = 0.18f + 0.1f * sin(time * 3f + i) + f * 0.7f
             r.flat(x, z, 1f, 70f, 70f, glow, blend = Blend.ADD, emissive = 1f, alpha = a, tint = BUMPER_COLORS[i])
         }
@@ -1148,8 +1148,8 @@ class PinballGame : BaseMiniGame() {
             ArcadeFont.drawCentered(scope, PULL_TEXT, pt[0] - 6f, pt[1] - 64f, 1.8f, Color.White, a)
         }
         if (time < 6f) {
-            ArcadeFont.drawCentered(scope, HOLD_LEFT, 60f, 612f, 1.8f, Color(Pal.CYAN), a)
-            ArcadeFont.drawCentered(scope, HOLD_RIGHT, 220f, 612f, 1.8f, Color(Pal.CYAN), a)
+            ArcadeFont.drawCentered(scope, HOLD_LEFT, 128f, 562f, 1.8f, Color(Pal.CYAN), a)
+            ArcadeFont.drawCentered(scope, HOLD_RIGHT, 232f, 562f, 1.8f, Color(Pal.CYAN), a)
         }
         if (tilted) ArcadeFont.drawCentered(scope, "TILT", GAME_W / 2f, 300f, 6f, Color(Pal.RED), if ((time * 5f).toInt() % 2 == 0) 1f else 0.3f)
     }
