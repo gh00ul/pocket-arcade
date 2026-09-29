@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
@@ -165,7 +166,35 @@ fun ArcadeText(
 }
 
 /**
- * A glossy arcade push-button: a candy-coloured cap on a darker skirt that sinks when pressed.
+ * Press feedback shared by every button: 0 at rest, 1 fully pressed. It springs down fast and
+ * back up with a little overshoot (below 0: the cap pops up past rest), so a release feels like
+ * a real button. With reduce motion it jumps between the two with no overshoot.
+ */
+@Composable
+private fun rememberPress(pressed: Boolean): State<Float> {
+    val press = remember { Animatable(0f) }
+    LaunchedEffect(pressed) {
+        if (!UiMotion.enabled) {
+            press.snapTo(if (pressed) 1f else 0f)
+        } else if (pressed) {
+            press.animateTo(1f, spring(dampingRatio = 1f, stiffness = PRESS_STIFFNESS))
+        } else {
+            press.animateTo(0f, spring(dampingRatio = RELEASE_DAMPING, stiffness = RELEASE_STIFFNESS))
+        }
+    }
+    return press.asState()
+}
+
+/** How hard the button shrinks when fully pressed (a fraction of its size), and how much it brightens. */
+private const val PRESS_SHRINK = 0.06f
+private const val PRESS_BRIGHTEN = 0.16f
+private const val PRESS_STIFFNESS = 1600f
+private const val RELEASE_STIFFNESS = 700f
+private const val RELEASE_DAMPING = 0.42f
+
+/**
+ * A glossy arcade push-button: a candy-coloured cap on a darker skirt. It sinks, shrinks a touch
+ * and brightens under your finger, then springs back up past rest and settles.
  */
 @Composable
 fun ArcadeButton(
@@ -180,19 +209,29 @@ fun ArcadeButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val press = rememberPress(pressed && enabled)
     val lip = 5.dp
-    val down = pressed && enabled
     val spoken = remember(text) { spokenText(text) }
     Box(
         modifier
+            // The touch area is the layout box; the spring below only moves what is drawn.
             .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = spoken }
-            .drawBehind { buttonCap(if (enabled) color else Color(0xFF3A3450), lip.toPx(), down, round = false) },
+            .graphicsLayer {
+                val s = 1f - PRESS_SHRINK * press.value
+                scaleX = s
+                scaleY = s
+            }
+            .drawBehind { buttonCap(if (enabled) color else Color(0xFF3A3450), lip.toPx(), press.value, round = false) },
         contentAlignment = Alignment.Center,
     ) {
         Box(
             Modifier
-                .offset(y = if (down) lip * 0.3f else -lip * 0.5f)
+                // The label rides the cap: up at rest, down when pressed.
+                .graphicsLayer {
+                    val p = press.value
+                    translationY = (-0.5f + 0.8f * p) * lip.toPx()
+                }
                 // The button says its text once (above); its painted label stays out of the way.
                 .clearAndSetSemantics {}
                 .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -228,29 +267,41 @@ fun RoundButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val press = rememberPress(pressed)
     val lip = 4.dp
     Canvas(
         modifier
             .size(size, size + lip)
             .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = label },
+            .semantics { contentDescription = label }
+            .graphicsLayer {
+                val sc = 1f - PRESS_SHRINK * press.value
+                scaleX = sc
+                scaleY = sc
+            },
     ) {
         val l = lip.toPx()
-        buttonCap(color, l, pressed, round = true)
-        val faceY = if (pressed) l * 0.8f else 0f
+        val p = press.value
+        buttonCap(color, l, p, round = true)
+        val faceY = pressOffset(l, p)
         val c = Offset(this.size.width / 2f, faceY + (this.size.height - l) / 2f)
         drawUiIcon(icon, c + Offset(0f, this.size.width * 0.03f), this.size.width * 0.5f, Color.Black.copy(alpha = 0.3f))
         drawUiIcon(icon, c, this.size.width * 0.5f, Color.White)
     }
 }
 
-/** The shared look of every button: drop shadow, skirt, gradient cap, gloss and rim. */
-private fun DrawScope.buttonCap(base: Color, lip: Float, down: Boolean, round: Boolean) {
+/** How far the cap has sunk into the skirt at [press] (1 = fully down); the release overshoot lifts it a little above rest. */
+internal fun pressOffset(lip: Float, press: Float): Float = if (press >= 0f) lip * 0.8f * press else lip * 0.5f * press
+
+/** The shared look of every button: drop shadow, skirt, gradient cap, gloss and rim, at press depth [press] (0 rest, 1 down). */
+private fun DrawScope.buttonCap(color: Color, lip: Float, press: Float, round: Boolean) {
     val w = size.width
     val h = size.height - lip
     val r = if (round) h / 2f else min(16.dp.toPx(), h / 2f)
     val cr = CornerRadius(r, r)
-    val faceY = if (down) lip * 0.8f else 0f
+    val faceY = pressOffset(lip, press)
+    // The cap brightens as it is pressed, as if the light behind it came up.
+    val base = if (press > 0f) color.lift(PRESS_BRIGHTEN * press.coerceAtMost(1f)) else color
     drawRoundRect(Color.Black.copy(alpha = 0.35f), Offset(0f, lip + 2.dp.toPx()), Size(w, h), cr)
     drawRoundRect(base.shade(0.45f), Offset(0f, lip), Size(w, h), cr)
     drawRoundRect(
@@ -421,7 +472,9 @@ fun TicketIcon(size: Dp, modifier: Modifier = Modifier) {
 
 /**
  * A full-screen modal: dims the hall, blocks touches behind it and shows a dark glass card with
- * a glowing edge, a title and a close button.
+ * a glowing edge, a title and a close button. It arrives: the scrim fades in, the card rises and
+ * settles with a small overshoot, and the title row lands just after it. Every [GlassBox] inside
+ * then slides up in turn, in the order it is composed. With reduce motion it simply fades in.
  */
 @Composable
 fun ArcadePanel(
@@ -433,41 +486,65 @@ fun ArcadePanel(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(24.dp)
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(UiColors.scrim)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            (if (fillHeight) modifier.fillMaxSize() else modifier.fillMaxWidth())
-                .shadow(24.dp, shape, ambientColor = accent, spotColor = accent)
-                .clip(shape)
-                .background(Brush.verticalGradient(listOf(UiColors.cardTop, UiColors.cardBottom)))
-                .border(2.dp, Brush.verticalGradient(listOf(accent, accent.shade(0.45f))), shape)
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+    val progress = rememberEntrance(PANEL_ENTRANCE_MILLIS)
+    val entrance = remember { PanelEntrance(progress) }
+    CompositionLocalProvider(LocalEntrance provides entrance) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .drawBehind { drawRect(UiColors.scrim, alpha = clamp01(progress.value * 3.2f)) }
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(12.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                ArcadeText(title, color = accent.lift(0.15f), unit = 3.dp)
-                Spacer(Modifier.weight(1f))
-                RoundButton(UiIcon.CLOSE, onClose, Color(Pal.RED), size = 48.dp, label = "Close")
+            Column(
+                (if (fillHeight) modifier.fillMaxSize() else modifier.fillMaxWidth())
+                    .graphicsLayer {
+                        val e = stageOf(progress.value, 0f, 0.55f)
+                        alpha = clamp01(e * 2.4f)
+                        if (UiMotion.enabled) {
+                            val k = easeOutBack(e)
+                            val sc = 0.95f + 0.05f * k
+                            scaleX = sc
+                            scaleY = sc
+                            translationY = (1f - k) * 44.dp.toPx()
+                        }
+                    }
+                    .shadow(24.dp, shape, ambientColor = accent, spotColor = accent)
+                    .clip(shape)
+                    .background(Brush.verticalGradient(listOf(UiColors.cardTop, UiColors.cardBottom)))
+                    .border(2.dp, Brush.verticalGradient(listOf(accent, accent.shade(0.45f))), shape)
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Row(Modifier.fillMaxWidth().enterStage(progress, 0.1f, 0.5f, rise = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ArcadeText(title, color = accent.lift(0.15f), unit = 3.dp)
+                    Spacer(Modifier.weight(1f))
+                    RoundButton(UiIcon.CLOSE, onClose, Color(Pal.RED), size = 48.dp, label = "Close")
+                }
+                Spacer(Modifier.size(12.dp))
+                content()
             }
-            Spacer(Modifier.size(12.dp))
-            content()
         }
     }
 }
 
-/** A frosted inset box inside a panel. */
+/** How long a panel takes to arrive, all its staggered pieces included. */
+private const val PANEL_ENTRANCE_MILLIS = 620
+
+/**
+ * A frosted inset box inside a panel. Inside an [ArcadePanel] it arrives with it: each box
+ * composed while the panel is still coming in slides up a beat after the one before it.
+ */
 @Composable
 fun GlassBox(modifier: Modifier = Modifier, highlight: Color? = null, content: @Composable ColumnScope.() -> Unit) {
     val shape = RoundedCornerShape(16.dp)
+    val entrance = LocalEntrance.current
+    val index = remember { entrance?.claim() ?: 0 }
     Column(
         modifier
+            .then(if (entrance != null) Modifier.enterStage(entrance.progress, entrance.slotStart(index), entrance.slotStart(index) + 0.3f, rise = 14.dp) else Modifier)
             .clip(shape)
             .background(if (highlight != null) highlight.copy(alpha = 0.16f) else UiColors.glass)
             .border(if (highlight != null) 2.dp else 1.dp, highlight ?: UiColors.glassEdge, shape)
@@ -605,8 +682,22 @@ fun Modifier.enterStage(entrance: State<Float>, from: Float, to: Float, rise: Dp
         }
     }
 
-/** The entrance progress of the panel or card this is inside, if it has one; see [staggerIn]. */
-val LocalEntrance = compositionLocalOf<State<Float>?> { null }
+/**
+ * The entrance of the panel a composable sits in: its [progress] and a counter that hands the
+ * pieces inside their place in the queue ([claim]), so they arrive one after another.
+ */
+class PanelEntrance(val progress: State<Float>) {
+    private var next = 0
+
+    /** The next free place in the queue (0 for the first piece). */
+    fun claim(): Int = next++
+
+    /** When (0..1 of the entrance) the piece at [index] starts arriving: a step behind the one before, never later than 0.7. */
+    fun slotStart(index: Int): Float = (0.2f + 0.06f * index).coerceAtMost(0.7f)
+}
+
+/** The entrance of the panel this is inside, if any; [GlassBox] and [staggerIn] join it. */
+val LocalEntrance = compositionLocalOf<PanelEntrance?> { null }
 
 /**
  * Brings a piece of a panel in after the pieces before it: item [index] of a list starts
@@ -616,8 +707,8 @@ val LocalEntrance = compositionLocalOf<State<Float>?> { null }
 @Composable
 fun Modifier.staggerIn(index: Int, rise: Dp = 14.dp): Modifier {
     val entrance = LocalEntrance.current ?: return this
-    val start = (0.18f + 0.055f * index).coerceAtMost(0.7f)
-    return enterStage(entrance, start, (start + 0.3f).coerceAtMost(1f), rise)
+    val start = entrance.slotStart(index)
+    return enterStage(entrance.progress, start, start + 0.3f, rise)
 }
 
 /**
