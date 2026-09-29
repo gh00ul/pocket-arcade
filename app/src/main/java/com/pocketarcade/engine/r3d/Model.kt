@@ -43,6 +43,12 @@ class Model(val polys: List<Poly>) {
     val minZ: Float = polys.minOfOrNull { p -> p.zs.take(p.n).min() } ?: 0f
     val maxZ: Float = polys.maxOfOrNull { p -> p.zs.take(p.n).max() } ?: 0f
 
+    /** A sphere round the model's bounds (in its own coordinates), for culling placed copies. */
+    val boundX: Float = (minX + maxX) / 2f
+    val boundY: Float = (minY + maxY) / 2f
+    val boundZ: Float = (minZ + maxZ) / 2f
+    val boundR: Float = sqrt((maxX - minX) * (maxX - minX) + (maxY - minY) * (maxY - minY) + (maxZ - minZ) * (maxZ - minZ)) / 2f
+
     /** Which blend modes this model contains, so draw calls for absent layers can be skipped. */
     val hasOpaque = polys.any { it.blend == Blend.OPAQUE }
     val hasAlpha = polys.any { it.blend == Blend.ALPHA }
@@ -143,6 +149,14 @@ class Xform {
     fun normalX(x: Float, y: Float, z: Float) = ((m[4] * m[8] - m[5] * m[7]) * x + (m[5] * m[6] - m[3] * m[8]) * y + (m[3] * m[7] - m[4] * m[6]) * z) * detSign()
     fun normalY(x: Float, y: Float, z: Float) = ((m[2] * m[7] - m[1] * m[8]) * x + (m[0] * m[8] - m[2] * m[6]) * y + (m[1] * m[6] - m[0] * m[7]) * z) * detSign()
     fun normalZ(x: Float, y: Float, z: Float) = ((m[1] * m[5] - m[2] * m[4]) * x + (m[2] * m[3] - m[0] * m[5]) * y + (m[0] * m[4] - m[1] * m[3]) * z) * detSign()
+
+    /** The largest factor the placement scales any direction by (for bounding spheres). */
+    fun maxScale(): Float {
+        val a = m[0] * m[0] + m[3] * m[3] + m[6] * m[6]
+        val b = m[1] * m[1] + m[4] * m[4] + m[7] * m[7]
+        val c = m[2] * m[2] + m[5] * m[5] + m[8] * m[8]
+        return sqrt(maxOf(a, maxOf(b, c)))
+    }
 
     private fun detSign(): Float {
         val det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6])

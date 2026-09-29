@@ -91,6 +91,19 @@ class Renderer3D(w: Int, h: Int) {
     var polysDrawn = 0
         private set
 
+    /**
+     * Model instances whose bounding sphere lies wholly beyond this view depth are skipped
+     * (0 = no limit). Pair it with fog that has faded to black by then so nothing pops.
+     */
+    var drawDistance = 0f
+
+    /** Skips model instances whose bounding sphere is wholly outside the camera's view. */
+    var cullModels = false
+
+    /** Model instances skipped by [drawDistance] or [cullModels] this frame. */
+    var modelsCulled = 0
+        private set
+
     private companion object {
         const val MAXV = 8
         const val S = RenderPass.STRIDE
@@ -147,6 +160,7 @@ class Renderer3D(w: Int, h: Int) {
         opaqueInstanceCount = 0
         texIndex.clear()
         polysDrawn = 0
+        modelsCulled = 0
         fogUsedNear = 1e8f
         fogUsedFar = 2e8f
         fogUsedFloor = 0f
@@ -381,6 +395,10 @@ class Renderer3D(w: Int, h: Int) {
     /** Draws [model] (placed by [xf]); [only] limits it to one blend layer. */
     fun drawModel(model: Model, only: Blend?, emissiveBoost: Float, xf: Xform?, tint: Int) {
         val p = current()
+        if ((cullModels || drawDistance > 0f) && !instanceInView(model, xf)) {
+            modelsCulled++
+            return
+        }
         val wantOpaque = model.hasOpaque && (only == null || only == Blend.OPAQUE)
         val wantAlpha = model.hasAlpha && (only == null || only == Blend.ALPHA)
         val wantAdd = model.hasAdd && (only == null || only == Blend.ADD)
@@ -423,6 +441,35 @@ class Renderer3D(w: Int, h: Int) {
         polysDrawn += model.polys.size
     }
 
+    /** Whether a placed model's bounding sphere reaches the view (and lies within [drawDistance]). */
+    internal fun instanceInView(model: Model, xf: Xform?): Boolean {
+        val cam = camera
+        val bx = model.boundX
+        val by = model.boundY
+        val bz = model.boundZ
+        val x = xf?.x(bx, by, bz) ?: bx
+        val y = xf?.y(bx, by, bz) ?: by
+        val z = xf?.z(bx, by, bz) ?: bz
+        val r = model.boundR * (xf?.maxScale() ?: 1f) + 0.5f
+        val vz = cam.viewZ(x, y, z)
+        if (vz + r < cam.near) return false
+        if (drawDistance > 0f && vz - r > drawDistance) return false
+        if (!cullModels) return true
+        val vx = cam.viewX(x, y, z)
+        val vy = cam.viewY(x, y, z)
+        // Distances outside the four side planes through the eye (the image edges).
+        val f = cam.focal
+        val right = (cam.imageW - cam.cx) / f
+        val left = cam.cx / f
+        val top = cam.cy / f
+        val bottom = (cam.imageH - cam.cy) / f
+        if ((vx - right * vz) / sqrt(1f + right * right) > r) return false
+        if ((-vx - left * vz) / sqrt(1f + left * left) > r) return false
+        if ((vy - top * vz) / sqrt(1f + top * top) > r) return false
+        if ((-vy - bottom * vz) / sqrt(1f + bottom * bottom) > r) return false
+        return true
+    }
+
     private val modelTex = IdentityHashMap<Model, Array<Texture>>()
 
     private fun modelTextures(model: Model): Array<Texture> =
@@ -449,6 +496,7 @@ class Renderer3D(w: Int, h: Int) {
         p.cx0 = clipX0; p.cy0 = clipY0; p.cx1 = clipX1; p.cy1 = clipY1
         val cam = camera
         val c = p.cam
+        p.near = cam.near
         c[0] = cam.ex; c[1] = cam.ey; c[2] = cam.ez
         c[3] = cam.rx; c[4] = cam.ry; c[5] = cam.rz
         c[6] = cam.ux; c[7] = cam.uy; c[8] = cam.uz

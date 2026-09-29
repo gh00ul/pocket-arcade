@@ -17,6 +17,9 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
         // Draw list entry kinds.
         const val KIND_BATCH = 0
         const val KIND_MODEL = 1
+
+        /** The near clipping distance every pass used before it became configurable. */
+        const val DEFAULT_NEAR = 8f
     }
 
     // Where on the window to draw (pixels, top-left origin) and an optional clip rectangle.
@@ -26,6 +29,8 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
 
     // Camera: eye, basis and pinhole projection in viewport pixels.
     val cam = FloatArray(16)
+    /** Near clipping distance (view depth) for the GPU's depth range; games keep the default. */
+    var near = DEFAULT_NEAR
 
     // Background.
     var clearColor = 0
@@ -92,6 +97,7 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
 
     internal fun reset() {
         clip = false
+        near = DEFAULT_NEAR
         clearColor = 0
         gradientCount = 0
         lightCount = 0

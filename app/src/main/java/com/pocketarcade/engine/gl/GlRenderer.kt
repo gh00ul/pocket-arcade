@@ -23,7 +23,6 @@ import kotlin.math.roundToInt
 internal class GlRenderer {
     companion object {
         private const val TAG = "PocketArcadeGL"
-        private const val NEAR = 8f
         private const val FAR = 9000f
         private const val GL_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FE
         private const val GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF
@@ -874,7 +873,9 @@ internal class GlRenderer {
         GLES30.glUniform3f(scene.loc("uFwd"), c[9], c[10], c[11])
         // ndc.x = 2 f/W · x/z + (2 cx/W − 1); ndc.y = 2 f/H · y/z + (1 − 2 cy/H)
         GLES30.glUniform4f(scene.loc("uProj"), 2f * c[12], 2f * c[13] - 1f, 2f * c[15], 1f - 2f * c[14])
-        GLES30.glUniform2f(scene.loc("uDepth"), (FAR + NEAR) / (FAR - NEAR), -2f * FAR * NEAR / (FAR - NEAR))
+        // The pass's own near plane (8 unless a scene needs to get closer, like the hall's eye view).
+        val near = p.near.coerceIn(0.25f, FAR * 0.5f)
+        GLES30.glUniform2f(scene.loc("uDepth"), (FAR + near) / (FAR - near), -2f * FAR * near / (FAR - near))
         GLES30.glUniform3f(scene.loc("uAmbient"), p.ambient[0], p.ambient[1], p.ambient[2])
         GLES30.glUniform3f(scene.loc("uDirDir"), p.dirDir[0], p.dirDir[1], p.dirDir[2])
         GLES30.glUniform3f(scene.loc("uDirCol"), p.dirCol[0], p.dirCol[1], p.dirCol[2])
