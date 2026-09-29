@@ -301,6 +301,99 @@ object HallArt {
         tp.toTexture().also { tp.recycle() }
     }
 
+    /** A backlit neon skyline for the upper back wall: towers with lit windows under a big moon. */
+    val muralCity: Texture by lazy {
+        val w = 384
+        val h = 240
+        val tp = TexPaint(w, h)
+        tp.vgrad(0f, 0f, w.toFloat(), h.toFloat(), 0xFF0A0624.toInt(), 0xFF2A0E4A.toInt(), 0xFF5A1A5E.toInt())
+        for (i in 0 until 50) tp.circle(hash01(i, 71) * w, hash01(i, 72) * h * 0.5f, 0.8f + hash01(i, 73), 0xAAFFFFFF.toInt())
+        tp.radial(w * 0.72f, h * 0.3f, 70f, 0x55FFD0F0, 0)
+        tp.circle(w * 0.72f, h * 0.3f, 34f, 0xFFFFE8F4.toInt())
+        tp.circle(w * 0.72f - 10f, h * 0.3f - 6f, 8f, 0x22000000)
+        val colors = intArrayOf(0xFF39E6F2.toInt(), 0xFFFF4FA8.toInt(), 0xFFFFD84D.toInt(), 0xFF9B6BFF.toInt())
+        var x = 0f
+        var k = 0
+        while (x < w) {
+            val bw = 26f + hash01(k, 74) * 34f
+            val bh = 60f + hash01(k, 75) * 110f
+            val top = h - bh
+            tp.rect(x, top, bw - 3f, bh, 0xFF100822.toInt())
+            val c = colors[k % colors.size]
+            tp.rect(x, top, bw - 3f, 2f, c)
+            var wy = top + 8f
+            while (wy < h - 14f) {
+                var wx = x + 4f
+                while (wx < x + bw - 8f) {
+                    if (hash01((wx * 7 + wy).toInt(), k) > 0.45f) tp.rect(wx, wy, 3f, 4f, alpha(lift(c, 0.4f), 0.85f))
+                    wx += 7f
+                }
+                wy += 9f
+            }
+            x += bw
+            k++
+        }
+        // Light trails along the freeway at the foot.
+        tp.rect(0f, h - 16f, w.toFloat(), 16f, 0xFF08040E.toInt())
+        tp.line(0f, h - 11f, w.toFloat(), h - 11f, 2f, 0xFFFF3B30.toInt())
+        tp.line(0f, h - 6f, w.toFloat(), h - 6f, 2f, 0xFFFFF4C0.toInt())
+        tp.strokeRound(3f, 3f, w - 6f, h - 6f, 8f, 6f, 0xFF2A2440.toInt())
+        tp.toTexture().also { tp.recycle() }
+    }
+
+    /** A backlit space scene for the upper back wall: a ringed planet, moons and a rocket. */
+    val muralSpace: Texture by lazy {
+        val w = 384
+        val h = 240
+        val tp = TexPaint(w, h)
+        tp.vgrad(0f, 0f, w.toFloat(), h.toFloat(), 0xFF050418.toInt(), 0xFF0E1440.toInt(), 0xFF1A0A3A.toInt())
+        for (i in 0 until 90) tp.circle(hash01(i, 81) * w, hash01(i, 82) * h, 0.6f + hash01(i, 83) * 1.2f, 0xBBFFFFFF.toInt())
+        tp.radial(w * 0.24f, h * 0.44f, 110f, 0x3339E6F2, 0)
+        tp.ball(w * 0.24f, h * 0.44f, 58f, 0xFF4DA6FF.toInt(), 0.3f)
+        tp.canvas.save()
+        tp.canvas.rotate(-18f, w * 0.24f, h * 0.44f)
+        tp.paint.reset()
+        tp.paint.isAntiAlias = true
+        tp.paint.style = Paint.Style.STROKE
+        tp.paint.strokeWidth = 7f
+        tp.paint.color = 0xFFFFD84D.toInt()
+        tp.canvas.drawOval(w * 0.24f - 100f, h * 0.44f - 20f, w * 0.24f + 100f, h * 0.44f + 20f, tp.paint)
+        tp.canvas.restore()
+        tp.ball(w * 0.62f, h * 0.22f, 16f, 0xFFFF8A3D.toInt())
+        tp.ball(w * 0.86f, h * 0.7f, 26f, 0xFFFF4FA8.toInt())
+        // A rocket climbing away with its exhaust.
+        val rx = w * 0.66f
+        val ry = h * 0.62f
+        tp.line(rx - 30f, ry + 50f, rx, ry + 8f, 10f, 0x66FF9A3C)
+        tp.line(rx - 22f, ry + 38f, rx, ry + 8f, 5f, 0xCCFFE14D.toInt())
+        tp.canvas.save()
+        tp.canvas.rotate(35f, rx, ry)
+        tp.oval(rx, ry - 10f, 8f, 22f, 0xFFE8ECF6.toInt())
+        tp.circle(rx, ry - 14f, 3.5f, 0xFF39E6F2.toInt())
+        tp.polygon(floatArrayOf(rx - 8f, ry + 2f, rx - 15f, ry + 14f, rx - 6f, ry + 10f), 0xFFE8323C.toInt())
+        tp.polygon(floatArrayOf(rx + 8f, ry + 2f, rx + 15f, ry + 14f, rx + 6f, ry + 10f), 0xFFE8323C.toInt())
+        tp.canvas.restore()
+        tp.strokeRound(3f, 3f, w - 6f, h - 6f, 8f, 6f, 0xFF2A2440.toInt())
+        tp.toTexture().also { tp.recycle() }
+    }
+
+    /** The racers' hung bank sign: a lit box with chequered ends round the neon lettering. */
+    val raceSign: Texture by lazy {
+        val w = 640
+        val h = 96
+        val tp = TexPaint(w, h)
+        tp.vgrad(0f, 0f, w.toFloat(), h.toFloat(), 0xFF1A0610.toInt(), 0xFF08020A.toInt())
+        for (end in 0..1) {
+            val x0 = if (end == 0) 0f else w - 96f
+            for (x in 0 until 6) for (y in 0 until 6) {
+                if ((x + y) % 2 == 0) tp.rect(x0 + x * 16f, y * 16f, 16f, 16f, 0xFFF4F4F4.toInt())
+            }
+        }
+        tp.glowText("TURBO RACEWAY", w / 2f, h / 2f + 20f, 54f, 0xFFFFF0F0.toInt(), 0xFFFF2A3C.toInt(), 12f, Fonts.display, 0.04f)
+        tp.strokeRound(3f, 3f, w - 6f, h - 6f, 6f, 5f, 0xFFFF3B30.toInt())
+        tp.toTexture().also { tp.recycle() }
+    }
+
     /** A fan of coloured light thrown up a wall by a floor-level fixture (additive, white). */
     val washer: Texture by lazy {
         val tp = TexPaint(64, 256)
@@ -446,6 +539,22 @@ object HallArt {
             val half = 6f + t * 26f
             tp.hgrad(32f - half, y.toFloat(), half, 1f, 0x00FFFFFF, alpha(-1, 0.22f * (1f - t)))
             tp.hgrad(32f, y.toFloat(), half, 1f, alpha(-1, 0.22f * (1f - t)), 0x00FFFFFF)
+        }
+        tp.toTexture().also { tp.recycle() }
+    }
+
+    /**
+     * A spotlight's shaft through the haze (additive): narrow and brightest at the lens, spreading
+     * and thinning towards the floor, with soft edges.
+     */
+    val shaft: Texture by lazy {
+        val tp = TexPaint(64, 256)
+        for (y in 0 until 256) {
+            val t = y / 255f
+            val half = 3f + t * 29f
+            val a = 0.42f * (1f - t * 0.7f) * (0.35f + 0.65f * kotlin.math.min(1f, y / 12f))
+            tp.hgrad(32f - half, y.toFloat(), half, 1f, 0x00FFFFFF, alpha(-1, a))
+            tp.hgrad(32f, y.toFloat(), half, 1f, alpha(-1, a), 0x00FFFFFF)
         }
         tp.toTexture().also { tp.recycle() }
     }

@@ -141,20 +141,33 @@ internal object PinballArt {
         }
     }
 
-    /** The apron over the drain: instruction card and the ball-trough cover. */
+    /**
+     * How much of the apron, from its front edge, carries the printed art: the player's view
+     * ends about 50 units down it, so the cards and lettering all sit inside this strip.
+     */
+    const val APRON_PRINT = 40f
+
+    /** The apron over the drain: instruction cards either side of the lit lettering. */
     val apron: Texture by lazy {
-        paintTexture(272, 64, 2) {
-            vgrad(0f, 0f, 272f, 64f, 0xFF2B1A5C.toInt(), 0xFF140C30.toInt())
+        paintTexture(272, APRON_PRINT.toInt(), 2) {
+            val h = APRON_PRINT
+            vgrad(0f, 0f, 272f, h, 0xFF2B1A5C.toInt(), 0xFF140C30.toInt())
             rect(0f, 0f, 272f, 2f, Pal.CYAN)
-            roundGrad(12f, 12f, 76f, 40f, 4f, Pal.CREAM, Pal.TAN)
-            label("3 BALLS", 50f, 18f, 6f, Pal.DARKBROWN)
-            label("LANES=MULTI", 50f, 30f, 5f, Pal.DARKBROWN)
-            roundGrad(184f, 12f, 76f, 40f, 4f, Pal.CREAM, Pal.TAN)
-            label("BANK=MULT", 222f, 18f, 5f, Pal.DARKBROWN)
-            label("ORBIT=JACKPOT", 222f, 30f, 4.5f, Pal.DARKBROWN)
-            glow(3f, Pal.withAlpha(Pal.HOTPINK, 0.8f)) { label("FLIP", 136f, 24f, 14f, -1) }
-            label("FLIP", 136f, 24f, 14f, Pal.CREAM)
+            roundGrad(10f, 7f, 80f, 27f, 4f, Pal.CREAM, Pal.TAN)
+            label("3 BALLS", 50f, 11f, 6f, Pal.DARKBROWN)
+            label("LANES=MULTI", 50f, 22f, 5f, Pal.DARKBROWN)
+            roundGrad(182f, 7f, 80f, 27f, 4f, Pal.CREAM, Pal.TAN)
+            label("BANK=MULT", 222f, 11f, 5f, Pal.DARKBROWN)
+            label("ORBIT=JACKPOT", 222f, 22f, 4.5f, Pal.DARKBROWN)
+            glow(3f, Pal.withAlpha(Pal.HOTPINK, 0.8f)) { label("FLIP", 136f, 9f, 14f, -1) }
+            label("FLIP", 136f, 9f, 14f, Pal.CREAM)
+            rect(96f, 29f, 80f, 1.5f, Pal.withAlpha(Pal.CYAN, 0.7f))
         }
+    }
+
+    /** The rest of the apron, down to the front of the cabinet: plain moulded plastic. */
+    private val apronBack: Texture by lazy {
+        paintTexture(32, 32, 2) { vgrad(0f, 0f, 32f, 32f, 0xFF140C30.toInt(), 0xFF0C0820.toInt()) }
     }
 
     /** Backbox front: the backglass art above the display. */
@@ -322,7 +335,8 @@ internal object PinballArt {
         val side = BoxFaces(top = cabinetSide.full, left = cabinetSide.full, right = cabinetSide.full, front = cabinetSide.full, gloss = 0.3f)
         b.box(-26f, 0f, BACKBOX_Z, 0f, 26f, 700f, side)
         b.box(T.W, 0f, BACKBOX_Z, T.W + 26f, 26f, 700f, side)
-        b.box(0f, 0f, T.APRON_Y, T.PLAY_W, 8f, 700f, BoxFaces(top = apron.full, front = darkMetal.full, gloss = 0.4f))
+        b.box(0f, 0f, T.APRON_Y, T.PLAY_W, 8f, T.APRON_Y + APRON_PRINT, BoxFaces(top = apron.full, gloss = 0.4f))
+        b.box(0f, 0f, T.APRON_Y + APRON_PRINT, T.PLAY_W, 8f, 700f, BoxFaces(top = apronBack.full, front = darkMetal.full, gloss = 0.4f))
         b.box(T.PLAY_W, 0f, T.LANE_REST_Y + 30f, T.W, 6f, 700f, BoxFaces(top = darkMetal.full, gloss = 0.6f))
         // Backbox, standing behind the top arch.
         val back = BoxFaces(top = darkMetal.full, left = cabinetSide.full, right = cabinetSide.full, gloss = 0.4f)

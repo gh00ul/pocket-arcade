@@ -111,7 +111,11 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
             live.texture.full, 0f, 0f, 1f, emissive = 1.15f,
         )
         c.marqueeBox(ix0, ix1, screenTop, h - 1f, z0, cpBack + 3f)
-        b.box(x0, h - 1f, z0, x1, h, cpBack + 4f, BoxFaces(top = dark, front = art.trimTex.full, frontEmissive = 0.9f))
+        b.box(x0, h - 1f, z0, x1, h, cpBack + 4f, BoxFaces(top = art.topper.full, front = art.trimTex.full, frontEmissive = 0.9f, topEmissive = 0.9f, gloss = 0.5f))
+        c.coinDoor(cx, 6f, z1 - 1f, 8f)
+        // Lit T-molding edges down the screen's sides.
+        c.neonStrip(ix0 + 0.2f, panelY + 4f, ix0 + 0.8f, screenTop, cpBack + 0.2f, emissive = 1.3f)
+        c.neonStrip(ix1 - 0.8f, panelY + 4f, ix1 - 0.2f, screenTop, cpBack + 0.2f, emissive = 1.3f)
         // Controls sit on the sloping panel.
         fun panelY(z: Float) = panelY + 4f * (z1 - 1f - z) / (z1 - 1f - cpBack)
         if (tall) {
@@ -137,6 +141,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         b.box(x0, 0f, z0, x1, baseTop, z1, BoxFaces(front = art.kick.full, left = side, right = side, top = dark, back = dark, gloss = 0.3f))
         b.box(x0 - 0.3f, baseTop - 1f, z0 - 0.3f, x1 + 0.3f, baseTop, z1 + 0.3f, BoxFaces(front = art.trimTex.full, left = art.trimTex.full, right = art.trimTex.full, frontEmissive = 0.9f))
         c.posts(x0, x1, z0, z1, baseTop, glassTop)
+        c.coinDoor(cx + 3f, 7f, z1, 8f)
         // Inside: velvet floor and printed back wall.
         b.quad(x0 + 1f, baseTop + 0.3f, z0 + 1f, x1 - 1f, baseTop + 0.3f, z0 + 1f, x1 - 1f, baseTop + 0.3f, z1 - 1f, x0 + 1f, baseTop + 0.3f, z1 - 1f, MachineKit.velvet.full, 0f, 1f, 0f)
         b.quad(x0 + 1f, glassTop, z0 + 1.2f, x1 - 1f, glassTop, z0 + 1.2f, x1 - 1f, baseTop, z0 + 1.2f, x0 + 1f, baseTop, z0 + 1.2f, art.sideArt.full, 0f, 0f, 1f, emissive = 0.55f)
@@ -174,6 +179,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         val dark = art.darkPaint.full
         b.box(x0, 0f, boardZ, x1, tableY, z1, BoxFaces(front = art.kick.full, left = side, right = side, back = dark, gloss = 0.3f))
         b.quad(x0, tableY, boardZ, x1, tableY, boardZ, x1, tableY, z1, x0, tableY, z1, MachineKit.whackTop(art.body).full, 0f, 1f, 0f, gloss = 0.35f)
+        c.coinDoor(cx, 6f, z1, 8f)
         // Padded rim round the table.
         val pad = art.trimTex.full
         b.box(x0 - 0.5f, tableY, z1 - 1.5f, x1 + 0.5f, tableY + 1.2f, z1 + 0.5f, BoxFaces(front = pad, top = pad, left = pad, right = pad, gloss = 0.4f))
@@ -199,6 +205,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         b.box(x1 - 2f, 0f, boardZ, x1, railH, z1, BoxFaces(right = side, left = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
         // Front console with the ball tray.
         b.box(x0 + 2f, 0f, z1 - 10f, x1 - 2f, 18f, z1, BoxFaces(front = art.kick.full, top = HallArt.solid(0xFF14121A.toInt()).full, gloss = 0.3f))
+        c.coinDoor(cx, 3f, z1, 7f)
         // The lane rises towards the jump.
         val laneFront = z1 - 10f
         val laneBack = boardZ + 30f
@@ -240,6 +247,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         b.box(x0, 0f, z0 + 4f, x0 + 2f, wallH, z1, BoxFaces(left = side, right = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
         b.box(x1 - 2f, 0f, z0 + 4f, x1, wallH, z1, BoxFaces(right = side, left = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
         b.box(x0 + 2f, 0f, z1 - 12f, x1 - 2f, 20f, z1, BoxFaces(front = art.kick.full, top = HallArt.solid(0xFF14121A.toInt()).full, gloss = 0.3f))
+        c.coinDoor(cx, 4f, z1, 7f)
         b.quad(x0 + 2f, 28f, z0 + 4f, x1 - 2f, 28f, z0 + 4f, x1 - 2f, 20f, z1 - 12f, x0 + 2f, 20f, z1 - 12f, MachineKit.court.full, 0f, 0.99f, 0.1f, gloss = 0.45f)
         // Backboard frame, board, rim and net.
         b.box(x0, 0f, z0, x1, h - 10f, z0 + 4f, BoxFaces(front = dark, left = dark, right = dark, top = dark, back = dark))
@@ -274,6 +282,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         val dark = art.darkPaint.full
         b.box(x0, 0f, z0, x1, baseTop, z1, BoxFaces(front = art.kick.full, left = side, right = side, top = dark, back = dark, gloss = 0.3f))
         c.posts(x0, x1, z0, z1, baseTop, glassTop)
+        c.coinDoor(cx, 8f, z1, 9f)
         b.quad(x0 + 1f, glassTop, z0 + 1.2f, x1 - 1f, glassTop, z0 + 1.2f, x1 - 1f, baseTop, z0 + 1.2f, x0 + 1f, baseTop, z0 + 1.2f, art.sideArt.full, 0f, 0f, 1f, emissive = 0.5f)
         val deckY = baseTop + 3f
         b.box(x0 + 1f, baseTop, z0 + 1f, x1 - 1f, deckY, z1 - 1f, BoxFaces(top = MachineKit.deck.full, front = MachineKit.gold.full, gloss = 0.6f))
@@ -300,6 +309,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
             b.box(lx, 0f, lz, lx + 2f, 9f, lz + 2f, leg)
         }
         b.box(x0 + 0.5f, 9f, z0 + 6f, x1 - 0.5f, top, z1, BoxFaces(front = art.kick.full, left = side, right = side, back = dark, gloss = 0.3f))
+        c.coinDoor(cx, 10.5f, z1, 7.5f)
         val surface = if (hockey) MachineKit.hockeySurface.full else dark
         b.quad(x0 + 2f, top + 0.3f, z0 + 7.5f, x1 - 2f, top + 0.3f, z0 + 7.5f, x1 - 2f, top + 0.3f, z1 - 1.5f, x0 + 2f, top + 0.3f, z1 - 1.5f, surface, 0f, 1f, 0f, emissive = 0.55f, gloss = 0.8f)
         val rail = art.trimTex.full
@@ -417,9 +427,13 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         }
     }
 
-    /** Glass and netting, drawn after every solid thing. */
+    /**
+     * Glass and netting, drawn after every solid thing, then the additive glows (halos, light
+     * pools under the cabinet, neon edges) over them.
+     */
     fun drawTransparent(r: Renderer3D) {
-        if (model.hasAlpha || model.hasAdd) model.draw(r, Blend.ALPHA)
+        if (model.hasAlpha) model.draw(r, Blend.ALPHA)
+        if (model.hasAdd) model.draw(r, Blend.ADD)
     }
 
     /** Chasing marquee bulbs, with a soft halo each. */

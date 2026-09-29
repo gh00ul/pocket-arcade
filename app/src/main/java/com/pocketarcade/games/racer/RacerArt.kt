@@ -194,6 +194,24 @@ internal object RacerArt {
         }
     }
 
+    /**
+     * The lit plate on the back of a hall cabinet's racing seat, the pod's number [n] in a
+     * roundel under a chequered strip, so the pods read from across the hall.
+     */
+    fun seatPlate(n: Int): Texture = seatPlates.getOrPut(n) {
+        paintTexture(32, 48, 6) {
+            vgrad(0f, 0f, 32f, 48f, 0xFF3A0A12.toInt(), 0xFF140408.toInt())
+            for (x in 0 until 8) for (y in 0 until 2) rect(x * 4f, 2f + y * 4f, 4f, 4f, if ((x + y) % 2 == 0) Pal.WHITE else Pal.BLACK)
+            glow(2.5f, Pal.withAlpha(Pal.RED, 0.9f)) { strokeRound(2f, 12f, 28f, 34f, 4f, 1.4f, -1) }
+            strokeRound(2f, 12f, 28f, 34f, 4f, 1f, 0xFFFF8A80.toInt())
+            circle(16f, 26f, 9f, Pal.WHITE)
+            ring(16f, 26f, 9f, 1.2f, Pal.RED)
+            label(n.toString(), 16f, 21.5f, 10f, 0xFF140408.toInt())
+            label("TURBO", 16f, 38.5f, 4.2f, Pal.WHITE)
+        }
+    }
+    private val seatPlates = HashMap<Int, Texture>()
+
     /** The hall cabinet's dash: a lit speedo and rev counter either side of a digital readout. */
     val dash: Texture by lazy {
         paintTexture(64, 20, 6) {
