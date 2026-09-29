@@ -35,6 +35,7 @@ class Player {
     var yaw = PI.toFloat()
     var pose = Pose.STAND
         private set
+    /** The stride cycle, from [anim]: a foot lands at every multiple of π (the first-person head bob keeps time with it). */
     var phase = 0f
         private set
     var moving = false
@@ -45,6 +46,9 @@ class Player {
 
     var look: CharacterLook? = null
         private set
+
+    /** How the kid moves: blended poses, gait and follow-through (see [FigureAnim]); stepped by [update] and [walkFirstPerson]. */
+    val anim = FigureAnim(seed = 1).also { it.prime(0f, 0f, PI.toFloat(), Pose.STAND) }
 
     private val out = FloatArray(2)
     private val slid = FloatArray(2)
@@ -62,6 +66,7 @@ class Player {
      */
     fun update(dt: Float, inputX: Float, inputY: Float, solids: List<Box>, faceYaw: Float = Float.NaN) {
         stepped = false
+        var goal = yaw
         val mag = len(inputX, inputY).coerceAtMost(1f)
         if (mag > 0.01f) {
             vx = inputX * SPEED
@@ -72,6 +77,7 @@ class Player {
             x = out[0]
             y = out[1]
             moving = moved
+            goal = atan2(inputX, inputY)
             if (!faceYaw.isNaN()) {
                 yaw = faceYaw
             } else {
@@ -82,11 +88,6 @@ class Player {
                 if (d < -PI) d += 2f * PI.toFloat()
                 yaw += d.coerceIn(-dt * 12f, dt * 12f)
             }
-            if (moved) {
-                val before = (phase / PI.toFloat()).toInt()
-                phase += dt * (6f + 6f * mag)
-                if ((phase / PI.toFloat()).toInt() != before) stepped = true
-            }
         } else {
             vx = 0f
             vy = 0f
@@ -94,6 +95,9 @@ class Player {
             if (!faceYaw.isNaN()) yaw = faceYaw
         }
         pose = if (moving) Pose.WALK else Pose.STAND
+        anim.update(dt, x, y, yaw, pose, goal, vx, vy)
+        phase = anim.phase
+        stepped = anim.stepped
     }
 
     /**
@@ -154,12 +158,10 @@ class Player {
         yaw = faceYaw
         val frac = speedFrac
         moving = frac * SPEED > STILL_SPEED
-        if (moving) {
-            val before = (phase / PI.toFloat()).toInt()
-            phase += dt * (5f + 7f * frac)
-            if ((phase / PI.toFloat()).toInt() != before) stepped = true
-        }
         pose = if (moving) Pose.WALK else Pose.STAND
+        anim.update(dt, x, y, yaw, pose, yaw, vx, vy)
+        phase = anim.phase
+        stepped = anim.stepped
     }
 
     /** Nudges the kid (after something else moved them, like a kid bumping into them). */

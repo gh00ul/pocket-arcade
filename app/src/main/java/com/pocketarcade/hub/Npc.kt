@@ -3,6 +3,7 @@ package com.pocketarcade.hub
 import com.pocketarcade.engine.dist
 import com.pocketarcade.engine.range
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -31,14 +32,24 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
          * could go next starts the same way.
          */
         const val IMPATIENT_TIME = 3f
+        /** A kid notices the player inside this distance and stops noticing beyond [NOTICE_LEAVE] (world units). */
+        const val NOTICE_DIST = 64f
+        const val NOTICE_LEAVE = 84f
+        /** A kid playing a machine looks at a point this far in front of them, at screen height. */
+        const val MACHINE_DIST = 14f
+        const val MACHINE_GAZE_Y = 44f
+        /** A kid only waves at a player within this angle (radians) of straight ahead. */
+        const val WAVE_CONE = 1.1f
     }
 
     var yaw = rng.range(0f, 6.28f)
         private set
     var pose = Pose.STAND
         private set
-    var phase = 0f
-        private set
+    /** The stride cycle: advanced by the ground the kid covers (see [FigureAnim.phase]). */
+    val phase: Float get() = anim.phase
+    /** How this kid moves: blended poses, gait, gaze and follow-through (see [FigureAnim]). */
+    val anim = FigureAnim(seed = (seed * 1000f).toInt(), scale = 1f)
     var state = State.IDLE
         private set
     /** Index of the hangout this kid is heading to or using, or -1. */
@@ -52,6 +63,15 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
     /** Carrying a café treat (a cup or a cone, by [Figure.heldItem]). */
     var holding = false
         private set
+
+    /** How long this kid has had the player close by, and how long it takes them to notice (seconds). */
+    private var noticeT = 0f
+    private val emotes = Emotes((seed * 1000f).toInt())
+    private val reaction = 0.25f + 0.45f * AnimMath.unit((seed * 1000f).toInt(), 0, 9)
+
+    init {
+        anim.prime(x, y, yaw, pose)
+    }
 
     private var timer = rng.range(0.5f, 3f)
     private var path: IntArray = NO_PATH
@@ -72,7 +92,63 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
     /** Seconds left of walking on regardless of the player (see [IMPATIENT_TIME]). */
     private var impatientT = 0f
 
+    /**
+     * One simulation step: where the kid goes and what they do (which the animation never
+     * changes), then the animation follows it.
+     */
     fun update(dt: Float, world: HubWorld) {
+        step(dt, world)
+        aimGaze(dt, world)
+        gesture(dt, world)
+        anim.update(dt, x, y, yaw, pose, yawGoal = targetYaw)
+    }
+
+    /**
+     * Sets this kid cheering or clapping (a clap when seated) after [delay] seconds, for someone's
+     * good news. Only the pose they show changes: where they go and what they do next doesn't.
+     */
+    fun celebrate(delay: Float) = emotes.celebrate(delay, seated = state == State.SIT)
+
+    /**
+     * Now and then, a kid who has noticed the player in front of them waves; and a celebration
+     * (see [celebrate]) shows as a cheer. Swaps the pose shown, nothing else.
+     */
+    private fun gesture(dt: Float, world: HubWorld) {
+        val p = world.player
+        val rel = AnimMath.wrap(atan2(p.x - x, p.y - y) - anim.yaw)
+        val close = noticeT > reaction && abs(rel) < WAVE_CONE
+        val standing = !holding && (state == State.IDLE || (state == State.QUEUE && !ordering))
+        val shown = emotes.update(dt, close, standing, state == State.SIT, state == State.WALK)
+        if (shown != null) pose = shown
+    }
+
+    /**
+     * Decides what this kid is looking at: the machine they are playing, the barista at the till,
+     * the till from further back in the queue, and anyone who comes near, once they have noticed
+     * (after a moment's reaction time, different for each kid). Only the head follows.
+     */
+    private fun aimGaze(dt: Float, world: HubWorld) {
+        val p = world.player
+        val near = if (noticeT > 0f) NOTICE_LEAVE else NOTICE_DIST
+        noticeT = if (dist(x, y, p.x, p.y) < near) noticeT + dt else 0f
+        when (state) {
+            State.PLAY -> if (hangout >= 0) {
+                val h = world.map.hangouts[hangout]
+                anim.look(h.x + sin(h.yaw) * MACHINE_DIST, h.z + cos(h.yaw) * MACHINE_DIST, MACHINE_GAZE_Y)
+            }
+            State.QUEUE -> if (ordering) {
+                val b = world.cafe.barista
+                anim.look(b.x, b.z, Figure.HEAD_Y * 1.05f)
+            } else {
+                anim.look(CafeLayout.TILL_X, CafeLayout.LANE_Z, Figure.HEAD_Y)
+            }
+            else -> {}
+        }
+        // Someone nearby gets noticed, unless this kid is absorbed in a game or giving an order.
+        if (noticeT > reaction && state != State.PLAY && !ordering) anim.look(p.x, p.y, Figure.HEAD_Y)
+    }
+
+    private fun step(dt: Float, world: HubWorld) {
         if (world.firstPerson && giveWay(dt, world)) {
             yaw = turnTowards(yaw, targetYaw, dt * 8f)
             return
@@ -206,7 +282,6 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
             y += dy / d * step
             targetYaw = atan2(dx, dy)
         }
-        phase += dt * speed * 0.2f
         stuckT = if (dist(x, y, lastX, lastY) < 0.01f) stuckT + dt else 0f
         lastX = x
         lastY = y
@@ -348,7 +423,6 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
                     if (!Collision.blocked(solids, nx, ny)) {
                         x = nx
                         y = ny
-                        phase += dt * speed * 0.2f
                     }
                     pose = if (holding) Pose.CARRY else Pose.WALK
                     giveWayT += dt

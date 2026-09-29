@@ -52,8 +52,10 @@ fun HubScreen(
     // A dialog, a machine starting or a pause takes the hall's focus: let go of every finger, so
     // nobody comes back to a stick still pushed or a view still turning.
     LaunchedEffect(inputEnabled) {
-        if (!inputEnabled) world.cancelInput()
+        if (!inputEnabled) world.cancelInput() else world.hallResumed()
     }
+    // A new prize bought at the counter gets a cheer from the kids about it once the shop closes.
+    LaunchedEffect(save.owned.size) { world.noteOwned(save.owned.size) }
     val density = LocalDensity.current
     world.density = density.density
     // The HUD row: the safe-area inset, its padding and the buttons with their lip.

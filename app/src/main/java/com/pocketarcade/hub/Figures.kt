@@ -13,7 +13,6 @@ import com.pocketarcade.engine.r3d.TexPaint
 import com.pocketarcade.engine.r3d.Texture
 import com.pocketarcade.engine.r3d.Xform
 import kotlin.math.PI
-import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -69,9 +68,21 @@ object Looks {
 
 /**
  * What a figure is doing, which sets its pose. With a café treat: [CARRY] walking with it, [HOLD]
- * standing with it, [SIP] sitting and sipping; [WIPE] is the barista wiping the counter.
+ * standing with it, [SIP] sitting and sipping; [WIPE] is the barista wiping the counter. [WAVE]
+ * is a kid greeting the player and [CLAP] applauding (the prize counter's crowd). Poses cross-fade
+ * (see [PoseBlender]), so switching between them never snaps.
  */
-enum class Pose { STAND, WALK, PLAY, CHEER, SIT, WIPE, CARRY, HOLD, SIP }
+enum class Pose {
+    STAND, WALK, PLAY, CHEER, SIT, WIPE, CARRY, HOLD, SIP, WAVE, CLAP;
+
+    companion object {
+        /** How many poses there are (the size of a [PoseBlender]'s weights). */
+        val COUNT = values().size
+
+        /** Every pose by [ordinal], so looking one up allocates nothing. */
+        val ALL: Array<Pose> = values()
+    }
+}
 
 /**
  * A 3D kid: sculpted body, painted face, hair and hat, with limbs that swing as they walk.
@@ -84,6 +95,18 @@ class Figure(val look: CharacterLook) {
         const val SHOULDER_X = 7.3f
         const val HEAD_Y = 35.5f
         const val HEAD_R = 8f
+        /** The neck joint the head turns about (root coordinates). */
+        const val NECK_Y = 30f
+
+        // Where the painted eyes sit on the head sphere, for the eyelids that blink over them: the
+        // top of each eye at EYE_LAT radians of latitude and ±EYE_LON of longitude from straight ahead.
+        private const val EYE_LAT = 0.129f
+        private const val EYE_LON = 0.32f
+        private const val LID_HALF_W = 1.25f
+        private const val LID_HALF_H = 1.45f
+        private const val LID_DEPTH = 0.5f
+        /** Below this closure a lid isn't drawn at all. */
+        private const val BLINK_VISIBLE = 0.04f
 
         private val paints = HashMap<Int, Texture>()
         fun paint(color: Int): Region = paints.getOrPut(color) { HallArt.paint(color, 0.2f, 0.72f) }.full
@@ -235,47 +258,66 @@ class Figure(val look: CharacterLook) {
         }
     }
 
-    private val body: Model
+    // The body is built in pieces that move against each other: the torso (with neck and apron),
+    // the head (face and hair; the hat rides on it), a ponytail that swings on its own, the
+    // eyelids for blinking, and the limbs. The torso is modelled about the hips and the head about
+    // the neck, so leaning and turning pivot where a body does.
+    private val torso: Model
+    private val head: Model
+    private val tail: Model?
+    private val lid: Model
     private val leg: Model
     private val arm: Model
     private val hatModel: Model? = look.hat?.let { hat(it) }
+    private val eyeX = (HEAD_R + 0.05f) * cos(EYE_LAT) * sin(EYE_LON)
+    private val eyeTop = HEAD_Y - NECK_Y + (HEAD_R + 0.05f) * sin(EYE_LAT)
+    private val eyeZ = (HEAD_R + 0.05f) * cos(EYE_LAT) * cos(EYE_LON)
 
     init {
         val skin = paint(look.skin)
         val shirt = paint(look.shirt)
         val pants = paint(look.pants)
         val shoe = paint(look.shoes)
+        val faceRegion = face(look.skin, look.hair)
+        val hair = hairTexture(look.hair, look.hairStyle)
 
         // Torso: a rounded, slightly flattened shape from the hips to the shoulders.
-        val torso = ModelBuilder().lathe(
+        val torsoShape = ModelBuilder().lathe(
             0f, 0f, 0f,
             floatArrayOf(0f, 12f, 5.4f, 12.3f, 6.3f, 14f, 6.4f, 18f, 6.5f, 22f, 6.1f, 24.6f, 4.8f, 26.4f, 2.4f, 27.4f),
             16, shirt, gloss = 0.05f,
         ).build()
         val b = ModelBuilder()
-        b.addScaled(torso, 1f, 1f, 0.76f)
-        b.cylinder(0f, 0f, 26.5f, 29.5f, 2.1f, 10, skin)
+        b.addScaled(torsoShape, 1f, 1f, 0.76f, ty = -HIP_Y)
+        b.cylinder(0f, 0f, 26.5f - HIP_Y, 29.5f - HIP_Y, 2.1f, 10, skin)
         // Staff wear an apron with a bib and a pocket over the shirt.
         if (look.apron != 0) {
             val apron = paint(look.apron)
             val trim = paint(lift(look.apron, 0.45f))
-            b.box(-5.2f, 7.5f, 4.1f, 5.2f, 20.5f, 5.5f, BoxFaces(front = apron, left = apron, right = apron, gloss = 0.1f))
-            b.box(-3.4f, 20.5f, 3.9f, 3.4f, 25.2f, 5.2f, BoxFaces(front = apron, left = apron, right = apron, top = apron, gloss = 0.1f))
-            b.box(-2.6f, 12.5f, 5.5f, 2.6f, 15.8f, 5.8f, BoxFaces(front = trim, top = trim, left = trim, right = trim))
-            b.box(-6.5f, 18.6f, -5f, 6.5f, 19.8f, 4.2f, BoxFaces(left = apron, right = apron, back = apron, top = apron))
+            b.box(-5.2f, 7.5f - HIP_Y, 4.1f, 5.2f, 20.5f - HIP_Y, 5.5f, BoxFaces(front = apron, left = apron, right = apron, gloss = 0.1f))
+            b.box(-3.4f, 20.5f - HIP_Y, 3.9f, 3.4f, 25.2f - HIP_Y, 5.2f, BoxFaces(front = apron, left = apron, right = apron, top = apron, gloss = 0.1f))
+            b.box(-2.6f, 12.5f - HIP_Y, 5.5f, 2.6f, 15.8f - HIP_Y, 5.8f, BoxFaces(front = trim, top = trim, left = trim, right = trim))
+            b.box(-6.5f, 18.6f - HIP_Y, -5f, 6.5f, 19.8f - HIP_Y, 4.2f, BoxFaces(left = apron, right = apron, back = apron, top = apron))
         }
-        // Head with the painted face, and hair over it.
-        b.sphere(0f, HEAD_Y, 0f, HEAD_R, face(look.skin, look.hair), slices = 20, stacks = 14, gloss = 0.08f)
-        val hair = hairTexture(look.hair, look.hairStyle)
-        b.sphere(0f, HEAD_Y + 0.4f, -0.2f, HEAD_R + 0.55f, hair, slices = 20, stacks = 12, yFrom = -0.35f, gloss = 0.25f)
-        when (look.hairStyle) {
-            1 -> for (k in 0 until 5) {
-                val a = -0.9f + k * 0.45f
-                b.cylinder(kotlin.math.sin(a) * 4f, -1f - kotlin.math.cos(a) * 2f, HEAD_Y + 6.5f, HEAD_Y + 11f, 2f, 6, hair, topRadius = 0.2f)
-            }
-            2 -> b.capsule(0f, HEAD_Y + 2f, -7.5f, 0f, HEAD_Y - 9f, -7f, 3f, hair)
+        torso = b.build()
+
+        // Head with the painted face, and hair over it (a ponytail hangs from a joint of its own).
+        val hy = HEAD_Y - NECK_Y
+        val hb = ModelBuilder()
+        hb.sphere(0f, hy, 0f, HEAD_R, faceRegion, slices = 20, stacks = 14, gloss = 0.08f)
+        hb.sphere(0f, hy + 0.4f, -0.2f, HEAD_R + 0.55f, hair, slices = 20, stacks = 12, yFrom = -0.35f, gloss = 0.25f)
+        if (look.hairStyle == 1) for (k in 0 until 5) {
+            val a = -0.9f + k * 0.45f
+            hb.cylinder(sin(a) * 4f, -1f - cos(a) * 2f, hy + 6.5f, hy + 11f, 2f, 6, hair, topRadius = 0.2f)
         }
-        body = b.build()
+        head = hb.build()
+        tail = if (look.hairStyle == 2) ModelBuilder().capsule(0f, 0f, 0f, 0f, -11f, 0.5f, 3f, hair).build() else null
+
+        // An eyelid: half an ellipsoid of forehead skin hanging from the top of the eye, which
+        // is drawn squashed down over the painted eye to blink.
+        val patch = Region(faceRegion.tex, 54, 22, 20, 12)
+        val ball = ModelBuilder().sphere(0f, 0f, 0f, 1f, patch, slices = 8, stacks = 6).build()
+        lid = ModelBuilder().addScaled(ball, LID_HALF_W, LID_HALF_H, LID_DEPTH, ty = -LID_HALF_H).build()
 
         leg = ModelBuilder()
             .capsule(0f, 0f, 0f, 0f, -11.2f, 0f, 2.7f, pants)
@@ -289,96 +331,86 @@ class Figure(val look: CharacterLook) {
     }
 
     private val root = Xform()
+    private val spine = Xform()
+    private val neck = Xform()
+    private val hatXf = Xform()
     private val part = Xform()
     private val local = Xform()
     private val held = Xform()
     private val ownItem = heldItem(look)
     private val itemSeed = look.shirt xor look.hair
 
+    /** Animation state for [draw]'s older form, which poses a figure from scratch each call (portraits). */
+    private val still = FigureAnim()
+
     /**
-     * Draws the figure standing at ([x], [y], [z]) facing [yaw]. [phase] advances the walk cycle;
-     * [time] drives idle motions. In the holding poses the hand carries café treat [item] (by
-     * default the one this look always buys).
+     * Draws the figure standing at ([x], [y], [z]) facing [yaw], in [pose] at moment [time] of its
+     * idle motion and [phase] of its stride. With no history it can't blend, so this is for
+     * portraits and pictures; a figure that moves keeps a [FigureAnim] and uses the form below.
      */
     fun draw(r: Renderer3D, x: Float, y: Float, z: Float, yaw: Float, pose: Pose, phase: Float, time: Float, scale: Float = 1f, item: Int = -1) {
-        val walking = pose == Pose.WALK || pose == Pose.CARRY
-        val swing = if (walking) sin(phase) else 0f
-        val bob = when (pose) {
-            Pose.WALK, Pose.CARRY -> abs(sin(phase)) * 0.9f
-            Pose.CHEER -> abs(sin(time * 9f)) * 2.5f
-            else -> sin(time * 2f) * 0.15f
+        still.setStatic(pose, time, phase, yaw)
+        draw(r, x, y, z, still, scale, item)
+    }
+
+    /**
+     * Draws the figure standing at ([x], [y], [z]) as [anim] has it: its facing, pose, gait, gaze and
+     * follow-through. In the holding poses the hand carries café treat [item] (by default the
+     * one this look always buys).
+     */
+    fun draw(r: Renderer3D, x: Float, y: Float, z: Float, anim: FigureAnim, scale: Float = 1f, item: Int = -1) {
+        val a = anim
+        val yaw = a.yaw
+        // Weight shifts sway the whole body sideways, along its own x axis.
+        root.set(x + cos(yaw) * a.sway * scale, y + a.rootY * scale, z - sin(yaw) * a.sway * scale, yaw = yaw, scale = scale)
+        // The spine turns and leans about the hips; breathing swells the chest a touch.
+        local.set(0f, HIP_Y, 0f, yaw = a.twist, pitch = a.lean, roll = a.leanRoll)
+        spine.setProduct(root, local)
+        part.copyFrom(spine).stretch(1f + a.breath * 0.5f, 1f + a.breath, 1f + a.breath * 0.5f)
+        torso.draw(r, Blend.OPAQUE, xf = part)
+        // The head turns about the neck; the hat and ponytail follow it, each with a little lag.
+        local.set(0f, NECK_Y - HIP_Y + a.breathLift, 0f, yaw = a.headYaw, pitch = a.headPitch, roll = a.headRoll)
+        neck.setProduct(spine, local)
+        head.draw(r, Blend.OPAQUE, xf = neck)
+        if (a.blink > BLINK_VISIBLE) {
+            for (s in 0..1) {
+                val side = SIDES[s]
+                local.set(side * eyeX, eyeTop, eyeZ, yaw = side * EYE_LON, pitch = -EYE_LAT).stretch(1f, a.blink, 1f)
+                part.setProduct(neck, local)
+                lid.draw(r, Blend.OPAQUE, xf = part)
+            }
         }
-        val sit = pose == Pose.SIT || pose == Pose.SIP
-        root.set(x, y + (bob + if (sit) -5f else 0f) * scale, z, yaw = yaw, scale = scale)
-        body.draw(r, Blend.OPAQUE, xf = root)
         hatModel?.let {
-            local.set(0f, HEAD_Y, 0f)
-            part.setProduct(root, local)
-            it.draw(r, xf = part)
+            local.set(0f, HEAD_Y - NECK_Y + a.hatLift, 0f, pitch = a.hatPitch, roll = a.hatRoll)
+            hatXf.setProduct(neck, local)
+            it.draw(r, xf = hatXf)
             if (look.hat == HatStyle.PROPELLER) {
-                local.set(0f, HEAD_Y + HEAD_R + 3f, 0f, yaw = time * 14f)
-                part.setProduct(root, local)
+                local.set(0f, HEAD_R + 3f, 0f, yaw = a.clock * 14f)
+                part.setProduct(hatXf, local)
                 propeller.draw(r, Blend.OPAQUE, xf = part)
             }
         }
+        tail?.let {
+            local.set(0f, HEAD_Y - NECK_Y + 2f, -7.5f, pitch = a.tailPitch, roll = a.tailRoll)
+            part.setProduct(neck, local)
+            it.draw(r, Blend.OPAQUE, xf = part)
+        }
         // Legs swing from the hips (or stick out forwards when sitting).
-        for (s in SIDES) {
-            val legPitch = if (sit) -1.45f else swing * 0.6f * s
-            local.set(s * 3.1f, HIP_Y, 0f, pitch = legPitch)
+        for (s in 0..1) {
+            local.set(SIDES[s] * 3.1f, HIP_Y + a.legLift[s], 0f, pitch = a.legPitch[s])
             part.setProduct(root, local)
             leg.draw(r, Blend.OPAQUE, xf = part)
         }
-        // Arms: opposite to the legs when walking, reaching forward at a machine, up when cheering.
-        for (s in SIDES) {
-            val armPitch: Float
-            val armRoll: Float
-            when (pose) {
-                Pose.WALK -> {
-                    armPitch = -swing * 0.5f * s; armRoll = 0.12f * s
-                }
-                Pose.PLAY -> {
-                    armPitch = -1.05f + sin(time * 11f + s) * 0.12f; armRoll = 0.05f * s
-                }
-                Pose.CHEER -> {
-                    armPitch = -2.6f + sin(time * 9f + s) * 0.25f; armRoll = 0.2f * s
-                }
-                Pose.SIT -> {
-                    armPitch = -0.6f; armRoll = 0.1f * s
-                }
-                Pose.STAND -> {
-                    armPitch = sin(time * 1.3f + s) * 0.05f; armRoll = 0.1f * s
-                }
-                Pose.WIPE -> if (s > 0) {
-                    // Circles with a cloth on the counter top.
-                    armPitch = -1.15f + sin(time * 7f) * 0.1f; armRoll = 0.05f + cos(time * 7f) * 0.28f
-                } else {
-                    armPitch = -0.75f; armRoll = -0.12f
-                }
-                Pose.CARRY, Pose.HOLD -> if (s > 0) {
-                    armPitch = -1.25f + sin(time * 2f) * 0.04f; armRoll = 0.02f
-                } else if (pose == Pose.CARRY) {
-                    armPitch = swing * 0.5f; armRoll = -0.12f
-                } else {
-                    armPitch = sin(time * 1.3f) * 0.05f; armRoll = -0.1f
-                }
-                Pose.SIP -> if (s > 0) {
-                    // Every few seconds the cup comes up for a sip.
-                    val c = time % 4.5f
-                    val lift = if (c < 1.4f) sin(c / 1.4f * PI.toFloat()) else 0f
-                    armPitch = -0.95f - lift * 1.35f; armRoll = 0.05f + lift * 0.2f
-                } else {
-                    armPitch = -0.6f; armRoll = -0.1f
-                }
-            }
-            local.set(s * SHOULDER_X, SHOULDER_Y, 0f, pitch = armPitch, roll = armRoll)
-            part.setProduct(root, local)
+        // Arms hang from the shoulders, so they lean and twist with the spine.
+        for (s in 0..1) {
+            local.set(SIDES[s] * SHOULDER_X, SHOULDER_Y - HIP_Y + a.breathLift, 0f, pitch = a.armPitch[s], roll = a.armRoll[s])
+            part.setProduct(spine, local)
             arm.draw(r, Blend.OPAQUE, xf = part)
-            // The treat stays upright in the hand.
-            if (s > 0 && (pose == Pose.CARRY || pose == Pose.HOLD || pose == Pose.SIP)) {
-                val what = if (item >= 0) item else ownItem
-                val m = itemModel(what, itemSeed)
+            // The treat stays upright in the right hand.
+            if (s == 1 && a.itemAmount > 0.02f) {
+                val m = itemModel(if (item >= 0) item else ownItem, itemSeed)
                 if (m != null) {
-                    held.set(part.x(0f, -12.6f, 1.2f), part.y(0f, -12.6f, 1.2f), part.z(0f, -12.6f, 1.2f), yaw = yaw, scale = scale)
+                    held.set(part.x(0f, -12.6f, 1.2f), part.y(0f, -12.6f, 1.2f), part.z(0f, -12.6f, 1.2f), yaw = yaw, scale = scale * a.itemAmount)
                     m.draw(r, Blend.OPAQUE, xf = held)
                 }
             }
