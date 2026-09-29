@@ -40,6 +40,8 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
     /** Each light's steady intensity (the per-frame flicker scales it). */
     private val baseIntensity: FloatArray
     private val structure: Model
+    /** Trusses and spotlights, the racers' hung sign, the upper-wall murals, the entrance chase lights. */
+    private val rig = HallRig(map, games)
     private val floorShade: Texture
     private val hasDisco = map.props.any { it.decor == DecorStyle.DISCO_BALL }
     private val figures = HashMap<CharacterLook, Figure>()
@@ -311,6 +313,8 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         r.clear(0xFF07050E.toInt())
 
         structure.draw(r, Blend.OPAQUE)
+        rig.model.draw(r, Blend.OPAQUE)
+        rig.drawOpaque(r, t, minX, maxX, minZ, maxZ)
 
         for (i in fixtureProps.indices) {
             val p = fixtureProps[i]
@@ -373,6 +377,7 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
             if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
             fixtureModels[i].draw(r, Blend.ADD)
         }
+        rig.drawGlow(r, t, minX, maxX, minZ, maxZ)
         if (hasDisco) drawDiscoSpots(r, t)
     }
 
