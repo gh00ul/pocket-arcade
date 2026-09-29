@@ -221,6 +221,37 @@ void main() {
 }
 """
 
+    /** Screen-space particle quads: positions already in clip space, local coordinates for the glow. */
+    const val PARTICLE_VS = """#version 300 es
+layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec2 aLocal;
+layout(location = 2) in vec4 aColor;
+out vec2 vLocal;
+out vec4 vColor;
+void main() {
+    vLocal = aLocal;
+    vColor = aColor;
+    gl_Position = vec4(aPos, 0.0, 1.0);
+}
+"""
+
+    /** A solid particle, or (uSoft = 1) a round glow that fades to nothing at the quad's edge. */
+    const val PARTICLE_FS = """#version 300 es
+precision mediump float;
+in vec2 vLocal;
+in vec4 vColor;
+uniform float uSoft;
+out vec4 outColor;
+void main() {
+    float f = 1.0;
+    if (uSoft > 0.5) {
+        float d = clamp(1.0 - length(vLocal), 0.0, 1.0);
+        f = d * d;
+    }
+    outColor = vec4(vColor.rgb, vColor.a * f);
+}
+"""
+
     /** Background gradients: positions already in clip space, colours per vertex. */
     const val BG_VS = """#version 300 es
 layout(location = 0) in vec2 aPos;

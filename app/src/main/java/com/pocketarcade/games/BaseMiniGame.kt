@@ -68,11 +68,16 @@ abstract class BaseMiniGame : MiniGame {
     final override fun draw(scope: DrawScope) {
         GameViewport.shakeX = shake.offsetX
         GameViewport.shakeY = shake.offsetY
+        // Offer the particles to the GPU picture, where they glow in the bloom; a game with a
+        // 3D stage takes them in present(), and only if nothing did are they painted in 2D.
+        GameViewport.particles = particles
+        GameViewport.particlesInGl = false
         scope.translate(shake.offsetX, shake.offsetY) {
             render(this)
             GameViewport.shakeX = 0f
             GameViewport.shakeY = 0f
-            particles.draw(this)
+            GameViewport.particles = null
+            if (!GameViewport.particlesInGl) particles.draw(this)
             popups.draw(this, 0f, 0f, 1f)
         }
         if (flash.value > 0f) {

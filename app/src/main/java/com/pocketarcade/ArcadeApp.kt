@@ -38,6 +38,8 @@ import com.pocketarcade.engine.AudioSynth
 import com.pocketarcade.engine.Haptics
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.ScreenShake
+import com.pocketarcade.engine.gl.Gfx
+import com.pocketarcade.engine.gl.GfxFailureNotice
 import com.pocketarcade.engine.gl.GlSurface
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.games.GameRegistry
@@ -379,5 +381,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                 drawRect(Color.Black, alpha = fade.value.coerceIn(0f, 1f))
             }
         }
+
+        // The GPU gave up: say so instead of leaving the interface over a blank screen.
+        Gfx.failure?.let { GfxFailureNotice(it) }
     }
 }

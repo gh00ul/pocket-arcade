@@ -1,6 +1,8 @@
 package com.pocketarcade.engine.r3d
 
+import com.pocketarcade.engine.Particles
 import com.pocketarcade.engine.gl.Gfx
+import com.pocketarcade.engine.gl.GfxQuality
 import kotlin.math.roundToInt
 
 /**
@@ -22,6 +24,20 @@ object GameViewport {
     var clipY1 = 0
     /** Slot the game's picture is submitted to. */
     const val SLOT = "game"
+
+    /**
+     * The particle pool of the game being drawn, offered to the GPU picture: the game host sets
+     * it before the game draws, and [Stage3D.present] records it into the pass so the particles
+     * are drawn inside the 3D image and glow in its bloom. It is cleared once the game has drawn.
+     */
+    var particles: Particles? = null
+
+    /**
+     * Set by [Stage3D.present] when the offered [particles] are in the GPU picture (recorded into
+     * this frame's pass, or already in the last picture when the frame cap skipped this one).
+     * Anything left false, such as a flat game with no [Stage3D], paints them in 2D instead.
+     */
+    var particlesInGl = false
 }
 
 /**
@@ -32,7 +48,8 @@ object GameViewport {
  * Projection and touch helpers are plain math, so games can use them in headless tests too.
  */
 class Stage3D(val fieldW: Int, val fieldH: Int) {
-    val r = Renderer3D(fieldW, fieldH)
+    /** Follows the frame-rate cap: on a fast display, frames the GPU would not draw aren't recorded. */
+    val r = Renderer3D(fieldW, fieldH).also { it.frameCapped = true }
 
     /** The camera in field units; [begin] copies it to the renderer. */
     val cam = Camera3D()
@@ -85,6 +102,12 @@ class Stage3D(val fieldW: Int, val fieldH: Int) {
             x.roundToInt(), y.roundToInt(), (fieldW * v.scale).roundToInt(), (fieldH * v.scale).roundToInt(),
             v.clipX0, v.clipY0, v.clipX1, v.clipY1, clip = true,
         )
+        val source = v.particles
+        if (source != null && GfxQuality.glParticles) {
+            // A skipped frame keeps the last picture on screen, with its particles in it.
+            if (!pass.skipped) source.recordGl(pass, fieldW.toFloat(), fieldH.toFloat())
+            v.particlesInGl = true
+        }
         Gfx.submit(GameViewport.SLOT, pass)
     }
 }

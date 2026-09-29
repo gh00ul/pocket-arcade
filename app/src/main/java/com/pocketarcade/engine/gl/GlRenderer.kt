@@ -53,6 +53,11 @@ internal class GlRenderer {
     private var downProg = 0
     private var upProg = 0
     private var compProg = 0
+    private var particleProg = 0
+
+    /** Whether particles can be drawn into the picture (their shader built). */
+    var particlesOk = false
+        private set
 
     /** A linked program with its uniform locations looked up once each. */
     private class Prog(val id: Int) {
@@ -65,10 +70,13 @@ internal class GlRenderer {
     private var down = Prog(0)
     private var up = Prog(0)
     private var comp = Prog(0)
+    private var particle = Prog(0)
     private var streamVbo = 0
     private var streamVao = 0
     private var bgVbo = 0
     private var bgVao = 0
+    private var partVbo = 0
+    private var partVao = 0
     private var quadVbo = 0
     private var quadVao = 0
     private var gridTex = 0
@@ -76,8 +84,36 @@ internal class GlRenderer {
     private var gridTexW = 0
     private var gridTexH = 0
     private var whiteTex = 0
-    private var samples = 0
+    /** The most samples the GPU offers (capped at 4); whether a multisampled target failed to build. */
+    private var maxSamples = 0
+    private var msaaBroken = false
     private var anisotropy = 1f
+
+    /** What the driver calls itself (`GL_RENDERER`), for the first guess at a quality rung. */
+    var glRendererName = ""
+        private set
+
+    // Quality levers (see GfxQuality), set by the GL thread from the current rung. The defaults
+    // are rung 0: how the renderer looked before there were tiers.
+    /** Multisampling wanted (4, 2 or 0); the GPU's own limit still applies. */
+    var msaa = 4
+    /** Bloom octaves wanted, 2..[BLOOM_LEVELS]. */
+    var bloomOctaves = BLOOM_LEVELS
+    var reflections = GfxQuality.Reflections.MIRROR
+    /** Whether the pass being drawn renders into a multisampled target. */
+    private var msActive = false
+
+    /** Draw calls and vertices issued by the last [drawFrame], for [FrameStats] (to judge instancing). */
+    var drawCalls = 0
+        private set
+    var vertsDrawn = 0L
+        private set
+
+    private fun drawArrays(mode: Int, first: Int, count: Int) {
+        drawCalls++
+        vertsDrawn += count
+        GLES30.glDrawArrays(mode, first, count)
+    }
 
     /** Skips floor reflections whatever the passes ask (for A/B timing from [FrameStats]). */
     var floorReflectOff = false
@@ -85,10 +121,25 @@ internal class GlRenderer {
     /** Fraction of full resolution the scene renders at; eased down if frames run slow. */
     var renderScale = START_SCALE
 
+    /** Sets every quality lever from [r]. */
+    fun applyRung(r: GfxQuality.Rung) {
+        msaa = r.msaa
+        bloomOctaves = r.bloomOctaves
+        reflections = r.reflections
+    }
+
+    /** The multisampling the current levers and the GPU allow: 0 (off) or 2..4. */
+    private fun wantSamples(): Int {
+        val n = if (msaaBroken) 0 else minOf(msaa, maxSamples)
+        return if (n > 1) n else 0
+    }
+
     private class Targets(val w: Int, val h: Int) {
         var msFbo = 0
         var msColor = 0
         var msDepth = 0
+        /** Samples the multisampled buffers were built with (0 = none), or -1 before they exist. */
+        var msSamples = -1
         var sceneFbo = 0
         var sceneTex = 0
         var sceneDepth = 0
@@ -158,15 +209,27 @@ internal class GlRenderer {
         downProg = program(GlShaders.POST_VS, GlShaders.DOWN_FS)
         upProg = program(GlShaders.POST_VS, GlShaders.UP_FS)
         compProg = program(GlShaders.POST_VS, GlShaders.COMPOSITE_FS)
+        // Particles are a nicety: a driver that rejects their shader must not take the scene down
+        // with it, so they fall back to being painted in 2D.
+        particleProg = try {
+            program(GlShaders.PARTICLE_VS, GlShaders.PARTICLE_FS)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Particle shader unavailable; particles stay 2D", e)
+            0
+        }
+        particlesOk = particleProg != 0
         scene = Prog(sceneProg)
         bg = Prog(bgProg)
         bright = Prog(brightProg)
         down = Prog(downProg)
         up = Prog(upProg)
         comp = Prog(compProg)
+        particle = Prog(particleProg)
 
         GLES30.glGetIntegerv(GLES30.GL_MAX_SAMPLES, tmp, 0)
-        samples = minOf(4, tmp[0])
+        maxSamples = minOf(4, tmp[0])
+        msaaBroken = false
+        glRendererName = GLES30.glGetString(GLES30.GL_RENDERER) ?: ""
         val ext = GLES30.glGetString(GLES30.GL_EXTENSIONS) ?: ""
         if (ext.contains("GL_EXT_texture_filter_anisotropic")) {
             val f = FloatArray(1)
@@ -174,7 +237,7 @@ internal class GlRenderer {
             anisotropy = minOf(8f, f[0])
         }
         GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
-        Log.i(TAG, "GL ${GLES30.glGetString(GLES30.GL_VERSION)} / ${GLES30.glGetString(GLES30.GL_RENDERER)}, MSAA $samples, aniso $anisotropy")
+        Log.i(TAG, "GL ${GLES30.glGetString(GLES30.GL_VERSION)} / ${GLES30.glGetString(GLES30.GL_RENDERER)}, MSAA $maxSamples, aniso $anisotropy")
 
         // Streaming buffer for immediate geometry.
         GLES30.glGenBuffers(1, tmp, 0); streamVbo = tmp[0]
@@ -191,6 +254,18 @@ internal class GlRenderer {
         GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 20, 0)
         GLES30.glEnableVertexAttribArray(1)
         GLES30.glVertexAttribPointer(1, 3, GLES30.GL_FLOAT, false, 20, 8)
+
+        GLES30.glGenBuffers(1, tmp, 0); partVbo = tmp[0]
+        GLES30.glGenVertexArrays(1, tmp, 0); partVao = tmp[0]
+        GLES30.glBindVertexArray(partVao)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, partVbo)
+        val partStride = RenderPass.PARTICLE_STRIDE * 4
+        GLES30.glEnableVertexAttribArray(0)
+        GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, partStride, 0)
+        GLES30.glEnableVertexAttribArray(1)
+        GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, partStride, 8)
+        GLES30.glEnableVertexAttribArray(2)
+        GLES30.glVertexAttribPointer(2, 4, GLES30.GL_FLOAT, false, partStride, 16)
 
         GLES30.glGenBuffers(1, tmp, 0); quadVbo = tmp[0]
         GLES30.glGenVertexArrays(1, tmp, 0); quadVao = tmp[0]
@@ -472,7 +547,13 @@ internal class GlRenderer {
     }
 
     private fun targetsFor(w: Int, h: Int): Targets {
-        targets.firstOrNull { it.w == w && it.h == h }?.let { it.lastUsed = frameNo; return it }
+        targets.firstOrNull { it.w == w && it.h == h }?.let {
+            it.lastUsed = frameNo
+            // The multisampling lever may have moved since this set was built.
+            val want = wantSamples()
+            if (it.msSamples != want) applyMultisample(it, want)
+            return it
+        }
         // Drop the least recently used set when too many sizes pile up.
         if (targets.size >= 3) {
             val old = targets.minByOrNull { it.lastUsed }!!
@@ -481,36 +562,11 @@ internal class GlRenderer {
         }
         val t = Targets(w, h)
         t.lastUsed = frameNo
-        if (samples > 1) {
-            GLES30.glGenFramebuffers(1, tmp, 0); t.msFbo = tmp[0]
-            GLES30.glGenRenderbuffers(1, tmp, 0); t.msColor = tmp[0]
-            GLES30.glGenRenderbuffers(1, tmp, 0); t.msDepth = tmp[0]
-            GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.msColor)
-            GLES30.glRenderbufferStorageMultisample(GLES30.GL_RENDERBUFFER, samples, GLES30.GL_RGBA8, w, h)
-            GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.msDepth)
-            GLES30.glRenderbufferStorageMultisample(GLES30.GL_RENDERBUFFER, samples, GLES30.GL_DEPTH_COMPONENT24, w, h)
-            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.msFbo)
-            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_RENDERBUFFER, t.msColor)
-            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, t.msDepth)
-            if (GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) != GLES30.GL_FRAMEBUFFER_COMPLETE) {
-                Log.w(TAG, "MSAA framebuffer incomplete; rendering without multisampling")
-                samples = 0
-                tmp[0] = t.msFbo; GLES30.glDeleteFramebuffers(1, tmp, 0)
-                tmp[0] = t.msColor; GLES30.glDeleteRenderbuffers(1, tmp, 0)
-                tmp[0] = t.msDepth; GLES30.glDeleteRenderbuffers(1, tmp, 0)
-                t.msFbo = 0
-            }
-        }
         GLES30.glGenFramebuffers(1, tmp, 0); t.sceneFbo = tmp[0]
         t.sceneTex = colorTexture(w, h)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.sceneFbo)
         GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, t.sceneTex, 0)
-        if (t.msFbo == 0) {
-            GLES30.glGenRenderbuffers(1, tmp, 0); t.sceneDepth = tmp[0]
-            GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.sceneDepth)
-            GLES30.glRenderbufferStorage(GLES30.GL_RENDERBUFFER, GLES30.GL_DEPTH_COMPONENT24, w, h)
-            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, t.sceneDepth)
-        }
+        applyMultisample(t, wantSamples())
         // The bloom chain: each octave half the size of the one before, down to about 1/32.
         var bw = w / 4
         var bh = h / 4
@@ -529,6 +585,54 @@ internal class GlRenderer {
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         targets += t
         return t
+    }
+
+    /**
+     * Gives [t] multisampled buffers of [want] samples, or none (0): the scene is then drawn
+     * straight into the scene target with a depth buffer of its own. Replaces whatever [t] had,
+     * so the multisampling lever can move while the app runs.
+     */
+    private fun applyMultisample(t: Targets, want: Int) {
+        if (t.msFbo != 0) { tmp[0] = t.msFbo; GLES30.glDeleteFramebuffers(1, tmp, 0); t.msFbo = 0 }
+        if (t.msColor != 0) { tmp[0] = t.msColor; GLES30.glDeleteRenderbuffers(1, tmp, 0); t.msColor = 0 }
+        if (t.msDepth != 0) { tmp[0] = t.msDepth; GLES30.glDeleteRenderbuffers(1, tmp, 0); t.msDepth = 0 }
+        if (t.sceneDepth != 0) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.sceneFbo)
+            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, 0)
+            tmp[0] = t.sceneDepth; GLES30.glDeleteRenderbuffers(1, tmp, 0); t.sceneDepth = 0
+        }
+        var n = want
+        if (n > 1) {
+            GLES30.glGenFramebuffers(1, tmp, 0); t.msFbo = tmp[0]
+            GLES30.glGenRenderbuffers(1, tmp, 0); t.msColor = tmp[0]
+            GLES30.glGenRenderbuffers(1, tmp, 0); t.msDepth = tmp[0]
+            GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.msColor)
+            GLES30.glRenderbufferStorageMultisample(GLES30.GL_RENDERBUFFER, n, GLES30.GL_RGBA8, t.w, t.h)
+            GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.msDepth)
+            GLES30.glRenderbufferStorageMultisample(GLES30.GL_RENDERBUFFER, n, GLES30.GL_DEPTH_COMPONENT24, t.w, t.h)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.msFbo)
+            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_RENDERBUFFER, t.msColor)
+            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, t.msDepth)
+            if (GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) != GLES30.GL_FRAMEBUFFER_COMPLETE) {
+                Log.w(TAG, "MSAA framebuffer incomplete; rendering without multisampling")
+                msaaBroken = true
+                tmp[0] = t.msFbo; GLES30.glDeleteFramebuffers(1, tmp, 0)
+                tmp[0] = t.msColor; GLES30.glDeleteRenderbuffers(1, tmp, 0)
+                tmp[0] = t.msDepth; GLES30.glDeleteRenderbuffers(1, tmp, 0)
+                t.msFbo = 0
+                t.msColor = 0
+                t.msDepth = 0
+                n = 0
+            }
+        }
+        if (t.msFbo == 0) {
+            GLES30.glGenRenderbuffers(1, tmp, 0); t.sceneDepth = tmp[0]
+            GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.sceneDepth)
+            GLES30.glRenderbufferStorage(GLES30.GL_RENDERBUFFER, GLES30.GL_DEPTH_COMPONENT24, t.w, t.h)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.sceneFbo)
+            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, t.sceneDepth)
+        }
+        t.msSamples = n
     }
 
     private fun colorTexture(w: Int, h: Int): Int {
@@ -605,7 +709,7 @@ internal class GlRenderer {
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.reflTex)
         // Streaked a little more up and down the screen, like light on a polished floor.
         GLES30.glUniform2f(down.loc("uTexel"), 1f / t.reflW, 2f / t.reflH)
-        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+        drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.reflFbo)
         GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardColor, 0)
         GLES30.glViewport(0, 0, t.reflW, t.reflH)
@@ -614,7 +718,7 @@ internal class GlRenderer {
         GLES30.glUniform1f(up.loc("uWeight"), 1f)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.refl2Tex)
         GLES30.glUniform2f(up.loc("uTexel"), 1f / w2, 1.5f / h2)
-        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+        drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
         GLES30.glBindVertexArray(0)
     }
 
@@ -623,6 +727,8 @@ internal class GlRenderer {
     /** Draws every pass into the window surface ([surfaceW] × [surfaceH]). */
     fun drawFrame(passes: Collection<RenderPass>, surfaceW: Int, surfaceH: Int) {
         frameNo++
+        drawCalls = 0
+        vertsDrawn = 0L
         if (frameNo % 120 == 0L) collectGarbage()
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         GLES30.glViewport(0, 0, surfaceW, surfaceH)
@@ -682,13 +788,17 @@ internal class GlRenderer {
         val rw = (p.vw * scale).roundToInt().coerceAtLeast(16)
         val rh = (p.vh * scale).roundToInt().coerceAtLeast(16)
         val t = targetsFor(rw, rh)
+        msActive = t.msFbo != 0
+        // Bloom octaves in use this frame: the chain may be longer than the lever asks for.
+        val levels = minOf(t.bloomLevels, bloomOctaves.coerceAtLeast(1))
         reflReady = false
         streamed = false
         passW = rw
         passH = rh
         reflStreak = 0f
-        if ((p.floorReflect > 0f || p.floorReflectMatte > 0f) && !floorReflectOff) {
-            if (p.floorMirror) {
+        if ((p.floorReflect > 0f || p.floorReflectMatte > 0f) && !floorReflectOff && reflections != GfxQuality.Reflections.OFF) {
+            // Real mirror images only where the scene asks and the rung allows; else streaks.
+            if (p.floorMirror && reflections == GfxQuality.Reflections.MIRROR) {
                 if (p.glowDraws > 0) {
                     drawMirror(p, t)
                     reflReady = true
@@ -697,7 +807,7 @@ internal class GlRenderer {
             } else if (t.bloomDone) {
                 // Free streaks: last frame's softened glow (1/8 size) gathered up the screen.
                 reflReady = true
-                reflTex = t.bloomTex[if (t.bloomLevels > 1) 1 else 0]
+                reflTex = t.bloomTex[if (levels > 1) 1 else 0]
                 reflStreak = STREAK
             }
         }
@@ -712,6 +822,7 @@ internal class GlRenderer {
 
         drawBackground(p)
         drawScene(p)
+        drawParticles(p)
         if (reflReady) {
             // Let go of the reflection source before the bloom chain draws into it.
             GLES30.glActiveTexture(GLES30.GL_TEXTURE3)
@@ -747,8 +858,7 @@ internal class GlRenderer {
             GLES30.glUniform1i(bright.loc("uTex"), 0)
             GLES30.glUniform2f(bright.loc("uTexel"), 1f / rw, 1f / rh)
             GLES30.glUniform1f(bright.loc("uThreshold"), p.bloomThreshold)
-            GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
-            val levels = t.bloomLevels
+            drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             GLES30.glUseProgram(downProg)
             GLES30.glUniform1i(down.loc("uTex"), 0)
             for (i in 1 until levels) {
@@ -757,7 +867,7 @@ internal class GlRenderer {
                 GLES30.glViewport(0, 0, t.bloomW[i], t.bloomH[i])
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTex[i - 1])
                 GLES30.glUniform2f(down.loc("uTexel"), 1f / t.bloomW[i - 1], 1f / t.bloomH[i - 1])
-                GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+                drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             }
             GLES30.glUseProgram(upProg)
             GLES30.glUniform1i(up.loc("uTex"), 0)
@@ -775,7 +885,7 @@ internal class GlRenderer {
                 }
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTex[i + 1])
                 GLES30.glUniform2f(up.loc("uTexel"), 1f / t.bloomW[i + 1], 1f / t.bloomH[i + 1])
-                GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+                drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             }
             GLES30.glDisable(GLES30.GL_BLEND)
             t.bloomDone = true
@@ -799,9 +909,9 @@ internal class GlRenderer {
         // (a little more, since the wide halo is fainter per pixel, but not so much that big
         // bright areas such as a daytime sky turn hazy).
         val w = p.bloomRadius
-        var sum = if (t.bloomLevels > 1) BLOOM_CORE else 1f
+        var sum = if (levels > 1) BLOOM_CORE else 1f
         var wk = 1f
-        for (i in 1 until t.bloomLevels) {
+        for (i in 1 until levels) {
             wk *= w
             sum += wk
         }
@@ -811,9 +921,45 @@ internal class GlRenderer {
         GLES30.glUniform1f(comp.loc("uVignette"), p.vignette)
         GLES30.glUniform1f(comp.loc("uSharpen"), p.sharpen)
         GLES30.glUniform1f(comp.loc("uGrade"), p.grade)
-        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+        drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
+        GLES30.glBindVertexArray(0)
+    }
+
+    /**
+     * Draws the pass's screen-space particles into the scene image, before it is resolved and
+     * the bloom is taken from it, so bright sparks and confetti glow like neon. Soft additive
+     * glows go first, then the particles alpha-blended, as the 2D fallback paints them.
+     */
+    private fun drawParticles(p: RenderPass) {
+        val n = p.particleVertCount
+        if (n == 0 || !particlesOk) return
+        val floats = n * RenderPass.PARTICLE_STRIDE
+        val fb = floatBuffer(floats)
+        fb.put(p.particleVerts, 0, floats).position(0)
+        GLES30.glUseProgram(particleProg)
+        GLES30.glBindVertexArray(partVao)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, partVbo)
+        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, floats * 4, fb, GLES30.GL_STREAM_DRAW)
+        GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDepthMask(false)
+        GLES30.glDisable(GLES30.GL_CULL_FACE)
+        GLES30.glEnable(GLES30.GL_BLEND)
+        val uSoft = particle.loc("uSoft")
+        val halo = p.particleHaloCount.coerceIn(0, n)
+        if (halo > 0) {
+            GLES30.glUniform1f(uSoft, 1f)
+            GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE)
+            drawArrays(GLES30.GL_TRIANGLES, 0, halo)
+        }
+        if (n > halo) {
+            GLES30.glUniform1f(uSoft, 0f)
+            GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+            drawArrays(GLES30.GL_TRIANGLES, halo, n - halo)
+        }
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glDepthMask(true)
         GLES30.glBindVertexArray(0)
     }
 
@@ -844,7 +990,7 @@ internal class GlRenderer {
         GLES30.glDisable(GLES30.GL_DEPTH_TEST)
         GLES30.glDepthMask(false)
         GLES30.glDisable(GLES30.GL_BLEND)
-        for (i in 0 until n) GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, i * 4, 4)
+        for (i in 0 until n) drawArrays(GLES30.GL_TRIANGLE_STRIP, i * 4, 4)
         GLES30.glDepthMask(true)
     }
 
@@ -984,7 +1130,7 @@ internal class GlRenderer {
                 setCull(false)
                 bindTexture(p.textures[index])
                 GLES30.glBindVertexArray(streamVao)
-                GLES30.glDrawArrays(GLES30.GL_TRIANGLES, p.draws[o + 3], p.draws[o + 4])
+                drawArrays(GLES30.GL_TRIANGLES, p.draws[o + 3], p.draws[o + 4])
             } else {
                 val io = index * 22
                 val model = p.models[p.instances[io + 21].toInt()]
@@ -1000,7 +1146,7 @@ internal class GlRenderer {
                     if (g[go + 1] != blend || (mirror && g[go + 5] == 0)) continue
                     setCull(g[go + 2] == 1)
                     bindTexture(mesh.textures[g[go]])
-                    GLES30.glDrawArrays(GLES30.GL_TRIANGLES, g[go + 3], g[go + 4])
+                    drawArrays(GLES30.GL_TRIANGLES, g[go + 3], g[go + 4])
                 }
             }
         }
@@ -1025,7 +1171,7 @@ internal class GlRenderer {
             Blend.OPAQUE.ordinal -> {
                 GLES30.glDisable(GLES30.GL_BLEND)
                 GLES30.glDepthMask(true)
-                val ms = samples > 1 && !mirror
+                val ms = msActive && !mirror
                 if (ms) GLES30.glEnable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
                 GLES30.glUniform1f(uCut, if (ms) 0.08f else 0.5f)
                 GLES30.glUniform1f(uGlass, 0f)

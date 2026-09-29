@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.pocketarcade.engine.r3d.RenderPass
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -18,6 +19,20 @@ class Particles(private val capacity: Int = 600) {
         const val SQUARE = 0
         const val CONFETTI = 1
         const val SPARKLE = 2
+
+        /** Half the width of the soft glow under a glowing particle, as a multiple of its size. */
+        const val GLOW_SIZE = 1.3f
+
+        /**
+         * How strongly each shape's glow shows (a share of its alpha, before it is weighted by
+         * how bright the colour is). Confetti has none: its bright colours bloom on their own.
+         */
+        const val GLOW_SQUARE = 0.30f
+        const val GLOW_SPARKLE = 0.50f
+        const val GLOW_CONFETTI = 0f
+
+        /** Glows fainter than this are not worth a quad. */
+        private const val GLOW_MIN = 0.01f
     }
 
     private val x = FloatArray(capacity)
@@ -110,6 +125,72 @@ class Particles(private val capacity: Int = 600) {
             i++
         }
     }
+
+    /**
+     * Records the particles into [pass] as screen-space quads, to be drawn by the GL thread
+     * over the 3D picture and before its bloom, so bright sparks and confetti glow. Positions
+     * and sizes are in field units ([fieldW] × [fieldH], the area the pass covers), and shapes,
+     * fading and colours match [draw]. Each bright square or sparkle also gets a soft additive
+     * glow underneath. Allocation-free once the pass's arrays have grown.
+     */
+    fun recordGl(pass: RenderPass, fieldW: Float, fieldH: Float) {
+        // Clip space spans -1..1 over the field: this many clip units per field unit.
+        val ux = 2f / fieldW
+        val uy = 2f / fieldH
+        // Glows first (they are drawn additively under the particles), then the particles.
+        for (i in 0 until count) {
+            val gain = when (shape[i]) {
+                SPARKLE -> GLOW_SPARKLE
+                CONFETTI -> GLOW_CONFETTI
+                else -> GLOW_SQUARE
+            }
+            if (gain <= 0f) continue
+            val t = life[i] / maxLife[i]
+            val argb = color[i]
+            val r = (argb shr 16 and 255) / 255f
+            val g = (argb shr 8 and 255) / 255f
+            val b = (argb and 255) / 255f
+            // A dark colour has nothing to glow with.
+            val lum = maxOf(r, maxOf(g, b))
+            val a = fade(t) * (argb ushr 24) / 255f * gain * lum * lum
+            if (a < GLOW_MIN) continue
+            val s = if (shape[i] == SPARKLE) size[i] * (0.5f + 0.5f * abs(sin(phase[i]))) else size[i] * (0.4f + 0.6f * t)
+            val half = s * GLOW_SIZE
+            pass.addParticleQuad(x[i] * ux - 1f, 1f - y[i] * uy, half * ux, half * uy, r, g, b, a)
+        }
+        pass.particleHaloCount = pass.particleVertCount
+        for (i in 0 until count) {
+            val t = life[i] / maxLife[i]
+            val argb = color[i]
+            val r = (argb shr 16 and 255) / 255f
+            val g = (argb shr 8 and 255) / 255f
+            val b = (argb and 255) / 255f
+            val a = fade(t) * (argb ushr 24) / 255f
+            val cx = x[i] * ux - 1f
+            val cy = 1f - y[i] * uy
+            when (shape[i]) {
+                CONFETTI -> {
+                    val w = size[i] * (0.25f + 0.75f * abs(sin(phase[i])))
+                    val h = size[i] * 0.6f
+                    pass.addParticleQuad(cx, cy, w / 2f * ux, h / 2f * uy, r, g, b, a)
+                }
+                SPARKLE -> {
+                    val s = size[i] * (0.5f + 0.5f * abs(sin(phase[i])))
+                    val thin = (s * 0.34f).coerceAtLeast(1f)
+                    // Two bars crossing, each 2s long and thin wide.
+                    pass.addParticleQuad(cx, cy, s * ux, thin / 2f * uy, r, g, b, a)
+                    pass.addParticleQuad(cx, cy, thin / 2f * ux, s * uy, r, g, b, a)
+                }
+                else -> {
+                    val s = size[i] * (0.4f + 0.6f * t)
+                    pass.addParticleQuad(cx, cy, s / 2f * ux, s / 2f * uy, r, g, b, a)
+                }
+            }
+        }
+    }
+
+    /** A particle's opacity over its life: full, then fading out over the last 30%. */
+    private fun fade(t: Float): Float = if (t < 0.3f) t / 0.3f else 1f
 
     /** Draws with world→screen transform: screen = origin + world * scale. */
     fun draw(scope: DrawScope, originX: Float = 0f, originY: Float = 0f, scale: Float = 1f) {
