@@ -101,6 +101,9 @@ private val COUNT_COLORS = intArrayOf(Pal.PINK, Pal.ORANGE, Pal.YELLOW)
 private const val COUNT_PUNCH = 0.12f
 private const val GO_PUNCH = 0.35f
 
+/** The colours the NEW HIGH SCORE banner cycles through. */
+private val RAINBOW = intArrayOf(Pal.PINK, Pal.YELLOW, Pal.CYAN, Pal.LIME, Pal.ORANGE)
+
 /** A tap on the results this long after they begin skips the reveal (not sooner: a last fast tap of the round must not). */
 private const val SKIP_AFTER = 0.6f
 
@@ -935,8 +938,7 @@ private fun drawResults(scope: DrawScope, state: HostState, game: MiniGame) {
             val since = t - ResultsPlan.BEST_AT
             val land = clamp01(since / 0.28f)
             if (state.newHigh) {
-                val rainbow = intArrayOf(Pal.PINK, Pal.YELLOW, Pal.CYAN, Pal.LIME, Pal.ORANGE)
-                val c = rainbow[((state.hostTime * 10f).toInt()) % rainbow.size]
+                val c = RAINBOW[((state.hostTime * 10f).toInt()) % RAINBOW.size]
                 val slam = if (motion) lerp(2.4f, 1f, easeOutBack(land)) else 1f
                 val pulse = 1f + 0.06f * sin(state.hostTime * 10f)
                 val size = 2.5f * slam * pulse

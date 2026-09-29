@@ -114,8 +114,9 @@ class CurrencyFx {
         f.kind = kind
         f.x0 = from.x
         f.y0 = from.y
-        f.x1 = to.x // Unspecified is NaN: resolved against the layer's size while it flies
-        f.y1 = to.y
+        // An unspecified target is NaN here and resolved against the layer's size (see aim).
+        f.x1 = if (to == Offset.Unspecified) Float.NaN else to.x
+        f.y1 = if (to == Offset.Unspecified) Float.NaN else to.y
         f.delay = delay
         f.t = 0f
         f.dur = duration.coerceAtLeast(0.1f)
