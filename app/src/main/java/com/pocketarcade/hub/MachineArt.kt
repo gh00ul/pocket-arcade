@@ -1,5 +1,6 @@
 package com.pocketarcade.hub
 
+import android.graphics.Bitmap
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.r3d.CanvasPainter
@@ -279,7 +280,8 @@ class MachineArt(val game: MiniGame) {
 
 /**
  * One cabinet's live screen: the game's attract loop, drawn with smooth shapes and real text,
- * and a "HI score" card every few seconds, with CRT scanlines.
+ * and a "HI score" card every few seconds, with CRT scanlines. The hall only repaints it while
+ * the cabinet is in view (see [MachineUnit.refresh]).
  */
 class LiveScreen(private val art: MachineArt, private val seed: Int) {
     private val units = art.screenUnits()
@@ -287,7 +289,8 @@ class LiveScreen(private val art: MachineArt, private val seed: Int) {
     private val tp by lazy { TexPaint((units.first * scale).toInt(), (units.second * scale).toInt()) }
     private val painter by lazy { CanvasPainter(tp, scale) }
     val texture: Texture by lazy { Texture((units.first * scale).toInt(), (units.second * scale).toInt()) }
-    private var frame = 0
+    /** Screens repaint on alternate frames; which ones is set by the seed so the whole hall doesn't do it on the same frame. */
+    private var frame = seed and 1
     private var bestText = ""
     private var bestShown = -1
 
@@ -309,10 +312,34 @@ class LiveScreen(private val art: MachineArt, private val seed: Int) {
             tp.fill(0xFF000000.toInt())
             art.game.drawAttract(painter, w, h, t + seed * 3.1f)
         }
-        // Scanlines and a soft glass sheen.
-        for (y in 0 until tp.h step 3) tp.rect(0f, y.toFloat(), tp.w.toFloat(), 1f, 0x33000000)
-        tp.radial(tp.w * 0.3f, tp.h * 0.2f, tp.w * 0.5f, 0x22FFFFFF, 0)
+        // Scanlines and a soft glass sheen: one draw of a pre-painted overlay, not a rect per line.
+        tp.canvas.drawBitmap(ScreenGlass.overlay(tp.w, tp.h), 0f, 0f, null)
         tp.update(texture)
+    }
+}
+
+/**
+ * The CRT scanlines and the soft sheen of the glass over a live screen, painted once for each
+ * screen size and shared by every screen of that size. Laid over the game's picture in a single
+ * draw call, this comes out the same as painting the lines and the gradient over it each frame
+ * (which took a rect per third row, some 60 to 80 of them, 30 times a second per screen).
+ */
+private object ScreenGlass {
+    /** Every third pixel row gets this dark line. */
+    const val LINE_COLOR = 0x33000000
+    const val LINE_GAP = 3
+    /** The sheen: a pale radial patch near the top left. */
+    const val SHEEN_COLOR = 0x22FFFFFF
+
+    private val sizes = HashMap<Long, TexPaint>()
+
+    fun overlay(w: Int, h: Int): Bitmap = synchronized(sizes) {
+        sizes.getOrPut(w.toLong() shl 32 or h.toLong()) {
+            val tp = TexPaint(w, h)
+            for (y in 0 until h step LINE_GAP) tp.rect(0f, y.toFloat(), w.toFloat(), 1f, LINE_COLOR)
+            tp.radial(w * 0.3f, h * 0.2f, w * 0.5f, SHEEN_COLOR, 0)
+            tp
+        }.bitmap
     }
 }
 
