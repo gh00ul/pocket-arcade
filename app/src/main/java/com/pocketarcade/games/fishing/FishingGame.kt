@@ -16,9 +16,11 @@ import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.clamp01
 import com.pocketarcade.engine.damp
 import com.pocketarcade.engine.easeOutCubic
+import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.r3d.Blend
 import com.pocketarcade.engine.r3d.Model
 import com.pocketarcade.engine.r3d.PointLight
+import com.pocketarcade.engine.r3d.Region
 import com.pocketarcade.engine.r3d.Renderer3D
 import com.pocketarcade.engine.r3d.Stage3D
 import com.pocketarcade.engine.r3d.TexKit
@@ -323,6 +325,20 @@ class FishingGame : BaseMiniGame() {
         const val SEP_RADIUS = 28f
         const val FLOCK_RADIUS = 70f
 
+        // Look (presentation only): the low sun, and how many of each little effect there are.
+        const val SUN_X = 330f
+        const val SUN_Y = 178f
+        const val SUN_Z = -440f
+        const val SPLASHES = 3
+        const val SPLASH_LIFE = 0.8f
+        const val DROPLETS = 9
+        const val FIREFLIES = 12
+        const val GLITTER = 26
+        /** Strengths of the sun's halo, the beams of light and the mist over the far water. */
+        const val HALO_ALPHA = 0.5f
+        const val SHAFT_ALPHA = 0.11f
+        const val MIST_ALPHA = 0.17f
+
         val SPLASH_COLORS = intArrayOf(Pal.WHITE, Pal.CYAN, Pal.SKY, 0xFFBFF4FF.toInt())
         val GOLD_COLORS = intArrayOf(Pal.GOLD, Pal.YELLOW, Pal.WHITE, Pal.ORANGE)
         val ATTRACT_FISH = intArrayOf(Pal.ORANGE, 0xFF6E8A2A.toInt(), Pal.GOLD)
@@ -427,6 +443,16 @@ class FishingGame : BaseMiniGame() {
     private val rSize = FloatArray(RIPPLES)
     private val rOn = BooleanArray(RIPPLES)
 
+    // Presentation only: splash sprays. Written by the game's splash events, read by render();
+    // a spray's droplets fly from hashes of its seed, never from the game's random numbers.
+    private val splashX = FloatArray(SPLASHES)
+    private val splashZ = FloatArray(SPLASHES)
+    private val splashAge = FloatArray(SPLASHES) { SPLASH_LIFE }
+    private val splashPower = FloatArray(SPLASHES)
+    private val splashSeed = IntArray(SPLASHES)
+    private var splashNext = 0
+    private var splashCount = 0
+
     // Lily pads (placed per round; they only decorate).
     private val padX = FloatArray(PADS)
     private val padZ = FloatArray(PADS)
@@ -472,6 +498,7 @@ class FishingGame : BaseMiniGame() {
         chargeT = 0f
         power = 0f
         lureX = DOCK_X; lureY = 0f; lureZ = DOCK_Z
+        splashAge.fill(SPLASH_LIFE)
         suitor = -1
         strikeAcc = 0f
         earlyAcc = 0f
@@ -636,6 +663,7 @@ class FishingGame : BaseMiniGame() {
         snapFlash = (snapFlash - dt * 2f).coerceAtLeast(0f)
         catchShowT = (catchShowT - dt).coerceAtLeast(0f)
         stepRipples(dt)
+        for (i in 0 until SPLASHES) if (splashAge[i] < SPLASH_LIFE) splashAge[i] += dt
         if (timeUp) {
             settleT += dt
             if (settleT > FishingTuning.SETTLE_FAILSAFE && phase != CastPhase.IDLE) {
@@ -714,6 +742,7 @@ class FishingGame : BaseMiniGame() {
         bootIgnored = false
         addRipple(lureX, lureZ, 44f, 1.2f)
         addRipple(lureX, lureZ, 24f, 0.8f)
+        splashAt(lureX, lureZ, 1f)
         if (stage.toField(lureX, 0f, lureZ, pt)) {
             particles.burst(pt[0], pt[1], 16, 40f, 150f, SPLASH_COLORS, 0.55f, 3.5f, grav = 380f, angleFrom = PI.toFloat() * 1.1f, angleTo = PI.toFloat() * 1.9f)
         }
@@ -1035,6 +1064,7 @@ class FishingGame : BaseMiniGame() {
         fx.haptics.tick()
         shake.add(0.08f)
         addRipple(f.x, f.z, 30f, 0.9f)
+        splashAt(f.x, f.z, 0.55f)
     }
 
     private fun snapLine(f: Fish) {
@@ -1058,6 +1088,7 @@ class FishingGame : BaseMiniGame() {
         play(Sfx.SPLASH, 0.6f, 1.2f)
         fx.haptics.tick()
         addRipple(f.x, f.z, 34f, 1f)
+        splashAt(f.x, f.z, 0.8f)
         if (stage.toField(f.x, 0f, f.z, pt)) popups.add("IT GOT AWAY!", pt[0], pt[1] - 30f, Color(Pal.LIGHTGRAY), size = 3f)
         recover()
     }
@@ -1070,6 +1101,7 @@ class FishingGame : BaseMiniGame() {
         tension = 0f
         play(Sfx.SPLASH, 0.9f, 0.8f)
         addRipple(f.x, f.z, 50f, 1.2f)
+        splashAt(f.x, f.z, 1.5f)
         if (stage.toField(f.x, 0f, f.z, pt)) {
             particles.burst(pt[0], pt[1], 26, 60f, 220f, SPLASH_COLORS, 0.7f, 4f, grav = 420f, angleFrom = PI.toFloat() * 1.05f, angleTo = PI.toFloat() * 1.95f)
         }
@@ -1340,6 +1372,17 @@ class FishingGame : BaseMiniGame() {
         rSize[slot] = size
     }
 
+    /** Starts a spray of droplets at ([x], [z]) on the water, [power] times a normal splash. */
+    private fun splashAt(x: Float, z: Float, power: Float) {
+        val i = splashNext
+        splashNext = (splashNext + 1) % SPLASHES
+        splashX[i] = x
+        splashZ[i] = z
+        splashAge[i] = 0f
+        splashPower[i] = power
+        splashSeed[i] = ++splashCount
+    }
+
     private fun stepRipples(dt: Float) {
         for (i in 0 until RIPPLES) {
             if (!rOn[i]) continue
@@ -1350,7 +1393,11 @@ class FishingGame : BaseMiniGame() {
 
     // ---------------------------------------------------------------- 3D presentation
 
-    private val sun = PointLight(360f, 260f, 120f, 1f, 0.92f, 0.75f, 900f, 0.35f)
+    /** The low sun's warm light over the pond (golden hour: long, warm, a little dim). */
+    private val sun = PointLight(360f, 260f, 120f, 1f, 0.72f, 0.42f, 900f, 0.42f)
+
+    /** The mist's wrapping texture view, fetched once. */
+    private val fogRegion: Region by lazy { FishingArt.fog }
     private val goldLight = PointLight(0f, 20f, 0f, 1f, 0.8f, 0.3f, 90f, 0f)
     private val xf = Xform()
     private val bankTex by lazy {
@@ -1372,12 +1419,15 @@ class FishingGame : BaseMiniGame() {
     override fun render(scope: DrawScope) {
         val r = stage.begin()
         val l = r.lighting
-        l.ambR = 0.72f; l.ambG = 0.74f; l.ambB = 0.78f
+        // Golden hour: soft violet shade, warm low sun. Bright enough that the fish still read.
+        l.ambR = 0.70f; l.ambG = 0.68f; l.ambB = 0.76f
         l.setDirection(-0.4f, 1f, 0.5f)
-        l.dirR = 0.55f; l.dirG = 0.52f; l.dirB = 0.45f
+        l.dirR = 0.62f; l.dirG = 0.49f; l.dirB = 0.35f
         l.points.clear()
         l.points += sun
-        r.gradient(0xFF4FA8E8.toInt(), 0xFFBFE6F5.toInt())
+        r.vignette = 0.3f
+        r.gradient(0xFF3D68AE.toInt(), 0xFFF3B27A.toInt())
+        drawSky(r)
         drawScenery(r)
         drawFish(r)
         drawPads(r)
@@ -1385,18 +1435,49 @@ class FishingGame : BaseMiniGame() {
         drawRod(r)
         drawBobber(r)
         drawWater(r)
+        drawMist(r)
+        drawGlitter(r)
         drawRipples(r)
+        drawSplashes(r)
         drawLine(r)
         drawAim(r)
         drawGlints(r)
+        drawFireflies(r)
         stage.present()
         drawHud(scope)
+    }
+
+    /**
+     * The low sun behind the far bank: a wide warm halo, its core, a band of horizon haze over the
+     * tree line and a few slow beams of light slanting down between the trees.
+     */
+    private fun drawSky(r: Renderer3D) {
+        val glow = TexKit.glow.full
+        val breathe = 1f + 0.05f * sin(time * 0.7f)
+        r.sprite(SUN_X, SUN_Y, SUN_Z, 640f, 470f, glow, blend = Blend.ADD, emissive = 1f, alpha = HALO_ALPHA * breathe, tint = 0xFFFF9A50.toInt())
+        r.sprite(SUN_X, SUN_Y, SUN_Z + 1f, 240f, 240f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.7f, tint = 0xFFFFD890.toInt())
+        r.sprite(SUN_X, SUN_Y, SUN_Z + 2f, 72f, 72f, TexKit.dot.full, blend = Blend.ADD, emissive = 1.2f, alpha = 0.95f, tint = 0xFFFFF4D0.toInt())
+        val haze = FishingArt.haze
+        r.quad(-620f, 200f, -418f, 980f, 200f, -418f, 980f, 40f, -418f, -620f, 40f, -418f, haze, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1f, alpha = 0.32f, cull = false, tint = 0xFFFFB068.toInt())
+        // Beams: each slants from near the sun down and away to the left, swelling and fading.
+        val shaft = FishingArt.shaft
+        for (i in 0 until 4) {
+            val xt = SUN_X - 30f + i * 26f
+            val xb = xt - 210f - i * 60f
+            val hwT = 14f
+            val hwB = 62f + i * 12f
+            val a = SHAFT_ALPHA * (0.65f + 0.35f * sin(time * 0.5f + i * 1.9f))
+            r.quad(
+                xt - hwT, 178f, -200f, xt + hwT, 178f, -200f, xb + hwB, 0f, -200f, xb - hwB, 0f, -200f, shaft, 0f, 0f, 1f,
+                blend = Blend.ADD, emissive = 1f, alpha = a, cull = false, tint = 0xFFFFC880.toInt(),
+            )
+        }
     }
 
     private fun drawScenery(r: Renderer3D) {
         // Distant tree line and hills.
         val tl = FishingArt.treeline
-        r.quad(-620f, 190f, -420f, 980f, 190f, -420f, 980f, -10f, -420f, -620f, -10f, -420f, tl, 0f, 0f, 1f, emissive = 0.85f)
+        r.quad(-620f, 190f, -420f, 980f, 190f, -420f, 980f, -10f, -420f, -620f, -10f, -420f, tl, 0f, 0f, 1f, emissive = 0.85f, tint = 0xFFFFDDB4.toInt())
         // Grass round the pond, with the pond cut out of it.
         r.quad(BANK_X0, 0.4f, BANK_Z0, BANK_X1, 0.4f, BANK_Z0, BANK_X1, 0.4f, BANK_Z1, BANK_X0, 0.4f, BANK_Z1, bankTex, 0f, 1f, 0f)
         // The pond bed.
@@ -1413,7 +1494,7 @@ class FishingGame : BaseMiniGame() {
         var k = 0
         while (k < trees.size) {
             val h = trees[k + 2]
-            r.billboard(trees[k], 0f, trees[k + 1], h * 0.75f, h, tree, flipX = k % 2 == 0, lean = 0.2f)
+            r.billboard(trees[k], 0f, trees[k + 1], h * 0.75f, h, tree, flipX = k % 2 == 0, lean = 0.2f, tint = 0xFFFFE6C4.toInt())
             k += 3
         }
         val reeds = FishingArt.reeds
@@ -1523,9 +1604,14 @@ class FishingGame : BaseMiniGame() {
             val z = u * u * buttZ + 2f * u * t * cz + t * t * tipNow[2]
             val w = 4.2f - 3.2f * t
             r.beam(px, py, pz, x, y, z, if (s <= 2) w + 1.6f else w, if (s <= 2) FishingArt.cork else FishingArt.rod)
+            // A warm sheen of low sun along the top of the blank.
+            if (s > 2) r.beam(px, py + w * 0.3f, pz, x, y + w * 0.3f, z, w * 0.3f, FishingArt.line, blend = Blend.ADD, emissive = 1f, alpha = 0.32f * (1f - t * 0.7f), tint = 0xFFFFE0B0.toInt())
             if (s in 3..9 && s % 2 == 1) r.sprite(x, y + w * 0.6f, z, w * 0.9f, w * 0.9f, TexKit.dot.full, tint = Pal.LIGHTGRAY)
             px = x; py = y; pz = z
         }
+        // The tip glints, and burns hotter as the rod bends under a hard-pulling fish.
+        val hot = if (phase == CastPhase.FIGHT) ((tension - 0.6f) / 0.4f).coerceIn(0f, 1f) else 0f
+        r.sprite(tipNow[0], tipNow[1] + 1f, tipNow[2], 9f + 12f * hot, 9f + 12f * hot, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = 0.3f + 0.5f * hot, tint = Pal.mix(0xFFFFE0B0.toInt(), Pal.RED, hot))
     }
 
     /** The float: at the line's end (hanging from the rod when nothing's cast). */
@@ -1541,6 +1627,17 @@ class FishingGame : BaseMiniGame() {
         val bx = if (phase == CastPhase.FIGHT) lureX else lineEnd[0]
         val bz = if (phase == CastPhase.FIGHT) lureZ else lineEnd[2]
         FishingArt.bobber.draw(r, Blend.OPAQUE, xf = xf.set(bx, y, bz, roll = if (phase == CastPhase.FIGHT) sin(time * 5f) * 0.5f else 0f))
+        if (phase == CastPhase.WAIT) {
+            val biting = suitor >= 0 && fish[suitor].mode == FishMode.BITE
+            if (biting) {
+                // The dive is the cue to strike: rings pulse out from the bobber, and it glows.
+                val k = (time * 3.2f).rem(1f)
+                r.flat(bx, bz, 0.9f, 16f + 46f * k, 16f + 46f * k, FishingArt.ripple, blend = Blend.ADD, emissive = 1f, alpha = (1f - k) * 0.9f, tint = Pal.YELLOW)
+                r.sprite(bx, y + 4f, bz, 24f, 24f, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = 0.4f + 0.3f * sin(time * 18f), tint = Pal.YELLOW)
+            } else {
+                r.sprite(bx, y + 3.5f, bz, 12f, 12f, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = 0.22f + 0.08f * sin(time * 2.4f), tint = 0xFFFF6A50.toInt())
+            }
+        }
     }
 
     /** Where the line ends: the lure, the hooked fish, or dangling under the rod tip. */
@@ -1583,6 +1680,39 @@ class FishingGame : BaseMiniGame() {
         r.quad(x0, 0.2f, z0, x1, 0.2f, z0, x1, 0.2f, z1, x0, 0.2f, z1, c, 0f, 1f, 0f, u0 = time * 3f, v0 = -time * 6f, u1 = time * 3f + cw * 5f, v1 = -time * 6f + cw * 7f, blend = Blend.ADD, emissive = 1f, alpha = 0.1f, cull = false)
     }
 
+    /** A bank of mist drifting over the far water (a horizontal sheet that fades out at its edges). */
+    private fun drawMist(r: Renderer3D) {
+        val m = time * 4f
+        r.quad(
+            POND_CX - POND_RX, 7f, POND_CZ - POND_RZ - 10f, POND_CX + POND_RX, 7f, POND_CZ - POND_RZ - 10f,
+            POND_CX + POND_RX, 7f, POND_CZ + 10f, POND_CX - POND_RX, 7f, POND_CZ + 10f, fogRegion, 0f, 1f, 0f,
+            u0 = m, v0 = 0f, u1 = m + 256f, v1 = 32f, blend = Blend.ALPHA, emissive = 0.9f, alpha = MIST_ALPHA, cull = false, tint = 0xFFFFE2C8.toInt(),
+        )
+    }
+
+    /** The sun's glitter on the water: a broad warm sheen and a scatter of twinkling streaks along the path to the sun. */
+    private fun drawGlitter(r: Renderer3D) {
+        // The glowing sky reflected in the far water.
+        r.quad(
+            POND_CX - POND_RX, 0.6f, POND_CZ - POND_RZ, POND_CX + POND_RX, 0.6f, POND_CZ - POND_RZ,
+            POND_CX + POND_RX, 0.6f, 200f, POND_CX - POND_RX, 0.6f, 200f, FishingArt.haze, 0f, 1f, 0f,
+            blend = Blend.ADD, emissive = 1f, alpha = 0.16f, cull = false, tint = 0xFFFF9A58.toInt(),
+        )
+        r.flat(246f, 240f, 0.8f, 130f, 520f, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = 0.10f, tint = 0xFFFFB060.toInt())
+        val dot = TexKit.dot.full
+        for (i in 0 until GLITTER) {
+            val z = 20f + hash01(i, 301) * 500f
+            val t = (800f - z) / 1230f
+            val spread = 10f + (560f - z).coerceAtLeast(0f) * 0.05f + 30f * (1f - t)
+            val x = 180f + 150f * t + (hash01(i, 302) - 0.5f) * 2f * spread
+            val tw = sin(time * (1.6f + hash01(i, 303) * 3f) + hash01(i, 304) * 9f)
+            val a = if (tw > 0f) tw * tw * tw * tw else 0f
+            if (a < 0.02f) continue
+            val w = 6f + hash01(i, 305) * 12f
+            r.flat(x, z, 0.7f, w, w * 0.34f, dot, blend = Blend.ADD, emissive = 1f, alpha = 0.85f * a, tint = 0xFFFFF0D0.toInt())
+        }
+    }
+
     private fun drawRipples(r: Renderer3D) {
         val ring = FishingArt.ripple
         for (i in 0 until RIPPLES) {
@@ -1590,6 +1720,57 @@ class FishingGame : BaseMiniGame() {
             val k = rAge[i] / rLife[i]
             val s = rSize[i] * (0.3f + 0.9f * easeOutCubic(k))
             r.flat(rx[i], rz[i], 0.5f, s, s, ring, blend = Blend.ADD, emissive = 1f, alpha = 0.55f * (1f - k), tint = 0xFFDFF8FF.toInt())
+            // A second, smaller wave following the first.
+            val k2 = (k - 0.18f) / 0.82f
+            if (k2 > 0f) {
+                val s2 = rSize[i] * (0.3f + 0.75f * easeOutCubic(k2)) * 0.7f
+                r.flat(rx[i], rz[i], 0.5f, s2, s2, ring, blend = Blend.ADD, emissive = 1f, alpha = 0.3f * (1f - k2), tint = 0xFFDFF8FF.toInt())
+            }
+        }
+    }
+
+    /** Sprays: droplets thrown up from a splash, each on its own arc, plus a bright column at the start. */
+    private fun drawSplashes(r: Renderer3D) {
+        val dot = TexKit.dot.full
+        val glow = TexKit.glow.full
+        for (i in 0 until SPLASHES) {
+            val t = splashAge[i]
+            if (t >= SPLASH_LIFE) continue
+            val k = t / SPLASH_LIFE
+            val pw = splashPower[i]
+            val seed = splashSeed[i] * 7
+            val x = splashX[i]
+            val z = splashZ[i]
+            if (t < 0.25f) {
+                val c = 1f - t / 0.25f
+                r.sprite(x, 8f + t * 60f * pw, z, 10f * pw, 26f * pw * (1f - 0.3f * (1f - c)), glow, blend = Blend.ADD, emissive = 1f, alpha = 0.6f * c, tint = 0xFFE8FFFF.toInt())
+            }
+            for (n in 0 until DROPLETS) {
+                val ang = hash01(n, seed + 1) * 6.2832f
+                val out = (14f + hash01(n, seed + 2) * 30f) * pw
+                val up = (46f + hash01(n, seed + 3) * 70f) * pw
+                val y = up * t - 0.5f * 300f * t * t
+                if (y < 0f) continue
+                val sz = 2.4f + hash01(n, seed + 4) * 2f
+                r.sprite(x + kotlin.math.cos(ang) * out * t, y + 1f, z + kotlin.math.sin(ang) * out * t * 0.6f, sz, sz, dot, blend = Blend.ADD, emissive = 1f, alpha = 0.9f * (1f - k), tint = 0xFFEAFBFF.toInt())
+            }
+        }
+    }
+
+    /** Fireflies drifting over the far bank and the reeds, blinking on and off. */
+    private fun drawFireflies(r: Renderer3D) {
+        val dot = TexKit.dot.full
+        val glow = TexKit.glow.full
+        for (i in 0 until FIREFLIES) {
+            val a = PI.toFloat() * 0.9f + hash01(i, 201) * PI.toFloat() * 1.2f
+            val ring = 8f + hash01(i, 202) * 70f
+            val x = POND_CX + cos(a) * (POND_RX + ring) + sin(time * 0.5f + i) * 10f
+            val z = POND_CZ + sin(a) * (POND_RZ + ring * 0.6f) + cos(time * 0.4f + i * 1.3f) * 10f
+            val y = 10f + hash01(i, 203) * 44f + sin(time * 0.8f + i * 2f) * 6f
+            val b = 0.5f + 0.5f * sin(time * 2.2f + i * 1.9f)
+            val a3 = b * b * b
+            r.sprite(x, y, z, 3.6f, 3.6f, dot, blend = Blend.ADD, emissive = 1f, alpha = 0.15f + 0.85f * a3, tint = 0xFFDFFF80.toInt())
+            r.sprite(x, y, z, 17f, 17f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.5f * a3, tint = 0xFFC8FF60.toInt())
         }
     }
 
@@ -1608,6 +1789,9 @@ class FishingGame : BaseMiniGame() {
         val len = sqrt((ex - sx) * (ex - sx) + (ey - sy) * (ey - sy) + (ez - sz) * (ez - sz))
         val sag = (1f - tight) * len * 0.12f
         val color = if (phase == CastPhase.FIGHT && tension > FishingTuning.SAFE_HIGH) Pal.mix(Pal.WHITE, Pal.RED, (tension - FishingTuning.SAFE_HIGH) * 5f) else Pal.WHITE
+        // A glow along the line as it comes under strain: cool, then warm, then hot, flickering at the snap.
+        val strain = if (phase == CastPhase.FIGHT) (((tension - 0.55f) / 0.45f).coerceIn(0f, 1f)).let { it * it * (if (tension > FishingTuning.SNAP_TENSION - 0.05f) 0.7f + 0.3f * sin(time * 50f) else 1f) } else 0f
+        val glowCol = Pal.mix(Pal.YELLOW, Pal.RED, ((tension - 0.85f) * 6f).coerceIn(0f, 1f))
         val segs = 8
         var px = sx
         var py = sy
@@ -1618,6 +1802,7 @@ class FishingGame : BaseMiniGame() {
             val y = sy + (ey - sy) * t - sag * 4f * t * (1f - t)
             val z = sz + (ez - sz) * t
             r.beam(px, py, pz, x, y, z, 0.9f, FishingArt.line, blend = Blend.ALPHA, emissive = 1f, alpha = 0.85f, tint = color)
+            if (strain > 0.02f) r.beam(px, py, pz, x, y, z, 3.4f, FishingArt.line, blend = Blend.ADD, emissive = 1f, alpha = strain * 0.45f, tint = glowCol)
             px = x; py = y; pz = z
         }
     }
@@ -1655,7 +1840,14 @@ class FishingGame : BaseMiniGame() {
         }
         if (phase == CastPhase.LANDING) {
             val k = clamp01(phaseT / FishingTuning.LAND_SECONDS)
-            r.sprite(showX, showY, showZ, 120f * k, 120f * k, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.5f * k, tint = if (hooked >= 0 && fish[hooked].species == 3) Pal.GOLD else Pal.CREAM)
+            val gold = hooked >= 0 && fish[hooked].species == 3
+            r.sprite(showX, showY, showZ, 120f * k, 120f * k, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.5f * k, tint = if (gold) Pal.GOLD else Pal.CREAM)
+            // Sparkles circling the catch as it is held up.
+            for (n in 0 until 8) {
+                val ang = time * 2.4f + n * 0.7854f
+                val rad = 30f + 26f * k
+                r.sprite(showX + cos(ang) * rad, showY + sin(ang) * rad * 0.55f + 6f, showZ + 4f, 6f, 6f, TexKit.dot.full, blend = Blend.ADD, emissive = 1f, alpha = 0.9f * k * (0.5f + 0.5f * sin(time * 9f + n)), tint = if (gold) Pal.YELLOW else Pal.WHITE)
+            }
         }
     }
 
@@ -1687,6 +1879,12 @@ class FishingGame : BaseMiniGame() {
             }
             drawCircle(Color(0xFF0E1622.toInt()), REEL_R + 8f, c, alpha = 0.88f)
             drawCircle(Color(0xFF8A96AA.toInt()), REEL_R + 6f, c, style = rimStroke)
+            // A knurled edge (a tick every 15 degrees) and a sheen catching the low sun.
+            for (k in 0 until 24) {
+                val ang = k * TAU / 24f
+                drawLine(Color(0xFF56647E.toInt()), Offset(REEL_CX + cos(ang) * (REEL_R + 2f), REEL_CY + sin(ang) * (REEL_R + 2f)), Offset(REEL_CX + cos(ang) * (REEL_R + 9f), REEL_CY + sin(ang) * (REEL_R + 9f)), strokeWidth = 2f)
+            }
+            drawArc(Color.White, 195f, 75f, false, Offset(REEL_CX - REEL_R - 6f, REEL_CY - REEL_R - 6f), Size((REEL_R + 6f) * 2f, (REEL_R + 6f) * 2f), alpha = 0.3f, style = rimStroke)
             drawCircle(Color(0xFF26344A.toInt()), REEL_R * 0.66f, c)
             drawCircle(Color(0xFF3E5270.toInt()), REEL_R * 0.66f, c, style = thinStroke)
             val a = crank.angle
@@ -1750,6 +1948,7 @@ class FishingGame : BaseMiniGame() {
                         else -> Pal.LIME
                     }
                     drawRect(Color(col), Offset(x + 4f, ty), Size(w - 8f, top + h - ty))
+                    drawRect(Color(col), Offset(x - 2f, ty - 6f), Size(w + 4f, 12f), alpha = 0.22f)
                     drawRect(Color.White, Offset(x - 5f, ty - 2f), Size(w + 10f, 4f))
                     if (strainT > 0f && (time * 12f).toInt() % 2 == 0) {
                         drawRect(Color(Pal.RED), Offset(x - 4f, top - 4f), Size(w + 8f, h + 8f), style = rimStroke)
@@ -1881,16 +2080,47 @@ class FishingGame : BaseMiniGame() {
     // ---------------------------------------------------------------- attract mode
 
     override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) {
+        // A pond at golden hour in miniature: a warm sky and low sun over a tree line, the water
+        // glittering along the path to the sun, fish circling under the surface, and a rod whose
+        // float dives every few seconds (rings, a splash and a jumping fish). Fireflies blink.
         val wf = w.toFloat()
         val hf = h.toFloat()
-        // Sky, far bank and the pond.
-        p.fill(0f, 0f, wf, hf * 0.3f, Color(0xFF4FA8E8.toInt()))
-        p.fill(0f, hf * 0.22f, wf, hf * 0.12f, Color(0xFF2E7A36.toInt()))
-        p.fill(0f, hf * 0.3f, wf, hf * 0.7f, Color(0xFF1C6E7A.toInt()))
+        val horizon = hf * 0.3f
+        // Sky in warm bands, the sun with its halo, and the tree line.
+        p.fill(0f, 0f, wf, horizon, Color(0xFF3D68AE.toInt()))
+        p.fill(0f, hf * 0.09f, wf, hf * 0.08f, Color(0xFF8A5A98.toInt()))
+        p.fill(0f, hf * 0.17f, wf, hf * 0.08f, Color(0xFFE0905E.toInt()))
+        p.fill(0f, hf * 0.25f, wf, horizon - hf * 0.25f + 0.1f, Color(0xFFF3B27A.toInt()))
+        val sunX = wf * 0.74f
+        val sunY = hf * 0.2f
+        p.disc(sunX, sunY, 4.4f, Color(0xFFFFB068.toInt()), 0.16f)
+        p.disc(sunX, sunY, 2.9f, Color(0xFFFFD08C.toInt()), 0.30f)
+        p.disc(sunX, sunY, 1.5f, Color(0xFFFFF4D0.toInt()))
+        for (k in 0 until 9) {
+            val tx = k * wf / 8f
+            val th = hf * (0.10f + 0.06f * hash01(k, 3))
+            p.disc(tx, horizon - th * 0.2f, 2.3f + hash01(k, 4), Color(0xFF1F4A38.toInt()))
+            p.fill(tx - 1.6f, horizon - th, 3.2f, th, Color(0xFF1F4A38.toInt()), 0.9f)
+        }
+        p.fill(0f, horizon - 0.6f, wf, 0.6f, Color(0xFFFFC080.toInt()), 0.5f)
+        // The pond, a little darker towards the viewer, and a warm sheen under the sun.
+        for (y in 0 until (hf - horizon).toInt() + 1) {
+            val t = y / (hf - horizon)
+            p.fill(0f, horizon + y, wf, 1f, Color(Pal.mix(0xFF2E8088.toInt(), 0xFF135060.toInt(), t)))
+        }
+        p.fill(sunX - 2.2f, horizon, 4.4f, hf - horizon, Color(0xFFFFB060.toInt()), 0.10f)
+        // Glitter down the sun's path, and drifting streaks of ripple.
+        for (i in 0 until 16) {
+            val gy = horizon + 0.8f + hash01(i, 21) * (hf - horizon - 1.6f)
+            val spread = 0.8f + (gy - horizon) * 0.22f
+            val gx = sunX - (gy - horizon) * 0.3f + (hash01(i, 22) - 0.5f) * 2f * spread
+            val tw = sin(time * (1.5f + hash01(i, 23) * 2.5f) + hash01(i, 24) * 9f)
+            if (tw > 0.2f) p.fill(gx, gy, 0.9f + hash01(i, 25) * 1.4f, 0.28f, Color(0xFFFFF0D0.toInt()), tw)
+        }
         for (k in 0 until 4) {
             val y = hf * (0.42f + k * 0.14f)
             val x = ((time * (3f + k) + k * 7f) % (wf + 6f)) - 4f
-            p.fill(x, y, 3f, 0.4f, Color(0xFF8FE3E0.toInt()), alpha = 0.6f)
+            p.fill(x, y, 3f, 0.4f, Color(0xFF8FE3E0.toInt()), alpha = 0.5f)
         }
         // Fish circling under the surface.
         val colors = ATTRACT_FISH
@@ -1901,6 +2131,7 @@ class FishingGame : BaseMiniGame() {
             val dir = if (-sin(a) >= 0f) 1f else -1f
             p.disc(fx, fy, 1.3f, Color(colors[k]), alpha = 0.85f)
             p.disc(fx - dir * 1.6f, fy, 0.8f, Color(colors[k]), alpha = 0.85f)
+            p.disc(fx, fy + 0.9f, 1.7f, Color.Black, alpha = 0.10f)
         }
         // A rod from the corner, its line to a bobbing float that dives every few seconds.
         val cycle = time % 4f
@@ -1913,6 +2144,8 @@ class FishingGame : BaseMiniGame() {
             val t = s / steps.toFloat()
             p.fill(wf - 4.7f + (bx - wf + 4.7f) * t, 1.5f + (by - 1.5f) * t + t * (1f - t) * 2f, 0.35f, 0.35f, Color.White, alpha = 0.8f)
         }
+        val ringK = (time * 0.5f) % 1f
+        p.frame(bx - 1f - 2.4f * ringK, by + 0.1f - 0.5f * ringK, 2f + 4.8f * ringK, 1f + 1f * ringK, Color.White, alpha = 0.45f * (1f - ringK))
         p.disc(bx, by, 0.9f, Color(Pal.RED))
         p.fill(bx - 0.9f, by, 1.8f, 0.6f, Color.White)
         if (cycle > 3f) {
@@ -1920,6 +2153,14 @@ class FishingGame : BaseMiniGame() {
             val j = (cycle - 3f)
             p.disc(bx - 2f + j * 4f, by - sin(j * PI.toFloat()) * 5f, 1.4f, Color(Pal.GOLD))
             p.frame(bx - 3f, by - 0.5f, 6f, 1.5f, Color.White, alpha = 1f - j)
+            for (d in 0 until 5) p.px(bx - 1.5f + d * 0.8f, by - sin(j * PI.toFloat()) * (1.5f + d * 0.6f), Color(0xFFEAFBFF.toInt()), 1f - j)
+        }
+        // Fireflies over the far bank.
+        for (i in 0 until 6) {
+            val fx = wf * hash01(i, 31) + sin(time * 0.6f + i) * 1.2f
+            val fy = horizon - 1.2f - hash01(i, 32) * hf * 0.12f + cos(time * 0.5f + i * 1.7f) * 0.6f
+            val b = sin(time * 2.2f + i * 1.9f) * 0.5f + 0.5f
+            p.px(fx, fy, Color(0xFFDFFF80.toInt()), b * b)
         }
         if ((time * 1.5f).toInt() % 2 == 0) p.textCentered("GONE FISHING", wf / 2f, 1f, Color(Pal.YELLOW), tiny = true)
     }

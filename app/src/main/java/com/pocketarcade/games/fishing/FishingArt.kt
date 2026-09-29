@@ -12,6 +12,7 @@ import com.pocketarcade.engine.r3d.Texture
 import com.pocketarcade.engine.r3d.Xform
 import com.pocketarcade.engine.r3d.paintTexture
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -202,6 +203,58 @@ internal object FishingArt {
                 rect(0f, 34f + k * 8f, 256f, 30f, c)
             }
         }.full
+    }
+
+    // ------------------------------------------------------------------ light and air (no bitmaps)
+
+    /**
+     * A drifting bank of mist: it tiles sideways (whole numbers of waves across the width) and
+     * fades to nothing along the top and bottom edges, so a quad of it has no visible border.
+     * Alpha only; tint it when drawing.
+     */
+    val fog: Region by lazy {
+        val w = 128
+        val h = 32
+        val px = IntArray(w * h)
+        val tau = (2.0 * PI).toFloat()
+        for (y in 0 until h) for (x in 0 until w) {
+            val u = x / w.toFloat()
+            val v = (y + 0.5f) / h
+            val n = 0.5f + 0.22f * sin(tau * 2f * u + 0.7f + v * 1.9f) + 0.16f * sin(tau * 5f * u + 2.4f - v * 2.6f) + 0.1f * sin(tau * 11f * u + 4.1f)
+            val edge = sin(v * PI.toFloat()).coerceIn(0f, 1f)
+            val a = ((n - 0.28f) * 1.6f).coerceIn(0f, 1f) * edge * edge
+            px[y * w + x] = ((a * 255f).toInt().coerceIn(0, 255) shl 24) or 0xFFFFFF
+        }
+        Texture(w, h, px).also { it.repeat = true }.region(wrap = true)
+    }
+
+    /**
+     * A beam of low sun: soft at both sides, brightest near its top (the sun's end, v = 0) and
+     * fading away down its length. Alpha only, for additive drawing.
+     */
+    val shaft: Region by lazy {
+        val w = 16
+        val h = 32
+        val px = IntArray(w * h)
+        for (y in 0 until h) for (x in 0 until w) {
+            val v = (y + 0.5f) / h
+            val across = (1f - abs((x + 0.5f) / w * 2f - 1f)).coerceIn(0f, 1f)
+            val a = across * across * (1f - v) * (1f - v * 0.4f)
+            px[y * w + x] = ((a * 255f).toInt().coerceIn(0, 255) shl 24) or 0xFFFFFF
+        }
+        Texture(w, h, px).full
+    }
+
+    /** A band of warm horizon haze: brightest a little below its top, fading out both ways (alpha). */
+    val haze: Region by lazy {
+        val h = 24
+        val px = IntArray(4 * h)
+        for (y in 0 until h) for (x in 0 until 4) {
+            val v = (y + 0.5f) / h
+            val a = sin(v * PI.toFloat()).coerceIn(0f, 1f)
+            px[y * 4 + x] = (((a * a) * 255f).toInt().coerceIn(0, 255) shl 24) or 0xFFFFFF
+        }
+        Texture(4, h, px).full
     }
 
     /** Weathered dock planks, running away from the viewer. */
