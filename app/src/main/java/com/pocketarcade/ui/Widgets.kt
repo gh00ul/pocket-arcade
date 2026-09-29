@@ -79,10 +79,18 @@ fun ArcadeText(
     tiny: Boolean = false,
     centered: Boolean = false,
     alpha: Float = 1f,
+    /** If set, the text shrinks (never grows) to fit this width. */
+    maxWidth: Dp = Dp.Unspecified,
 ) {
     val density = LocalDensity.current
-    val u = with(density) { unit.toPx() }
     val lines = remember(text) { text.split('\n') }
+    var u = with(density) { unit.toPx() }
+    if (maxWidth != Dp.Unspecified) {
+        // Width is linear in the unit, shadow pad included, so one scale fits it exactly.
+        val natural = (lines.maxOfOrNull { ArcadeFont.width(it, u, tiny) } ?: 0f) + (if (shadow) u * 1.2f else 0f)
+        val limit = with(density) { maxWidth.toPx() }
+        if (natural > limit && natural > 0f) u *= limit / natural
+    }
     val gap = u * 3.2f
     val lineH = ArcadeFont.height(u, tiny) + gap
     val pad = if (shadow) u * 1.2f else 0f

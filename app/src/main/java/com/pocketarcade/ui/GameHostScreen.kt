@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -321,15 +322,6 @@ fun GameHostScreen(
             drawHost(this, state, game, topInset, bottomInset)
         }
 
-        // Exit button.
-        Box(
-            Modifier
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(8.dp),
-        ) {
-            RoundButton(UiIcon.CLOSE, { onExitPressed() }, Color(Pal.RED), size = 44.dp)
-        }
-
         when (state.phase) {
             HostPhase.INTRO -> IntroCard(game, state.best) {
                 audio.play(Sfx.SELECT)
@@ -376,6 +368,15 @@ fun GameHostScreen(
             }
             else -> Unit
         }
+
+        // Exit button, last so it sits above the cards: their backdrops swallow every other tap.
+        Box(
+            Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(8.dp),
+        ) {
+            RoundButton(UiIcon.CLOSE, { onExitPressed() }, Color(Pal.RED), size = 44.dp)
+        }
     }
 }
 
@@ -390,6 +391,8 @@ private fun IntroCard(game: MiniGame, best: Int, onStart: () -> Unit) {
     ) {
         val shape = RoundedCornerShape(24.dp)
         val glow = Color(game.look.glow)
+        // The card's inside: the screen less its margin and padding (20 dp each, both sides).
+        val fit = (LocalConfiguration.current.screenWidthDp - 80).coerceAtLeast(120).dp
         Column(
             Modifier
                 .padding(20.dp)
@@ -401,10 +404,10 @@ private fun IntroCard(game: MiniGame, best: Int, onStart: () -> Unit) {
                 .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            ArcadeText(game.title, unit = 4.dp, color = Color(game.look.glow))
+            ArcadeText(game.title, unit = 4.dp, color = Color(game.look.glow), maxWidth = fit)
             Spacer(Modifier.height(16.dp))
             for (line in game.instructions) {
-                ArcadeText(line, unit = 2.dp, color = Color.White, centered = true)
+                ArcadeText(line, unit = 2.dp, color = Color.White, centered = true, maxWidth = fit)
                 Spacer(Modifier.height(8.dp))
             }
             Spacer(Modifier.height(8.dp))
