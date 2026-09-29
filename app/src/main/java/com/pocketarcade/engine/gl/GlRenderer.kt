@@ -49,6 +49,14 @@ internal class GlRenderer {
          * pipeline, which is switched off and the frame drawn again as LDR.
          */
         private const val HDR_PROBE_FRAMES = 4
+
+        /**
+         * Frames a screen's HDR buffers may sit unused before their multisampled colour and depth
+         * (the biggest allocation: 8 bytes a sample in float) are given back; they are built again
+         * on demand if the screen returns. Keeps three screen sizes from holding three float
+         * multisampled sets at once.
+         */
+        private const val HDR_IDLE_FRAMES = 240L
     }
 
     /**
@@ -612,8 +620,12 @@ internal class GlRenderer {
         return mesh
     }
 
-    /** Frees GPU copies of models and textures the app no longer holds. */
+    /** Frees GPU copies of models and textures the app no longer holds, and idle HDR sets' multisampled buffers. */
     private fun collectGarbage() {
+        for (i in 0 until targets.size) {
+            val t = targets[i]
+            if (t.hdr && t.msFbo != 0 && frameNo - t.lastUsed > HDR_IDLE_FRAMES) releaseMultisample(t)
+        }
         val mi = meshRefs.iterator()
         while (mi.hasNext()) {
             val (ref, mesh) = mi.next()
@@ -723,6 +735,14 @@ internal class GlRenderer {
     private fun drainErrors() {
         var guard = 0
         while (GLES30.glGetError() != GLES30.GL_NO_ERROR && guard++ < 16) { /* drained */ }
+    }
+
+    /** Gives back [t]'s multisampled colour and depth; the next use of the set rebuilds them ([Targets.msSamples] = -1). */
+    private fun releaseMultisample(t: Targets) {
+        if (t.msFbo != 0) { tmp[0] = t.msFbo; GLES30.glDeleteFramebuffers(1, tmp, 0); t.msFbo = 0 }
+        if (t.msColor != 0) { tmp[0] = t.msColor; GLES30.glDeleteRenderbuffers(1, tmp, 0); t.msColor = 0 }
+        if (t.msDepth != 0) { tmp[0] = t.msDepth; GLES30.glDeleteRenderbuffers(1, tmp, 0); t.msDepth = 0 }
+        t.msSamples = -1
     }
 
     /**
