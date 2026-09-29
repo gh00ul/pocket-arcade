@@ -37,8 +37,8 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
         private set
     var pose = Pose.STAND
         private set
-    var phase = 0f
-        private set
+    /** The stride cycle: advanced by the ground the kid covers (see [FigureAnim.phase]). */
+    val phase: Float get() = anim.phase
     /** How this kid moves: blended poses, gait, gaze and follow-through (see [FigureAnim]). */
     val anim = FigureAnim(seed = (seed * 1000f).toInt(), scale = 1f)
     var state = State.IDLE
@@ -80,7 +80,7 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
      */
     fun update(dt: Float, world: HubWorld) {
         step(dt, world)
-        anim.update(dt, x, y, yaw, pose, phase)
+        anim.update(dt, x, y, yaw, pose, yawGoal = targetYaw)
     }
 
     private fun step(dt: Float, world: HubWorld) {
@@ -217,7 +217,6 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
             y += dy / d * step
             targetYaw = atan2(dx, dy)
         }
-        phase += dt * speed * 0.2f
         stuckT = if (dist(x, y, lastX, lastY) < 0.01f) stuckT + dt else 0f
         lastX = x
         lastY = y
@@ -359,7 +358,6 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
                     if (!Collision.blocked(solids, nx, ny)) {
                         x = nx
                         y = ny
-                        phase += dt * speed * 0.2f
                     }
                     pose = if (holding) Pose.CARRY else Pose.WALK
                     giveWayT += dt

@@ -260,7 +260,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
         feelWalls()
         for (i in npcs.indices) npcs[i].update(dt, this)
         cafe.update(dt, this)
-        clerk.update(dt, map.clerkX, map.clerkY, sin(time * 0.4f) * 0.4f, Pose.STAND, 0f)
+        clerk.update(dt, map.clerkX, map.clerkY, sin(time * 0.4f) * 0.4f, Pose.STAND)
         val gait = if (fp) player.speedFrac else if (player.moving) 1f else 0f
         val run = if (fp) (player.speedFrac - 1f) / (Player.RUN_SCALE - 1f) else 0f
         camera.update(player.x, player.y, player.vx, player.vy, player.moving, player.phase, dt, gait, run)

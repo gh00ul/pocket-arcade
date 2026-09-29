@@ -74,10 +74,9 @@ class CafeLife {
             private set
         var pose = Pose.STAND
             private set
-        var phase = 0f
-            private set
         /** How the barista moves (see [FigureAnim]). */
         val anim = FigureAnim(seed = 7, scale = 1.1f)
+        val phase: Float get() = anim.phase
         var state = State.IDLE
             private set
         /** The kid being served, once they reach the till. */
@@ -135,7 +134,6 @@ class CafeLife {
                     } else {
                         val step = minOf(abs(d), BARISTA_SPEED * dt)
                         x += if (d > 0f) step else -step
-                        phase += dt * BARISTA_SPEED * 0.2f
                         goalYawWhileWalking(if (d > 0f) PI.toFloat() / 2f else -PI.toFloat() / 2f, dt)
                     }
                 }
@@ -201,7 +199,7 @@ class CafeLife {
                 State.SERVE -> Pose.HOLD
                 State.TAKE, State.IDLE -> Pose.STAND
             }
-            anim.update(dt, x, z, yaw, pose, phase)
+            anim.update(dt, x, z, yaw, pose, if (state == State.WALK) (if (goalX > x) PI.toFloat() / 2f else -PI.toFloat() / 2f) else goalYaw)
         }
 
         private fun goalYawWhileWalking(target: Float, dt: Float) {
