@@ -47,6 +47,8 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
     private val bulb = HallArt.solid(-1).full
     private val halo = HallArt.glow.full
     private val shadow = HallArt.shadow.full
+    // Café: the barista, slushie tanks and steam are drawn by CafeScene.kt.
+    private val cafe = CafeScene()
 
     // The part of the floor on screen this frame (plus margins), and the lights picked for it.
     private var minX = 0f
@@ -337,6 +339,7 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         if (visible(map.clerkX - 10f, map.clerkY - 10f, map.clerkX + 10f, map.clerkY + 10f)) {
             figureFor(Looks.clerk).draw(r, map.clerkX, 0f, map.clerkY, sin(t * 0.4f) * 0.4f, Pose.STAND, 0f, t, 1.12f)
         }
+        cafe.draw(r, world, t, minX, maxX, minZ, maxZ) // Café
 
         // ---- see-through layers, back to front where it matters.
         val logoZ = HubLayout.FRONT_WALL - 234f

@@ -17,6 +17,8 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         private set
     val player = Player()
     val npcs = ArrayList<Npc>()
+    /** The café queue and the barista. */
+    val cafe = CafeLife()
     val camera = HubCamera()
     val joystick = Joystick()
     var time = 0f
@@ -101,6 +103,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         if (player.moving) hasWalked = true
         if (player.stepped) audio?.play(Sfx.STEP, 0.5f, rng.range(0.8f, 1.2f))
         for (n in npcs) n.update(dt, this)
+        cafe.update(dt, this)
         camera.follow(player.x, player.y, player.vx, player.vy, dt)
 
         val spot = map.spots.firstOrNull { it.area.contains(player.x, player.y) }

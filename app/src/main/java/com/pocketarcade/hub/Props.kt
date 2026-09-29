@@ -43,6 +43,7 @@ object Props {
             PropKind.DOORS -> doors(b, p, lights)
             PropKind.KIDDIE_RIDE -> kiddieRide(b, p, lights)
             PropKind.DECOR -> decor(b, p, lights)
+            PropKind.CAFE_FLOOR, PropKind.CAFE_BAR, PropKind.CAFE_COUNTER, PropKind.BOOTH, PropKind.CHAIR -> CafeArt.build(b, p, lights)
             PropKind.MACHINE -> Unit
         }
         return b.build()

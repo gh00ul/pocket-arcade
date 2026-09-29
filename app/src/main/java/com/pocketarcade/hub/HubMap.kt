@@ -8,6 +8,8 @@ import com.pocketarcade.games.MiniGame
 enum class PropKind {
     MACHINE, COUNTER, PRIZE_WALL, TOKENS, CHANGE, VENDING, CAFE_TABLE, STOOL, PILLAR, PLANT, TRASH,
     PHOTO_BOOTH, DECOR, BENCH, DOORS, KIDDIE_RIDE,
+    /** The café: its floor and lighting rig, back bar, service counter, booths and chairs. */
+    CAFE_FLOOR, CAFE_BAR, CAFE_COUNTER, BOOTH, CHAIR,
 }
 
 /**
@@ -54,6 +56,8 @@ class Spot(
 /**
  * Where a wandering kid can stop: position, which way they face (radians) and whether it's a
  * machine. Kids path to the walk-grid tile ([tileX], [tileY]) nearest the spot, then step onto it.
+ * A [cafe] seat is where kids sit with what they bought; the tile is the one nearest the
+ * approach point ([approachX], [approachZ]), so kids get into a booth from the aisle end.
  */
 class Hangout(
     val x: Float,
@@ -62,6 +66,9 @@ class Hangout(
     val playing: Boolean,
     val tileX: Int = (x / HubLayout.TILE).toInt(),
     val tileY: Int = (z / HubLayout.TILE).toInt(),
+    val cafe: Boolean = false,
+    val approachX: Float = x,
+    val approachZ: Float = z,
 )
 
 class HubMap(
@@ -82,6 +89,8 @@ class HubMap(
     val discoY: Float,
     /** The bank each machine was given, by game index. */
     val machineSlots: List<Slot>,
+    /** The café queue, from the till backwards. */
+    val cafeQueue: List<Hangout> = emptyList(),
 ) {
     fun tileWalkable(tx: Int, ty: Int): Boolean =
         tx in 0 until cols && ty in 0 until rows && walkable[ty * cols + tx]
@@ -233,7 +242,7 @@ object HubLayout {
     private val decorSpots = mapOf(
         DecorStyle.TROPHY_CASE to (182f to 42f),
         DecorStyle.PLUSH_BEAR to (442f to 92f),
-        DecorStyle.JUKEBOX to (122f to 462f),
+        DecorStyle.JUKEBOX to (34f to 664f),
         DecorStyle.FISH_TANK to (562f to 470f),
         DecorStyle.LAVA_LAMP to (206f to 618f + FOYER_SHIFT),
         DecorStyle.FLAMINGO to (156f to 800f + FOYER_SHIFT),
@@ -292,20 +301,9 @@ object HubLayout {
             props += Prop(PropKind.PILLAR, px - 9f, pz - 9f, px + 9f, pz + 9f, WALL_HEIGHT)
         }
 
-        // Lounge: café tables with stools and a pair of vending machines.
-        props += Prop(PropKind.VENDING, 24f, 440f, 54f, 462f, 62f, variant = 0)
-        props += Prop(PropKind.VENDING, 58f, 440f, 88f, 462f, 62f, variant = 1)
-        for ((i, t) in listOf(64f to 530f, 140f to 580f, 64f to 640f).withIndex()) {
-            val (tx, tz) = t
-            props += Prop(PropKind.CAFE_TABLE, tx - 11f, tz - 11f, tx + 11f, tz + 11f, 24f, variant = i)
-            for (k in 0 until 3) {
-                val a = k * 2.094f + i
-                val sx = tx + kotlin.math.cos(a) * 20f
-                val sz = tz + kotlin.math.sin(a) * 20f
-                props += Prop(PropKind.STOOL, sx - 4.5f, sz - 4.5f, sx + 4.5f, sz + 4.5f, 16f, solid = false)
-                hangouts += Hangout(sx, sz + 4f, kotlin.math.atan2(tx - sx, tz - sz), playing = false)
-            }
-        }
+        // The café in the lounge corner: counter, booths, tables, vending machines.
+        val cafeQueue = ArrayList<Hangout>()
+        CafeLayout.add(props, hangouts, cafeQueue)
         props += Prop(PropKind.BENCH, 20f, 716f + foyer, 90f, 730f + foyer, 16f)
         // Coin-op kiddie rides either side of the way in.
         props += Prop(PropKind.KIDDIE_RIDE, 214f, 716f + foyer, 242f, 748f + foyer, 46f, variant = 0)
@@ -353,24 +351,28 @@ object HubLayout {
             360f to 650f + foyer, 250f to 740f + foyer,
         )
         for ((x, z) in aisles) hangouts += Hangout(x, z, 0f, playing = false)
-        // A stool or a play spot can sit closer to its table or cabinet than a walkable tile's
-        // centre, so kids aim for the nearest free tile and walk the last step.
-        for (i in hangouts.indices) {
-            val hg = hangouts[i]
-            var best = -1
-            var bestD = Float.MAX_VALUE
-            val tx0 = (hg.x / TILE).toInt()
-            val ty0 = (hg.z / TILE).toInt()
-            for (ty in ty0 - 2..ty0 + 2) for (tx in tx0 - 2..tx0 + 2) {
-                if (tx !in 0 until cols || ty !in 0 until rows || !walkable[ty * cols + tx]) continue
-                val d = kotlin.math.hypot(tx * TILE + TILE / 2f - hg.x, ty * TILE + TILE / 2f - hg.z)
-                if (d < bestD) {
-                    bestD = d
-                    best = ty * cols + tx
+        // A seat or a play spot can sit closer to its table or cabinet than a walkable tile's
+        // centre, so kids aim for the free tile nearest its approach and walk the last step.
+        fun snapToTiles(list: MutableList<Hangout>) {
+            for (i in list.indices) {
+                val hg = list[i]
+                var best = -1
+                var bestD = Float.MAX_VALUE
+                val tx0 = (hg.approachX / TILE).toInt()
+                val ty0 = (hg.approachZ / TILE).toInt()
+                for (ty in ty0 - 2..ty0 + 2) for (tx in tx0 - 2..tx0 + 2) {
+                    if (tx !in 0 until cols || ty !in 0 until rows || !walkable[ty * cols + tx]) continue
+                    val d = kotlin.math.hypot(tx * TILE + TILE / 2f - hg.approachX, ty * TILE + TILE / 2f - hg.approachZ)
+                    if (d < bestD) {
+                        bestD = d
+                        best = ty * cols + tx
+                    }
                 }
+                if (best >= 0) list[i] = Hangout(hg.x, hg.z, hg.yaw, hg.playing, best % cols, best / cols, hg.cafe, hg.approachX, hg.approachZ)
             }
-            if (best >= 0) hangouts[i] = Hangout(hg.x, hg.z, hg.yaw, hg.playing, best % cols, best / cols)
         }
+        snapToTiles(hangouts)
+        snapToTiles(cafeQueue)
 
         return HubMap(
             widthPx = w, heightPx = h, cols = cols, rows = rows,
@@ -380,6 +382,7 @@ object HubLayout {
             hangouts = hangouts,
             discoX = discoX, discoY = discoY,
             machineSlots = machineSlots,
+            cafeQueue = cafeQueue,
         )
     }
 
