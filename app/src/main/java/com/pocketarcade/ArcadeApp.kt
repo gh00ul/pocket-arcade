@@ -27,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.pocketarcade.data.ArcadeRepository
 import com.pocketarcade.data.SaveState
@@ -38,6 +39,7 @@ import com.pocketarcade.engine.Sfx
 import com.pocketarcade.games.GameRegistry
 import com.pocketarcade.hub.HubScreen
 import com.pocketarcade.hub.HubWorld
+import com.pocketarcade.hub.PhotoWall
 import com.pocketarcade.hub.Spot
 import com.pocketarcade.hub.SpotType
 import com.pocketarcade.ui.GameHostScreen
@@ -123,6 +125,9 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     LaunchedEffect(save.hat, save.outfit) { world.setPlayerLook(save.playerLook()) }
     LaunchedEffect(save.owned) { world.setDecor(save.ownedDecor) }
     LaunchedEffect(save.muted) { audio.muted = save.muted }
+    // The photo wall by the booth hangs the strips saved on earlier visits.
+    val appContext = LocalContext.current.applicationContext
+    LaunchedEffect(Unit) { PhotoWall.refresh(appContext.filesDir) }
     LaunchedEffect(save.loaded) {
         if (save.loaded && !viewRestored) {
             viewRestored = true

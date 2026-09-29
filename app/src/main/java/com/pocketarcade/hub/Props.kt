@@ -269,6 +269,34 @@ object Props {
         b.quad(p.x0 + 2f, p.height - 12f, p.z1 - 0.5f, p.x1 - 2f, p.height - 12f, p.z1 - 0.5f, p.x1 - 2f, 4f, p.z1 - 0.5f, p.x0 + 2f, 4f, p.z1 - 0.5f, curtain.full, 0f, 0f, 1f)
         b.quad(p.x0, p.height, p.z1 + 0.1f, p.x1, p.height, p.z1 + 0.1f, p.x1, p.height - 12f, p.z1 + 0.1f, p.x0, p.height - 12f, p.z1 + 0.1f, HallArt.lightbox("PHOTO", 0xFF2FB8FF.toInt(), -1, 384, 128, 76f).full, 0f, 0f, 1f, emissive = 1.3f)
         lights += light(p.centerX, 50f, p.z1 + 8f, 0xFF7ACBFF.toInt(), 60f, 0.8f)
+        photoWall(b, p)
+    }
+
+    /**
+     * The photo wall: the last four strips as posters on the right wall above the booth, on a
+     * dark board under a neon sign. The posters are one live texture ([PhotoWall]) that the booth
+     * repaints as strips are saved, so the model is built once. Nothing is hung if the booth isn't
+     * by the wall.
+     */
+    private fun photoWall(b: ModelBuilder, p: Prop) {
+        val wallX = HubLayout.WIDTH - HubLayout.WALL
+        if (wallX - p.x1 > PhotoWallLayout.REACH) return
+        val z0 = PhotoWallLayout.startZ(p)
+        val z1 = z0 + PhotoWallLayout.WORLD_LENGTH
+        val metal = HallArt.darkMetal.full
+        // The board is 1.4 deep against the wall; its face, and what hangs on it, look west into the hall.
+        b.box(wallX - 1.4f, PhotoWallLayout.Y0 - 2f, z0 - 2f, wallX, PhotoWallLayout.Y1 + 2f, z1 + 2f, BoxFaces.all(metal, 0.5f))
+        val tex = PhotoWall.texture
+        val x = wallX - 1.6f
+        for (slot in 0 until PhotoWallLayout.SLOTS) {
+            val za = PhotoWallLayout.posterZ(p, slot)
+            val zb = za + PhotoWallLayout.WORLD_W
+            val region = tex.region(PhotoWallLayout.texX(slot), 0, PhotoWallLayout.POSTER_W, PhotoWallLayout.POSTER_H)
+            b.quad(x, PhotoWallLayout.Y1, za, x, PhotoWallLayout.Y1, zb, x, PhotoWallLayout.Y0, zb, x, PhotoWallLayout.Y0, za, region, -1f, 0f, 0f, emissive = 0.35f, gloss = 0.4f)
+        }
+        val sign = HallArt.neon("PHOTO WALL", 0xFF2FB8FF.toInt(), 640, 160, 100f).full
+        val sx = wallX - 1.8f
+        b.quad(sx, PhotoWallLayout.SIGN_Y1, z0, sx, PhotoWallLayout.SIGN_Y1, z1, sx, PhotoWallLayout.SIGN_Y0, z1, sx, PhotoWallLayout.SIGN_Y0, z0, sign, -1f, 0f, 0f, blend = Blend.ADD, emissive = 1.6f, cull = false)
     }
 
     private fun doors(b: ModelBuilder, p: Prop, lights: MutableList<PointLight>) {

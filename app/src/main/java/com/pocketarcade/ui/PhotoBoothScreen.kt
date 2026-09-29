@@ -48,6 +48,7 @@ import com.pocketarcade.engine.r3d.PointLight
 import com.pocketarcade.hub.CharacterLook
 import com.pocketarcade.hub.Figure
 import com.pocketarcade.hub.HallArt
+import com.pocketarcade.hub.PhotoWall
 import com.pocketarcade.hub.Pose
 import com.pocketarcade.share.PhotoShare
 import com.pocketarcade.share.PhotoStore
@@ -130,6 +131,8 @@ fun PhotoBoothScreen(save: SaveState, services: ArcadeServices, onClose: () -> U
             saved = file
             if (file == null) message = "COULDN'T SAVE THE STRIP"
             services.repo.addStat("photos")
+            // Hang it on the photo wall by the booth.
+            if (file != null) PhotoWall.refresh(app.filesDir)
         }
     }
 
