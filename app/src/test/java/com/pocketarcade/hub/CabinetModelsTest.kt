@@ -130,14 +130,42 @@ class CabinetModelsTest {
         }
     }
 
+    @Test
+    fun paleColoursGlowLessThanSaturatedOnesAndDarkOnesAreLeftAlone() {
+        val white = MachineKit.glowFor(0xFFFFFFFF.toInt(), 1f)
+        val yellow = MachineKit.glowFor(0xFFFFE14D.toInt(), 1f)
+        val red = MachineKit.glowFor(0xFFB0213A.toInt(), 1f)
+        assertTrue("white $white, yellow $yellow", white < yellow)
+        assertTrue("yellow $yellow, red $red", yellow <= red)
+        assertEquals(1f, red, 1e-6f)
+        assertEquals(1f - MachineKit.PALE_GLOW_CUT, white, 1e-6f)
+        assertEquals(0f, MachineKit.glowFor(-1, 0f), 0f)
+    }
+
+    @Test
+    fun controlPanelHardwareFitsOnItsPrintedPanel() {
+        // An upright's panel is 20.4 wide; the joystick's plate is 4.6 across, a button's collar 2.3.
+        val w = 20.4f
+        val stickLeft = MachineKit.PANEL_STICK_U * w - 2.3f
+        val stickRight = MachineKit.PANEL_STICK_U * w + 2.3f
+        val firstButtonLeft = MachineKit.PANEL_BUTTON_U * w - 1.15f
+        val lastButtonRight = (MachineKit.PANEL_BUTTON_U + 2 * MachineKit.PANEL_BUTTON_STEP_U + MachineKit.PANEL_BUTTON_ROW_SHIFT_U) * w + 1.15f
+        assertTrue("the joystick runs off the panel's left", stickLeft > 0f)
+        assertTrue("the joystick overlaps the first button", stickRight < firstButtonLeft)
+        assertTrue("the buttons run off the panel's right", lastButtonRight < w)
+        assertTrue("neighbouring buttons overlap", MachineKit.PANEL_BUTTON_STEP_U * w > 2.3f)
+        // The two rows sit 8 deep panel units apart at most; their collars must clear each other.
+        assertTrue("the rows overlap", (MachineKit.PANEL_ROW2_V - MachineKit.PANEL_ROW_V) * 8f > 2.3f)
+    }
+
     private class Overhang(val side: Float, val back: Float, val front: Float, val top: Float)
 
     private fun overhang(name: String): Overhang = OVERHANG
     private companion object {
         /** Loudest emissive multiplier any cabinet polygon may have; the highlight adds a fifth on top. */
-        const val MAX_EMISSIVE = 2.0f
-        const val POLY_BUDGET = 6000
-        const val TEXTURE_BUDGET = 80
+        const val MAX_EMISSIVE = 1.6f
+        const val POLY_BUDGET = 5600
+        const val TEXTURE_BUDGET = 48
 
         /**
          * How far a cabinet's parts may reach past its footprint: marquees, rails and the air-hockey

@@ -469,8 +469,8 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         // Side walls round the playfield, their tops lit.
         val wallE = MachineKit.glowFor(art.trim, 0.8f)
         val wall = BoxFaces(top = trim, right = dark, left = dark, front = dark, topEmissive = wallE, gloss = 0.5f)
-        b.box(x0 + 1f, deckY, z0 + 1f, x0 + 2.2f, deckY + 5f, z1 - 1f, wall)
-        b.box(x1 - 2.2f, deckY, z0 + 1f, x1 - 1f, deckY + 5f, z1 - 1f, wall)
+        b.box(x0 + 1f, deckY, z0 + 1f, x0 + 2.2f, deckY + 4.6f, z1 - 1f, wall)
+        b.box(x1 - 2.2f, deckY, z0 + 1f, x1 - 1f, deckY + 4.6f, z1 - 1f, wall)
         for (k in 0 until 26) {
             val px = cx + MachineKit.jitter(seed + k, 5, (x1 - x0) / 2f - 4f)
             val pz = z0 + 12f + hash01(seed + k, 6) * (z1 - z0 - 16f)

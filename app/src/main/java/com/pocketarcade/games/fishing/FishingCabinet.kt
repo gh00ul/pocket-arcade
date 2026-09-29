@@ -1,6 +1,5 @@
 package com.pocketarcade.games.fishing
 
-import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.r3d.Blend
 import com.pocketarcade.engine.r3d.BoxFaces
 import com.pocketarcade.engine.r3d.Renderer3D

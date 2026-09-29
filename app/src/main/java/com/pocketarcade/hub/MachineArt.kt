@@ -1,8 +1,6 @@
 package com.pocketarcade.hub
 
 import android.graphics.Bitmap
-import com.pocketarcade.engine.Pal
-import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.r3d.CanvasPainter
 import com.pocketarcade.engine.r3d.Fonts
 import com.pocketarcade.engine.r3d.TexPaint

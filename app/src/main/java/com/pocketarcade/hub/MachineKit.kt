@@ -377,12 +377,11 @@ object MachineKit {
 
     /**
      * Arcade push button of cap [radius], its bottom at y = 0: a chrome-topped collar, a dark gap,
-     * a shaded plastic dome and a lit core on the dome's crown, in [color]. Eight-sided and smooth
-     * shaded, about 60 polygons.
+     * a shaded plastic dome and a lit core on the dome's crown (the same paint, whose lightest part
+     * is the crown), in [color]. Eight-sided and smooth shaded, about 60 polygons.
      */
     fun button(color: Int, radius: Float): Model = buttons.getOrPut(color * 31 + java.lang.Float.floatToIntBits(radius)) {
         val cap = colored(color)
-        val lit = HallArt.solid(lift(color, 0.25f)).full
         val chrome = HallArt.chrome.full
         val black = HallArt.solid(0xFF08070C.toInt()).full
         val r = radius
@@ -390,7 +389,7 @@ object MachineKit {
             .cylinder(0f, 0f, 0f, r * 0.4f, r * 1.28f, 8, HallArt.darkMetal.full, top = chrome, gloss = 0.85f)
             .cylinder(0f, 0f, r * 0.4f, r * 0.5f, r * 1.08f, 8, black, top = black)
             .sphere(0f, r * 0.5f, 0f, r, cap, slices = 8, stacks = 3, sy = 0.55f, gloss = 0.85f, yFrom = 0f)
-            .sphere(0f, r * 0.5f, 0f, r * 1.01f, lit, slices = 8, stacks = 2, sy = 0.55f, gloss = 0.6f, emissive = CAP_GLOW, yFrom = 0.55f)
+            .sphere(0f, r * 0.5f, 0f, r * 1.01f, cap, slices = 8, stacks = 2, sy = 0.55f, gloss = 0.6f, emissive = CAP_GLOW, yFrom = 0.55f)
             .build()
     }
     private val buttons = HashMap<Int, Model>()
