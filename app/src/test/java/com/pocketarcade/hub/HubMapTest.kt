@@ -18,7 +18,11 @@ import kotlin.math.hypot
 /**
  * Checks the real hall floor plan, built from every registered machine, with and without every
  * decoration bought: nothing overlaps, every aisle is at least as wide as the narrowest one in
- * the first floor plan, and the kids' walk grid reaches every prompt, counter and hangout.
+ * the first floor plan, and the kids' walk grid reaches every prompt, counter and hangout. It
+ * also holds the plan to how an arcade is laid out: a wide main aisle straight from the doors
+ * to the prize counter, the token kiosk just inside the doors, rows of banks that face a cross
+ * aisle rather than the back of the next bank, nothing hiding a bank's players from the hall
+ * camera, and a café that opens onto the main aisle.
  */
 class HubMapTest {
     private companion object {
@@ -32,6 +36,14 @@ class HubMapTest {
          * backed up to a wall. Nobody walks through them (a kid needs 12 of clearance).
          */
         const val CLOSED_GAP = 12f
+        /** The main aisle is at least as wide as the doors. */
+        const val MAIN_AISLE = HubLayout.DOOR_X1 - HubLayout.DOOR_X0
+        /** How far the token kiosk's spot may be from the middle of the doors. */
+        const val KIOSK_REACH = 120f
+        /** Clear floor between a bank's fronts and the backs of a bank in front of it. */
+        const val FACING_GAP = 80f
+        /** The hall camera's pitch (degrees below the horizon) when it follows the player. */
+        const val CAMERA_PITCH = 55f
     }
 
     private val games: List<MiniGame> = GameRegistry.createAll()
@@ -261,6 +273,114 @@ class HubMapTest {
                 val box = Box(p.x0, p.z0, p.x1, p.z1)
                 assertFalse("$name: café ${p.kind} at ${box.str()} is in a bank's floor ${slot.area.str()}", overlaps(box, slot.area))
             }
+        }
+    }
+
+    @Test
+    fun theMainAisleRunsClearFromTheDoorsToThePrizeCounter() {
+        assertTrue("the main aisle is narrower than the doors", HubLayout.AISLE_X1 - HubLayout.AISLE_X0 >= MAIN_AISLE)
+        assertTrue(
+            "the main aisle doesn't line up with the doors",
+            HubLayout.AISLE_X0 <= HubLayout.DOOR_X0 && HubLayout.AISLE_X1 >= HubLayout.DOOR_X1,
+        )
+        for ((name, map) in maps) {
+            val counter = map.props.single { it.kind == PropKind.COUNTER }
+            val prizes = map.spots.single { it.type == SpotType.PRIZES }
+            assertTrue(
+                "$name: the prize counter isn't at the end of the main aisle",
+                prizes.area.left < HubLayout.AISLE_X1 && prizes.area.right > HubLayout.AISLE_X0,
+            )
+            val aisle = Box(HubLayout.AISLE_X0, counter.frontZ, HubLayout.AISLE_X1, HubLayout.FRONT_WALL)
+            for (b in map.solids) {
+                assertFalse("$name: ${b.str()} stands in the main aisle ${aisle.str()}", overlaps(b, aisle))
+            }
+            // Nobody plays a machine standing in the main aisle.
+            for (spot in map.spots) {
+                if (spot.type != SpotType.MACHINE) continue
+                assertFalse("$name: ${games[spot.machine].id}'s play spot ${spot.area.str()} is in the main aisle", overlaps(spot.area, aisle))
+            }
+        }
+    }
+
+    @Test
+    fun theTokenKioskIsJustInsideTheDoors() {
+        val doorX = (HubLayout.DOOR_X0 + HubLayout.DOOR_X1) / 2f
+        for ((name, map) in maps) {
+            val tokens = map.spots.single { it.type == SpotType.TOKENS }
+            val d = hypot(tokens.area.centerX - doorX, tokens.area.centerY - HubLayout.FRONT_WALL)
+            assertTrue("$name: the token kiosk is ${"%.0f".format(d)} from the doors (keep it within $KIOSK_REACH)", d <= KIOSK_REACH)
+        }
+    }
+
+    /** Pairs of banks (by the floor they reserve) where [front] stands ahead of [rear] across some of the same x. */
+    private fun rowsInLine(action: (rear: Slot, front: Slot) -> Unit) {
+        val slots = HubLayout.slots
+        for (a in slots) for (b in slots) {
+            if (a === b || a.x0 >= b.x1 || b.x0 >= a.x1) continue
+            if (b.back >= a.back + a.maxD) action(a, b)
+        }
+    }
+
+    @Test
+    fun noBankFacesTheBackOfAnotherUpClose() {
+        rowsInLine { rear, front ->
+            val gap = front.back - (rear.back + rear.maxD)
+            assertTrue(
+                "the ${front.shape ?: "spare"} bank's back is ${"%.0f".format(gap)} in front of the ${rear.shape ?: "spare"} bank (keep $FACING_GAP)",
+                gap >= FACING_GAP,
+            )
+        }
+    }
+
+    @Test
+    fun noBankHidesThePlayersBehindItFromTheHallCamera() {
+        val reach = 1f / kotlin.math.tan(Math.toRadians(CAMERA_PITCH.toDouble())).toFloat()
+        rowsInLine { rear, front ->
+            val shadow = front.back - front.maxH * reach
+            val spots = rear.back + rear.maxD + HubLayout.PROMPT_DEPTH
+            assertTrue(
+                "the ${front.shape ?: "spare"} bank hides the ${rear.shape ?: "spare"} bank's play spots from the hall camera",
+                shadow >= spots,
+            )
+        }
+    }
+
+    @Test
+    fun theCafeOpensOntoTheMainAisle() {
+        val mid = (HubLayout.AISLE_X0 + HubLayout.AISLE_X1) / 2f
+        for ((name, map) in maps) {
+            val seen = reachable(map)
+            // Some rows of tiles run clear from inside the café to the middle of the main aisle.
+            val tx0 = (CafeLayout.FLOOR_X1 / HubLayout.TILE).toInt() - 1
+            val tx1 = (mid / HubLayout.TILE).toInt()
+            var open = 0
+            for (ty in (CafeLayout.FLOOR_Z0 / HubLayout.TILE).toInt() until (CafeLayout.FLOOR_Z1 / HubLayout.TILE).toInt()) {
+                if ((tx0..tx1).all { map.tileWalkable(it, ty) && seen[ty * map.cols + it] }) open++
+            }
+            assertTrue("$name: the café is walled off from the main aisle", open >= 3)
+            // The queue runs from the till out towards the aisle, not deeper into the café.
+            val q = map.cafeQueue
+            assertTrue("$name: the café queue runs away from the aisle", q.last().x > q.first().x)
+            // And the café is a corner of its own: no bank's floor in it.
+            val cafe = Box(CafeLayout.FLOOR_X0, CafeLayout.FLOOR_Z0, CafeLayout.FLOOR_X1, CafeLayout.FLOOR_Z1)
+            for (slot in HubLayout.slots) assertFalse("$name: a bank's floor ${slot.area.str()} is in the café", overlaps(slot.area, cafe))
+        }
+    }
+
+    @Test
+    fun theZoneSignsHangOverTheirBanks() {
+        for (sign in HubLayout.wallSigns) {
+            assertTrue("the ${sign.text} sign runs off the wall", sign.z0 >= HubLayout.BACK_WALL && sign.z1 <= HubLayout.FRONT_WALL && sign.z0 < sign.z1)
+            val shape = sign.shape ?: continue
+            val slot = HubLayout.slots.first { it.shape == shape }
+            val wallSide = if (sign.right) slot.x1 >= HubLayout.WIDTH - HubLayout.WALL - 16f else slot.x0 <= HubLayout.WALL + 16f
+            assertTrue("the ${sign.text} sign isn't on the wall its bank stands against", wallSide)
+            assertTrue("the ${sign.text} sign isn't over its bank", sign.z0 < slot.back + slot.maxD && sign.z1 > slot.back)
+        }
+        // Posters (64 to 100 up the wall) stay clear of any sign that comes down into them.
+        for (sign in HubLayout.wallSigns) {
+            val posters = if (sign.right) HubLayout.rightPosters else HubLayout.leftPosters
+            for (z in posters) assertFalse("a poster at z $z runs into the ${sign.text} sign", z + 12f > sign.z0 && z - 12f < sign.z1 && sign.y0 < 100f)
         }
     }
 
