@@ -33,30 +33,47 @@ object MachineKit {
 
     val laneWood: Texture by lazy { HallArt.wood(0xFFD69A5A.toInt(), 5) }
 
-    /** Skee-ball target: concentric scoring rings with their values. */
+    /**
+     * Skee-ball target (painted at 3x): concentric scoring rings, each a dished, bevelled band in
+     * its own colour with its value in big outlined numerals, a black 100 pocket in the middle
+     * and two rimmed bonus holes in the top corners.
+     */
     val skeeRings: Texture by lazy {
-        val w = 256
-        val h = 256
-        val tp = TexPaint(w, h)
-        tp.vgrad(0f, 0f, w.toFloat(), h.toFloat(), 0xFF22306E.toInt(), 0xFF141C44.toInt())
-        val cx = w / 2f
-        val cy = h * 0.55f
-        val colors = intArrayOf(0xFF4DA6FF.toInt(), 0xFF8A4FFF.toInt(), 0xFFFF3FA4.toInt(), 0xFFFF9A3C.toInt(), 0xFFFFE14D.toInt(), 0xFFFF4D4D.toInt())
-        val radii = floatArrayOf(118f, 96f, 76f, 56f, 36f, 16f)
-        val points = intArrayOf(10, 20, 30, 40, 50, 100)
-        for (i in radii.indices) {
-            tp.circle(cx, cy, radii[i], dim(colors[i], 0.55f))
-            tp.circle(cx, cy + 3f, radii[i] - 4f, dim(colors[i], 0.35f))
-            tp.ring(cx, cy, radii[i] - 1.5f, 3f, colors[i])
+        paintTexture(192, 192, 3) {
+            val w = 192f
+            val h = 192f
+            vgrad(0f, 0f, w, h, 0xFF22306E.toInt(), 0xFF101838.toInt())
+            val cx = w / 2f
+            val cy = h * 0.56f
+            val colors = intArrayOf(0xFF4DA6FF.toInt(), 0xFF8A4FFF.toInt(), 0xFFFF3FA4.toInt(), 0xFFFF9A3C.toInt(), 0xFFFFE14D.toInt(), 0xFFFF4D4D.toInt())
+            val radii = floatArrayOf(88f, 72f, 57f, 42f, 27f, 12f)
+            val points = intArrayOf(10, 20, 30, 40, 50, 100)
+            for (i in radii.indices) {
+                val r = radii[i]
+                // The dish: a dark rim, the band's colour, a lighter crown and a shadow line under the next ring in.
+                circle(cx, cy + 1.5f, r, alpha(0xFF000000.toInt(), 0.5f))
+                circle(cx, cy, r, dim(colors[i], 0.5f))
+                circle(cx, cy + 2f, r - 3f, dim(colors[i], 0.34f))
+                radial(cx, cy - r * 0.3f, r * 0.95f, alpha(lift(colors[i], 0.4f), 0.35f), 0)
+                ring(cx, cy, r - 1.1f, 2.2f, colors[i])
+                ring(cx, cy, r - 2.6f, 0.7f, alpha(-1, 0.35f))
+            }
+            circle(cx, cy, 9f, 0xFF050308.toInt())
+            ring(cx, cy, 9.5f, 1.8f, 0xFFC4C8D4.toInt())
+            for (i in 0 until radii.size - 1) {
+                val r = (radii[i] + radii[i + 1]) / 2f
+                val x = cx + (if (i % 2 == 0) r else -r)
+                outlinedText(points[i].toString(), x, cy + 5.5f, 14f, -1, 0xFF0A1030.toInt(), 3f, Fonts.display)
+            }
+            // The 200 bonus pockets in the top corners, rimmed in chrome.
+            for (sx in floatArrayOf(20f, w - 20f)) {
+                circle(sx, 22f, 11f, 0xFFC4C8D4.toInt())
+                circle(sx, 22f, 9f, 0xFFFFC83D.toInt())
+                circle(sx, 22f, 6.5f, 0xFF050308.toInt())
+            }
+            strokeRound(2f, 2f, w - 4f, h - 4f, 6f, 3f, 0xFFC4C8D4.toInt())
+            grain(0.03f, 5)
         }
-        tp.circle(cx, cy, 10f, 0xFF050308.toInt())
-        for (i in 0 until radii.size - 1) {
-            val r = (radii[i] + radii[i + 1]) / 2f
-            tp.text(points[i].toString(), cx + (if (i % 2 == 0) r else -r), cy + 6f, 16f, -1, Fonts.display)
-        }
-        tp.circle(w - 26f, 26f, 14f, 0xFFFFC83D.toInt())
-        tp.circle(w - 26f, 26f, 9f, 0xFF050308.toInt())
-        tp.toTexture().also { tp.recycle() }
     }
 
     val court: Texture by lazy {
@@ -101,21 +118,43 @@ object MachineKit {
     /** Hole positions for the whack-a-mole table top (fractions of width and depth). */
     val whackHoles = arrayOf(0.2f to 0.62f, 0.35f to 0.38f, 0.5f to 0.66f, 0.65f to 0.38f, 0.8f to 0.62f)
 
-    fun whackTop(color: Int): Texture {
-        val w = 256
-        val h = 208
-        val tp = TexPaint(w, h)
-        tp.vgrad(0f, 0f, w.toFloat(), h.toFloat(), lift(color, 0.1f), dim(color, 0.7f))
-        tp.grain(0.06f, 21)
-        for ((fx, fz) in whackHoles) {
-            val x = fx * w
-            val y = fz * h
-            tp.circle(x, y, 30f, 0xFF8A5A2B.toInt())
-            tp.circle(x, y, 26f, 0xFF3A2414.toInt())
-            tp.radial(x, y + 3f, 24f, 0xFF050303.toInt(), 0xFF2A1A0E.toInt())
+    /** The whack-a-mole table top for a body colour, painted once per colour at 2x (all copies of a machine share it). */
+    fun whackTop(color: Int): Texture = whackTops.getOrPut(color) {
+        paintTexture(256, 208, 2) {
+            val w = 256f
+            val h = 208f
+            vgrad(0f, 0f, w, h, lift(color, 0.12f), dim(color, 0.66f))
+            radial(w / 2f, h * 0.4f, w * 0.6f, alpha(lift(color, 0.5f), 0.25f), 0)
+            for ((fx, fz) in whackHoles) {
+                val x = fx * w
+                val y = fz * h
+                // Each hole: a rubber collar, a dark well and a shadow at the back of it.
+                circle(x, y + 1.5f, 32f, alpha(0xFF000000.toInt(), 0.35f))
+                circle(x, y, 30f, 0xFF7A4A22.toInt())
+                circle(x, y, 27f, 0xFF3A2414.toInt())
+                radial(x, y + 3f, 25f, 0xFF050303.toInt(), 0xFF2A1A0E.toInt())
+            }
+            rect(0f, 0f, w, 8f, 0xFF8B5A2B.toInt())
+            rect(0f, 8f, w, 1.5f, alpha(-1, 0.2f))
+            grain(0.05f, 21)
         }
-        tp.rect(0f, 0f, w.toFloat(), 8f, 0xFF8B5A2B.toInt())
-        return tp.toTexture().also { tp.recycle() }
+    }
+    private val whackTops = HashMap<Int, Texture>()
+
+    /**
+     * The prize door on a claw machine's front: a smoked flap hinged along its top edge over a dark
+     * chute, with "PRIZE" and a down arrow printed on it in warm yellow.
+     */
+    val prizeChute: Texture by lazy {
+        paintTexture(48, 52, CabinetPaint.PLATE_SCALE) {
+            round(0f, 0f, 48f, 52f, 4f, 0xFF08070C.toInt())
+            roundGrad(3f, 3f, 42f, 46f, 3f, 0xFF3A3648.toInt(), 0xFF14121C.toInt())
+            rect(3f, 9f, 42f, 1.4f, 0xFF8A8E9E.toInt())
+            for (x in floatArrayOf(6f, 24f, 42f)) circle(x, 6f, 1.6f, 0xFF8A8E9E.toInt())
+            text("PRIZE", 24f, 26f, 10f, 0xFFFFD84D.toInt(), Fonts.condensed)
+            polygon(floatArrayOf(17f, 32f, 31f, 32f, 24f, 41f), alpha(0xFFFFD84D.toInt(), 0.9f))
+            vgrad(3f, 10f, 42f, 14f, alpha(-1, 0.16f), 0)
+        }
     }
 
     val deck: Texture by lazy {
@@ -239,7 +278,7 @@ object MachineKit {
 
     /** A glossy ball of the given colour, radius 1 (scale with an [Xform]). */
     fun ball(color: Int): Model = balls.getOrPut(color) {
-        ModelBuilder().sphere(0f, 0f, 0f, 1f, colored(color), slices = 16, stacks = 10, gloss = 0.7f).build()
+        ModelBuilder().sphere(0f, 0f, 0f, 1f, colored(color), slices = 12, stacks = 8, gloss = 0.8f).build()
     }
     private val balls = HashMap<Int, Model>()
 
@@ -317,7 +356,7 @@ object MachineKit {
     /** How brightly a lit button cap's core glows (kept low: caps are saturated but often light). */
     const val CAP_GLOW = 0.7f
     /** Pale colours bloom sooner, so a glow multiplier is cut by up to this much at pure white. */
-    const val PALE_GLOW_CUT = 0.5f
+    const val PALE_GLOW_CUT = 0.3f
 
     /**
      * The emissive to give a surface painted [color] that should read as lit at strength [base]:

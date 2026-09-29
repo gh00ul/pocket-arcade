@@ -255,7 +255,7 @@ class CabinetBuild internal constructor(
         // The slot is at 14..21.5 of the plate's 32 texels; the paper leaves it at the middle.
         val sy = y0 + h * (1f - 17.5f / 32f)
         val pw = w * 0.17f
-        b.quad(x - pw, sy + 0.2f, z + 0.02f, x + pw, sy + 0.2f, z + 0.02f, x + pw, sy - w * 0.42f, z + 1.6f, x - pw, sy - w * 0.42f, z + 1.6f, MachineKit.ticketPaper.full, 0f, 0.36f, 0.93f, cull = false)
+        b.quad(x - pw, sy + 0.2f, z + 0.02f, x + pw, sy + 0.2f, z + 0.02f, x + pw, sy - w * 0.42f, z + 1.4f, x - pw, sy - w * 0.42f, z + 1.4f, MachineKit.ticketPaper.full, 0f, 0.36f, 0.93f, cull = false)
     }
 
     /**

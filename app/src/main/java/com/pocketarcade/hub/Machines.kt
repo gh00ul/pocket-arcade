@@ -17,11 +17,16 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /** The live screens' glow: just above 1 so the picture reads as lit but stays under the bloom threshold. */
 private const val SCREEN_GLOW = 1.15f
 /** Radius of the cap of a control-panel button on an upright. */
 private const val BUTTON_R = 0.9f
+/** Depth of a claw machine's control deck, in front of its glass. */
+private const val CLAW_DECK_D = 7.2f
+/** Plush prizes in a claw machine's pile (each is a few hundred polygons). */
+private const val CLAW_PRIZES = 8
 
 // Attract-mode props, looked up once rather than per frame.
 private val skeeBall: Model by lazy { MachineKit.ball(0xFFB0213A.toInt()) }
@@ -163,64 +168,129 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         c.light(cx, panelY + 16f, z1 + 4f, art.glow, 50f, 0.7f)
     }
 
-    /** A glass merchandiser: prize pile (or a screen), gantry and claw, lit marquee on top. */
+    /** T-moulding down the two front corners of a body box ([xa]..[xb] wide, [top] high, its front face at depth [z]). */
+    private fun frontCorners(c: CabinetBuild, xa: Float, xb: Float, top: Float, z: Float, thick: Float = 1.6f) {
+        c.tMoulding(xa - CabinetBuild.T_MOLD_SIDE, xa + thick, 0f, top, z)
+        c.tMoulding(xb - thick, xb + CabinetBuild.T_MOLD_SIDE, 0f, top, z)
+    }
+
+    /**
+     * A glass merchandiser: prize pile (or a screen) under a gantry and claw with LED strips, and a
+     * control deck sloping up in front of the glass with a joystick and a lit drop button. The
+     * base has the coin door, a ticket dispenser and a prize door with a smoked flap; the marquee
+     * on top is framed and lit.
+     */
     private fun claw(c: CabinetBuild, withPrizes: Boolean) {
         val b = c.b
         val baseTop = 28f
         val glassTop = h - 8f
-        val side = art.sideArt.full
+        val glassFront = z1 - CLAW_DECK_D
+        val side = art.sideArtSquare.full
         val dark = art.darkPaint.full
+        val metal = HallArt.darkMetal.full
+        val chrome = HallArt.chrome.full
+        val trim = art.trimTex.full
         b.beveledBox(x0, 0f, z0, x1, baseTop, z1, BoxFaces(front = art.kick.full, left = side, right = side, top = dark, back = dark, gloss = 0.3f))
-        b.box(x0 - 0.3f, baseTop - 1f, z0 - 0.3f, x1 + 0.3f, baseTop, z1 + 0.3f, BoxFaces(front = art.trimTex.full, left = art.trimTex.full, right = art.trimTex.full, frontEmissive = 0.9f))
-        c.posts(x0, x1, z0, z1, baseTop, glassTop)
+        frontCorners(c, x0, x1, baseTop, z1)
+        val bandE = MachineKit.glowFor(art.trim, 0.7f)
+        b.box(x0 - 0.3f, baseTop - 1f, z0 - 0.3f, x1 + 0.3f, baseTop, z1 + 0.3f, BoxFaces(front = trim, left = trim, right = trim, frontEmissive = bandE))
+        c.posts(x0, x1, z0, glassFront, baseTop, glassTop)
         // A solid back behind the prizes, so the case isn't see-through from behind the bank.
         c.rearPanel(x0, x1, 1f, glassTop)
-        c.coinDoor(cx + 3f, 7f, z1, 8f)
-        // Inside: velvet floor and printed back wall.
-        b.quad(x0 + 1f, baseTop + 0.3f, z0 + 1f, x1 - 1f, baseTop + 0.3f, z0 + 1f, x1 - 1f, baseTop + 0.3f, z1 - 1f, x0 + 1f, baseTop + 0.3f, z1 - 1f, MachineKit.velvet.full, 0f, 1f, 0f)
-        b.quad(x0 + 1f, glassTop, z0 + 1.2f, x1 - 1f, glassTop, z0 + 1.2f, x1 - 1f, baseTop, z0 + 1.2f, x0 + 1f, baseTop, z0 + 1.2f, art.sideArt.full, 0f, 0f, 1f, emissive = 0.55f)
+        // The front of the base: a prize door on the left, the coin door, and a ticket dispenser.
+        val fx = x0 + 7.5f
+        b.box(fx - 5.4f, 3.4f, z1, fx + 5.4f, 13.4f, z1 + 0.3f, BoxFaces(front = chrome, top = chrome, left = chrome, right = chrome, gloss = 0.9f))
+        b.quad(fx - 4.8f, 12.8f, z1 + 0.32f, fx + 4.8f, 12.8f, z1 + 0.32f, fx + 4.8f, 4f, z1 + 0.32f, fx - 4.8f, 4f, z1 + 0.32f, MachineKit.prizeChute.full, 0f, 0f, 1f, gloss = 0.5f)
+        c.coinDoor(cx + 2.5f, 7f, z1, 8f)
+        c.ticketDispenser(x1 - 5.2f, 5f, z1 + 0.5f, 5f)
+        // The control deck: a wedge sloping up to the glass, a raised lip along its front.
+        val dy0 = baseTop + 0.5f
+        val dy1 = baseTop + 4.5f
+        val dLen = sqrt(CLAW_DECK_D * CLAW_DECK_D + 16f)
+        b.quad(x0 + 1f, dy1, glassFront, x1 - 1f, dy1, glassFront, x1 - 1f, dy0, z1, x0 + 1f, dy0, z1, metal, 0f, CLAW_DECK_D / dLen, 4f / dLen, gloss = 0.5f)
+        val uv = floatArrayOf(0f, 0f, 0f)
+        b.poly(floatArrayOf(x0 + 1f, x0 + 1f, x0 + 1f), floatArrayOf(baseTop, dy1, dy0), floatArrayOf(glassFront, glassFront, z1), uv, uv, dark, -1f, 0f, 0f)
+        b.poly(floatArrayOf(x1 - 1f, x1 - 1f, x1 - 1f), floatArrayOf(dy0, dy1, baseTop), floatArrayOf(z1, glassFront, glassFront), uv, uv, dark, 1f, 0f, 0f)
+        b.box(x0 + 1f, baseTop, z1 - 0.7f, x1 - 1f, dy0 + 0.3f, z1, BoxFaces(front = metal, top = chrome, gloss = 0.8f))
+        val tilt = atan2(4f, CLAW_DECK_D)
+        fun deckY(z: Float) = dy0 + 4f * (z1 - z) / CLAW_DECK_D
+        b.add(MachineKit.joystick(art.trim), xf.set(cx - 4.5f, deckY(z1 - 3.8f), z1 - 3.8f, pitch = tilt))
+        b.add(MachineKit.button(art.glow, 2.1f), xf.set(cx + 5f, deckY(z1 - 3.6f), z1 - 3.6f, pitch = tilt))
+        // Inside: velvet floor and a printed back wall, lit by strips down the back corners and along the roof.
+        b.quad(x0 + 1f, baseTop + 0.3f, z0 + 1f, x1 - 1f, baseTop + 0.3f, z0 + 1f, x1 - 1f, baseTop + 0.3f, glassFront - 1f, x0 + 1f, baseTop + 0.3f, glassFront - 1f, MachineKit.velvet.full, 0f, 1f, 0f)
+        b.quad(x0 + 1f, glassTop, z0 + 1.2f, x1 - 1f, glassTop, z0 + 1.2f, x1 - 1f, baseTop, z0 + 1.2f, x0 + 1f, baseTop, z0 + 1.2f, art.sideArtSquare.full, 0f, 0f, 1f, emissive = 0.55f)
+        c.ledStrip(x0 + 1.4f, baseTop, x0 + 2.2f, glassTop, z0 + 1.3f)
+        c.ledStrip(x1 - 2.2f, baseTop, x1 - 1.4f, glassTop, z0 + 1.3f)
+        c.ledStripDown(x0 + 1.4f, x1 - 1.4f, glassTop - 0.05f, glassFront - 2.4f, glassFront - 1.2f)
         if (withPrizes) {
             val plushies = Catalog.plushies
-            for (k in 0 until 9) {
+            val zc = (z0 + glassFront) / 2f
+            val zr = (glassFront - z0) / 2f - 5.5f
+            for (k in 0 until CLAW_PRIZES) {
                 val p = plushies[(seed + k * 3) % plushies.size]
                 val px = cx + MachineKit.jitter(seed + k, 1, (x1 - x0) / 2f - 5f)
-                val pz = (z0 + z1) / 2f - 2f + MachineKit.jitter(seed + k, 2, (z1 - z0) / 2f - 6f)
+                val pz = zc + MachineKit.jitter(seed + k, 2, zr)
                 val py = baseTop + 0.3f + (k / 4) * 2.2f
                 b.add(Plush3D.model(p), xf.set(px, py, pz, yaw = MachineKit.jitter(seed + k, 3, 0.9f), roll = MachineKit.jitter(seed + k, 4, 0.2f), scale = 0.42f))
             }
-            // Prize chute in the front-left corner.
-            b.box(x0 + 1.4f, baseTop, z1 - 9f, x0 + 9f, baseTop + 9f, z1 - 1.4f, BoxFaces(top = HallArt.solid(0xFF08060A.toInt()).full, front = art.trimTex.full, frontEmissive = 0.6f))
+            // Prize chute in the front-left corner: a chrome-rimmed hole in the floor.
+            b.box(x0 + 1.4f, baseTop, glassFront - 9f, x0 + 9f, baseTop + 0.8f, glassFront - 1.6f, BoxFaces(top = HallArt.solid(0xFF08060A.toInt()).full, front = chrome, left = chrome, right = chrome, back = chrome, gloss = 0.8f))
         } else {
             val live = c.liveScreen()
-            b.quad(x0 + 3f, glassTop - 3f, z0 + 1.4f, x1 - 3f, glassTop - 3f, z0 + 1.4f, x1 - 3f, baseTop + 6f, z0 + 1.4f, x0 + 3f, baseTop + 6f, z0 + 1.4f, live.texture.full, 0f, 0f, 1f, emissive = 1.1f)
+            val sxa = x0 + 3f
+            val sxb = x1 - 3f
+            val sya = baseTop + 6f
+            val syb = glassTop - 3f
+            val sz = z0 + 1.6f
+            b.quad(sxa, syb, sz, sxb, syb, sz, sxb, sya, sz, sxa, sya, sz, live.texture.full, 0f, 0f, 1f, emissive = SCREEN_GLOW)
+            c.screenBezel(sxa, sxb, sya, syb, sz, frame = 1f, depth = 0.5f)
         }
-        // Gantry rails.
-        val chrome = HallArt.chrome.full
-        val rail = BoxFaces(front = chrome, top = chrome, back = chrome, gloss = 0.9f)
+        // Gantry rails: a frame of chrome under the roof.
+        val rail = BoxFaces(front = chrome, top = chrome, back = chrome, left = chrome, right = chrome, gloss = 0.9f)
         b.box(x0 + 1f, glassTop - 2.5f, z0 + 5f, x1 - 1f, glassTop - 1.5f, z0 + 6f, rail)
-        b.box(x0 + 1f, glassTop - 2.5f, z1 - 6f, x1 - 1f, glassTop - 1.5f, z1 - 5f, rail)
-        c.glassBox(x0 + 0.4f, baseTop, z0 + 0.4f, x1 - 0.4f, glassTop, z1 - 0.4f)
+        b.box(x0 + 1f, glassTop - 2.5f, glassFront - 6f, x1 - 1f, glassTop - 1.5f, glassFront - 5f, rail)
+        b.box(x0 + 1.2f, glassTop - 2.5f, z0 + 5f, x0 + 2.4f, glassTop - 1.5f, glassFront - 5f, rail)
+        b.box(x1 - 2.4f, glassTop - 2.5f, z0 + 5f, x1 - 1.2f, glassTop - 1.5f, glassFront - 5f, rail)
+        c.glassBox(x0 + 0.4f, baseTop, z0 + 0.4f, x1 - 0.4f, glassTop, glassFront - 0.4f)
         c.marqueeBox(x0, x1, glassTop, h, z0, z1)
-        c.light(cx, glassTop - 6f, (z0 + z1) / 2f, lift(art.glow, 0.3f), 44f, 1.1f)
+        c.light(cx, glassTop - 6f, (z0 + glassFront) / 2f, lift(art.glow, 0.3f), 44f, 1.1f)
     }
 
-    /** Whack-a-mole: a table with five holes, a painted backboard and two mallets. */
+    /**
+     * Whack-a-mole: a padded table with five lit holes, a painted backboard with a framed score
+     * display and a lit marquee, the coin door and a ticket dispenser on the front, two mallets
+     * resting on the corners.
+     */
     private fun whack(c: CabinetBuild) {
         val b = c.b
         val tableY = 26f
         val boardZ = z0 + 4f
-        val side = art.sideArt.full
+        val side = art.sideArtSquare.full
         val dark = art.darkPaint.full
-        b.beveledBox(x0, 0f, boardZ, x1, tableY, z1, BoxFaces(front = art.kick.full, left = side, right = side, back = dark, gloss = 0.3f))
-        b.quad(x0, tableY, boardZ, x1, tableY, boardZ, x1, tableY, z1, x0, tableY, z1, MachineKit.whackTop(art.body).full, 0f, 1f, 0f, gloss = 0.35f)
-        c.coinDoor(cx, 6f, z1, 8f)
-        // Padded rim round the table.
         val pad = art.trimTex.full
-        b.box(x0 - 0.5f, tableY, z1 - 1.5f, x1 + 0.5f, tableY + 1.2f, z1 + 0.5f, BoxFaces(front = pad, top = pad, left = pad, right = pad, gloss = 0.4f))
-        // Backboard with the marquee on top and the score display.
+        b.beveledBox(x0, 0f, boardZ, x1, tableY, z1, BoxFaces(front = art.kick.full, left = side, right = side, back = dark, gloss = 0.3f))
+        frontCorners(c, x0, x1, tableY, z1)
+        b.quad(x0, tableY, boardZ, x1, tableY, boardZ, x1, tableY, z1, x0, tableY, z1, MachineKit.whackTop(art.body).full, 0f, 1f, 0f, gloss = 0.35f)
+        c.coinDoor(cx - 5f, 6f, z1, 8f)
+        c.ticketDispenser(cx + 6.5f, 7f, z1 + 0.5f, 6.5f)
+        // Each hole has a lit ring round its collar.
+        val w = x1 - x0
+        val d = z1 - boardZ
+        val ringE = MachineKit.glowFor(art.glow, 0.9f)
+        for ((fx, fz) in MachineKit.whackHoles) b.annulus(x0 + fx * w, boardZ + fz * d, tableY + 0.06f, 3.55f, 4.2f, 12, art.glowTex.full, emissive = ringE)
+        // Padded rim round three sides of the table, with a strip of light along its front.
+        val padFaces = BoxFaces(front = pad, top = pad, left = pad, right = pad, gloss = 0.4f)
+        b.beveledBox(x0 - 0.5f, tableY, z1 - 1.5f, x1 + 0.5f, tableY + 1.2f, z1 + 0.5f, padFaces, bevel = 0.45f, floorAo = 0f)
+        b.beveledBox(x0 - 0.5f, tableY, boardZ, x0 + 1f, tableY + 1.2f, z1 - 1.4f, padFaces, bevel = 0.45f, floorAo = 0f)
+        b.beveledBox(x1 - 1f, tableY, boardZ, x1 + 0.5f, tableY + 1.2f, z1 - 1.4f, padFaces, bevel = 0.45f, floorAo = 0f)
+        c.ledStrip(x0 + 1f, tableY + 0.2f, x1 - 1f, tableY + 0.9f, z1 + 0.52f)
+        // Backboard with the marquee on top and the score display in a bezel.
         b.beveledBox(x0, 0f, z0, x1, h - 10f, boardZ, BoxFaces(front = art.sideArt.full, top = dark, left = dark, right = dark, back = dark))
+        c.tMoulding(x0 - CabinetBuild.T_MOLD_SIDE, x0 + 1.6f, tableY, h - 10f, boardZ)
+        c.tMoulding(x1 - 1.6f, x1 + CabinetBuild.T_MOLD_SIDE, tableY, h - 10f, boardZ)
         c.rearPanel(x0, x1, 1f, h - 10f)
         c.display(cx - 9f, cx + 9f, tableY + 16f, tableY + 21f, boardZ + 0.1f)
+        c.screenBezel(cx - 9f, cx + 9f, tableY + 16f, tableY + 21f, boardZ + 0.1f, frame = 0.9f, depth = 0.5f)
         c.marqueeBox(x0 - 1f, x1 + 1f, h - 10f, h, z0, boardZ + 1f)
         // Mallets resting on the front corners.
         b.add(MachineKit.mallet, xf.set(x0 + 5f, tableY + 2f, z1 - 4f, yaw = 2.4f))
@@ -228,24 +298,52 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         c.light(cx, tableY + 20f, (boardZ + z1) / 2f, lift(art.glow, 0.3f), 50f, 0.8f)
     }
 
-    /** Skee-ball alley (or a generic lane with a screen at the end): rails, lane, target, net and backboard. */
+    /**
+     * Skee-ball alley (or a generic lane with a screen at the end): rails with printed sides and
+     * chrome caps, a rising wood lane with gutters, a ball tray, the tilted target board (or a
+     * screen), a lit score display over the coin door, netting and a framed marquee.
+     */
     private fun lane(c: CabinetBuild, skee: Boolean) {
         val b = c.b
-        val side = art.sideArt.full
+        val side = art.sideArtLong.full
         val inner = art.bodyPaint.full
         val dark = art.darkPaint.full
+        val metal = HallArt.darkMetal.full
+        val chrome = HallArt.chrome.full
+        val black = HallArt.solid(0xFF14121A.toInt()).full
         val railH = 22f
         val boardZ = z0 + 8f
-        b.beveledBox(x0, 0f, boardZ, x0 + 2f, railH, z1, BoxFaces(left = side, right = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
-        b.beveledBox(x1 - 2f, 0f, boardZ, x1, railH, z1, BoxFaces(right = side, left = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
-        // Front console with the ball tray.
-        b.beveledBox(x0 + 2f, 0f, z1 - 10f, x1 - 2f, 18f, z1, BoxFaces(front = art.kick.full, top = HallArt.solid(0xFF14121A.toInt()).full, gloss = 0.3f))
-        c.coinDoor(cx, 3f, z1, 7f)
-        // The lane rises towards the jump.
+        // The rails: printed side, chrome cap, lit T-moulding at the front.
+        for (s in intArrayOf(-1, 1)) {
+            val xa = if (s < 0) x0 else x1 - 2f
+            val faces = if (s < 0) BoxFaces(left = side, right = inner, top = dark, front = dark, gloss = 0.4f) else BoxFaces(right = side, left = inner, top = dark, front = dark, gloss = 0.4f)
+            b.beveledBox(xa, 0f, boardZ, xa + 2f, railH, z1, faces)
+            b.box(xa - 0.15f, railH, boardZ, xa + 2.15f, railH + 0.6f, z1, BoxFaces(top = chrome, front = chrome, left = chrome, right = chrome, gloss = 0.9f))
+            c.tMoulding(xa - 0.15f, xa + 2.15f, 0f, railH, z1)
+        }
+        // Front console with the coin door, a score display, a ticket dispenser and the ball tray.
+        b.beveledBox(x0 + 2f, 0f, z1 - 10f, x1 - 2f, 18f, z1, BoxFaces(front = art.kick.full, top = black, gloss = 0.3f))
+        c.coinDoor(cx - 4f, 3f, z1, 7f)
+        c.ticketDispenser(cx + 6f, 4f, z1 + 0.5f, 6.5f)
+        c.display(cx - 6f, cx + 6f, 13.4f, 16.8f, z1 + 0.05f)
+        c.screenBezel(cx - 6f, cx + 6f, 13.4f, 16.8f, z1 + 0.05f, frame = 0.6f, depth = 0.4f)
+        val tray = BoxFaces(top = chrome, front = chrome, left = chrome, right = chrome, gloss = 0.85f)
+        b.box(x0 + 3f, 18f, z1 - 1.5f, x1 - 3f, 19.4f, z1 - 0.8f, tray)
+        b.box(x0 + 3f, 18f, z1 - 8f, x0 + 3.8f, 19.4f, z1 - 1.5f, tray)
+        b.box(x1 - 3.8f, 18f, z1 - 8f, x1 - 3f, 19.4f, z1 - 1.5f, tray)
+        // The lane rises towards the jump; a gutter with a chrome divider runs down each side.
         val laneFront = z1 - 10f
         val laneBack = boardZ + 30f
         val wood = MachineKit.laneWood.region(wrap = true)
         b.quad(x0 + 2f, 26f, laneBack, x1 - 2f, 26f, laneBack, x1 - 2f, 18f, laneFront, x0 + 2f, 18f, laneFront, wood, 0f, 0.99f, 0.12f, u1 = 128f, v1 = 512f, gloss = 0.5f)
+        fun laneY(z: Float) = 18f + 8f * (laneFront - z) / (laneFront - laneBack) + 0.08f
+        val gw = 2.2f
+        for (s in intArrayOf(-1, 1)) {
+            val xa = if (s < 0) x0 + 2f else x1 - 2f - gw
+            b.quad(xa, laneY(laneBack), laneBack, xa + gw, laneY(laneBack), laneBack, xa + gw, laneY(laneFront), laneFront, xa, laneY(laneFront), laneFront, metal, 0f, 0.99f, 0.12f, gloss = 0.6f)
+            val xl = if (s < 0) xa + gw else xa - 0.4f
+            b.quad(xl, laneY(laneBack) + 0.03f, laneBack, xl + 0.4f, laneY(laneBack) + 0.03f, laneBack, xl + 0.4f, laneY(laneFront) + 0.03f, laneFront, xl, laneY(laneFront) + 0.03f, laneFront, chrome, 0f, 0.99f, 0.12f, gloss = 0.9f)
+        }
         // The jump hump.
         b.quad(x0 + 2f, 30f, laneBack - 4f, x1 - 2f, 30f, laneBack - 4f, x1 - 2f, 26f, laneBack, x0 + 2f, 26f, laneBack, wood, 0f, 0.7f, 0.7f, u1 = 128f, v1 = 40f, gloss = 0.5f)
         if (skee) {
@@ -253,13 +351,13 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
             b.quad(x0 + 2f, 50f, boardZ, x1 - 2f, 50f, boardZ, x1 - 2f, 27f, laneBack - 6f, x0 + 2f, 27f, laneBack - 6f, MachineKit.skeeRings.full, 0f, 0.66f, 0.75f, gloss = 0.4f)
         } else {
             val live = c.liveScreen()
-            b.quad(x0 + 3f, 50f, boardZ + 0.2f, x1 - 3f, 50f, boardZ + 0.2f, x1 - 3f, 30f, boardZ + 0.2f, x0 + 3f, 30f, boardZ + 0.2f, live.texture.full, 0f, 0f, 1f, emissive = 1.1f)
+            b.quad(x0 + 3f, 50f, boardZ + 0.2f, x1 - 3f, 50f, boardZ + 0.2f, x1 - 3f, 30f, boardZ + 0.2f, x0 + 3f, 30f, boardZ + 0.2f, live.texture.full, 0f, 0f, 1f, emissive = SCREEN_GLOW)
+            c.screenBezel(x0 + 3f, x1 - 3f, 30f, 50f, boardZ + 0.2f, frame = 1f, depth = 0.5f)
             b.quad(x0 + 2f, 28f, boardZ, x1 - 2f, 28f, boardZ, x1 - 2f, 28f, laneBack - 4f, x0 + 2f, 28f, laneBack - 4f, dark, 0f, 1f, 0f)
         }
-        // Backboard, display and marquee.
-        b.beveledBox(x0, 0f, z0, x1, h - 12f, boardZ, BoxFaces(front = dark, left = side, right = side, top = dark, back = dark))
+        // Backboard and marquee.
+        b.beveledBox(x0, 0f, z0, x1, h - 12f, boardZ, BoxFaces(front = dark, left = dark, right = dark, top = dark, back = dark))
         c.rearPanel(x0, x1, 1f, h - 12f)
-        c.display(cx - 8f, cx + 8f, h - 20f, h - 14f, boardZ + 0.1f)
         c.marqueeBox(x0 - 1f, x1 + 1f, h - 12f, h, z0, boardZ + 1f)
         // Netting over the target end.
         val net = MachineKit.net.region(wrap = true)
@@ -310,20 +408,38 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         c.light(cx, h - 16f, z0 + 20f, 0xFFFFE8C8.toInt(), 70f, 0.9f)
     }
 
-    /** Coin pusher: glass case over a coin-covered deck with a sliding shelf. */
+    /**
+     * Coin pusher: a glass case over a coin-covered deck with side walls lit along their tops
+     * and a sliding shelf, LED strips in the roof and back corners, and a base with the coin
+     * door, a framed credits display and a ticket dispenser.
+     */
     private fun pusher(c: CabinetBuild) {
         val b = c.b
         val baseTop = 30f
         val glassTop = h - 8f
-        val side = art.sideArt.full
+        val side = art.sideArtSquare.full
         val dark = art.darkPaint.full
+        val chrome = HallArt.chrome.full
+        val trim = art.trimTex.full
         b.beveledBox(x0, 0f, z0, x1, baseTop, z1, BoxFaces(front = art.kick.full, left = side, right = side, top = dark, back = dark, gloss = 0.3f))
+        frontCorners(c, x0, x1, baseTop, z1)
         c.posts(x0, x1, z0, z1, baseTop, glassTop)
         c.rearPanel(x0, x1, 1f, glassTop)
-        c.coinDoor(cx, 8f, z1, 9f)
-        b.quad(x0 + 1f, glassTop, z0 + 1.2f, x1 - 1f, glassTop, z0 + 1.2f, x1 - 1f, baseTop, z0 + 1.2f, x0 + 1f, baseTop, z0 + 1.2f, art.sideArt.full, 0f, 0f, 1f, emissive = 0.5f)
+        c.coinDoor(cx - 6f, 8f, z1, 9f)
+        c.ticketDispenser(cx + 8.5f, 8.5f, z1 + 0.5f, 7f)
+        c.display(cx - 9f, cx + 9f, 23f, 27.5f, z1 + 0.05f)
+        c.screenBezel(cx - 9f, cx + 9f, 23f, 27.5f, z1 + 0.05f, frame = 0.8f, depth = 0.45f)
+        b.quad(x0 + 1f, glassTop, z0 + 1.2f, x1 - 1f, glassTop, z0 + 1.2f, x1 - 1f, baseTop, z0 + 1.2f, x0 + 1f, baseTop, z0 + 1.2f, art.sideArtSquare.full, 0f, 0f, 1f, emissive = 0.5f)
+        c.ledStrip(x0 + 1.4f, baseTop, x0 + 2.2f, glassTop, z0 + 1.3f)
+        c.ledStrip(x1 - 2.2f, baseTop, x1 - 1.4f, glassTop, z0 + 1.3f)
+        c.ledStripDown(x0 + 1.4f, x1 - 1.4f, glassTop - 0.05f, z1 - 2.4f, z1 - 1.2f)
         val deckY = baseTop + 3f
         b.box(x0 + 1f, baseTop, z0 + 1f, x1 - 1f, deckY, z1 - 1f, BoxFaces(top = MachineKit.deck.full, front = MachineKit.gold.full, gloss = 0.6f))
+        // Side walls round the playfield, their tops lit.
+        val wallE = MachineKit.glowFor(art.trim, 0.8f)
+        val wall = BoxFaces(top = trim, right = dark, left = dark, front = dark, topEmissive = wallE, gloss = 0.5f)
+        b.box(x0 + 1f, deckY, z0 + 1f, x0 + 2.2f, deckY + 5f, z1 - 1f, wall)
+        b.box(x1 - 2.2f, deckY, z0 + 1f, x1 - 1f, deckY + 5f, z1 - 1f, wall)
         for (k in 0 until 26) {
             val px = cx + MachineKit.jitter(seed + k, 5, (x1 - x0) / 2f - 4f)
             val pz = z0 + 12f + hash01(seed + k, 6) * (z1 - z0 - 16f)
@@ -407,9 +523,10 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
             CabinetShape.CLAW, CabinetShape.WIDE -> {
                 // The claw patrols over the prizes, dips now and then.
                 val glassTop = h - 8f
+                val glassFront = z1 - CLAW_DECK_D
                 val sweep = sin(phase * 0.55f)
                 val px = cx + sweep * ((x1 - x0) / 2f - 6f)
-                val pz = (z0 + z1) / 2f + sin(phase * 0.31f) * ((z1 - z0) / 2f - 7f)
+                val pz = (z0 + glassFront) / 2f + sin(phase * 0.31f) * ((glassFront - z0) / 2f - 7f)
                 val dip = ((sin(phase * 0.23f) - 0.75f) * 4f).coerceIn(0f, 1f) * 12f
                 val cy = glassTop - 6f - dip
                 r.beam(px, glassTop - 2f, pz, px, cy, pz, 0.35f, HallArt.chrome.full)
