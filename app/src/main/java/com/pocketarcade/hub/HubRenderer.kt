@@ -1,11 +1,8 @@
 package com.pocketarcade.hub
 
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -207,14 +204,26 @@ class HubRenderer {
                 accent = if (spot.prop?.variant == 0) Pal.RED else Pal.BLUE
             }
         }
-        // A dark glass card with an accent edge and a pointer down to the machine.
-        val u = 2.3f * scope.density
-        val tu = u * 1.05f
-        val tw = maxOf(ArcadeFont.width(title, tu, true), ArcadeFont.width(action, u * 1.3f), ArcadeFont.width(info, tu, true))
-        val pad = u * 5f
-        val bw = tw + pad * 2f
-        val bh = pad * 2f + ArcadeFont.height(tu, true) + u * 4f + ArcadeFont.height(u * 1.3f) + u * 4f + ArcadeFont.height(tu, true)
-        val tip = u * 5f
+        // The bubble itself: measured first so it can be kept on screen, then drawn where it settles.
+        val cost = when (spot.type) {
+            SpotType.MACHINE, SpotType.TOKENS -> PromptCost.TOKEN
+            SpotType.PRIZES -> PromptCost.TICKET
+            else -> PromptCost.NONE
+        }
+        val glyph = when (spot.type) {
+            SpotType.MACHINE -> PromptGlyph.STAR
+            SpotType.TOKENS -> PromptGlyph.TOKEN
+            SpotType.PRIZES, SpotType.TROPHY -> PromptGlyph.TROPHY
+            SpotType.PHOTO -> PromptGlyph.CAMERA
+            SpotType.RIDE -> PromptGlyph.PLAY
+            SpotType.JUKEBOX -> PromptGlyph.SOUND
+            SpotType.TANK, SpotType.CAFE, SpotType.VENDING -> PromptGlyph.SPARKLE
+        }
+        PromptBubble.measure(title, action, info, cost, scope.density)
+        val u = PromptBubble.u
+        val bw = PromptBubble.width
+        val bh = PromptBubble.height
+        val tip = PromptBubble.tip
         val bob = sin(t * 4f) * u * 0.8f
         // Keep the whole bubble on screen, clear of the HUD along the top: up close in first
         // person the anchor can be off the top or side, or (looking away) behind the eye.
@@ -232,31 +241,8 @@ class HubRenderer {
         world.bubbleRight = left + bw
         world.bubbleBottom = ay
         val pressed = world.bubblePressed >= 0
-        val accentC = Color(accent)
         scope.withTransform({ scale(pop, pop, Offset(ax, ay)) }) {
-            val r = CornerRadius(u * 5f)
-            drawRoundRect(Color.Black, Offset(left, top + u * 1.5f), Size(bw, bh), r, alpha = 0.35f)
-            val pointer = Path().apply {
-                moveTo(ax - tip, top + bh - 1f)
-                lineTo(ax + tip, top + bh - 1f)
-                lineTo(ax, ay)
-                close()
-            }
-            drawPath(pointer, accentC)
-            drawRoundRect(
-                Brush.verticalGradient(listOf(Color(if (pressed) 0xF03A2A5E else 0xF0241A40), Color(0xF0120C22)), startY = top, endY = top + bh),
-                Offset(left, top), Size(bw, bh), r,
-            )
-            drawRoundRect(accentC, Offset(left, top), Size(bw, bh), r, style = Stroke(u * 0.9f))
-            val cx = left + bw / 2f
-            var y = top + pad
-            ArcadeFont.drawCentered(this, title, cx, y, tu, accentC, tiny = true)
-            y += ArcadeFont.height(tu, true) + u * 4f
-            val blink = 0.75f + 0.25f * sin(t * 8f)
-            ArcadeFont.drawCentered(this, action, cx, y, u * 1.3f, Color.White, alpha = blink)
-            y += ArcadeFont.height(u * 1.3f) + u * 4f
-            val infoAlpha = if (infoColor == Pal.RED) (0.5f + 0.5f * sin(t * 10f)) else 1f
-            ArcadeFont.drawCentered(this, info, cx, y, tu, Color(infoColor), alpha = infoAlpha, tiny = true)
+            PromptBubble.draw(this, title, action, info, infoColor, accent, glyph, cost, left, top, ax, ay, t, pressed)
         }
     }
 }

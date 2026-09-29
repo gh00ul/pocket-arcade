@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -45,11 +46,22 @@ fun SaveState.playerLook(): CharacterLook {
     return Looks.player(outfit.shirt, outfit.pants, Catalog.hat(hat)?.hat)
 }
 
+/** The HUD's margin from the safe area, and the width of the gap between its round buttons. */
+private val HUD_MARGIN = 10.dp
+private val HUD_GAP = 8.dp
+
+/** The pill's glow at rest, and how far the low-token warning swings it. */
+private const val PILL_GLOW = 0.2f
+private const val PILL_GLOW_WARN = 0.5f
+
 /**
- * Token and ticket counters (rolling like an odometer when they change, with [onTick] for a soft
- * sound) plus collection and sound buttons, and (given [onToggleView]) the camera button switching
- * the hall between overhead and first person. Given a [fx], the token icon tells it where it is so
- * a coin can fly out of it.
+ * The currency pill, the collection and sound buttons and (given [onToggleView]) the camera
+ * button switching the hall between overhead and first person. The pill is layered glass edged
+ * in gold with a soft glow: the token twinkles, the counts roll like an odometer (with [onTick]
+ * for a soft sound), and when tokens run low the glow turns to a warning pulse. On a narrow phone
+ * the pill's contents shrink rather than push the buttons off screen. Given a [fx], the token
+ * icon tells it where it is so a coin can fly out of it. It sits inside the safe area, so a
+ * camera cutout never covers it.
  */
 @Composable
 fun Hud(
@@ -63,40 +75,59 @@ fun Hud(
     fx: CurrencyFx? = null,
 ) {
     val pill = RoundedCornerShape(50)
+    val low = save.tokens <= LOW_TOKENS
+    val pulse = rememberLowPulse(low)
+    // Gold at rest; orange while low and red when out, breathing with the same pulse the counter uses.
+    val glowColor = when {
+        save.tokens == 0 -> UiColors.bad
+        low -> UiColors.warn
+        else -> UiColors.token
+    }
     Row(
         modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(10.dp),
+            .padding(HUD_MARGIN),
+        // The pill hugs the left, the buttons the right; on a narrow phone the pill takes only
+        // what the buttons and the gap leave it, and shrinks its contents to fit.
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier
+                .weight(1f, fill = false)
+                .uiGlow(glowColor, PILL_HEIGHT, 8.dp) { if (low) PILL_GLOW + (PILL_GLOW_WARN - PILL_GLOW) * pulse.value else PILL_GLOW }
                 .shadow(10.dp, pill)
                 .clip(pill)
-                .background(Brush.verticalGradient(listOf(Color(0xE6261C44), Color(0xE6120C22))))
-                .border(1.5.dp, Brush.verticalGradient(listOf(Color(0x66FFFFFF), Color(0x14FFFFFF))), pill)
+                .background(Brush.verticalGradient(listOf(Color(0xE62C2152), Color(0xE6110B21))))
+                .drawBehind { paintGlassBevel(size.height / 2f) }
+                .border(UiEdge.line, Brush.verticalGradient(listOf(glowColor.copy(alpha = 0.7f), glowColor.copy(alpha = 0.16f))), pill)
                 .padding(start = 10.dp, end = 16.dp, top = 7.dp, bottom = 7.dp)
                 // The counters are numbers beside icons: say what they are, once, with the real totals.
                 .clearAndSetSemantics { contentDescription = "${save.tokens} tokens, ${save.tickets} tickets" },
         ) {
             CurrencyRow(
-                save.tokens, save.tickets, unit = 2.6.dp, onTick = onTick,
+                save.tokens, save.tickets, Modifier.shrinkToFit(), unit = 2.6.dp, onTick = onTick,
                 tokenIconModifier = Modifier.onGloballyPositioned {
                     fx?.tokenAnchor = it.positionInRoot() + Offset(it.size.width / 2f, it.size.height / 2f)
                 },
             )
         }
-        Spacer(Modifier.weight(1f))
-        if (onToggleView != null) {
-            RoundButton(if (firstPerson) UiIcon.EYE else UiIcon.CAMERA, onToggleView, Color(Pal.BLUE))
-            Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(HUD_GAP))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (onToggleView != null) {
+                RoundButton(if (firstPerson) UiIcon.EYE else UiIcon.CAMERA, onToggleView, Color(Pal.BLUE))
+                Spacer(Modifier.width(HUD_GAP))
+            }
+            RoundButton(UiIcon.TROPHY, onProfile, Color(Pal.PURPLE))
+            Spacer(Modifier.width(HUD_GAP))
+            RoundButton(if (save.muted) UiIcon.MUTED else UiIcon.SOUND, onToggleMute, Color(Pal.TEAL))
         }
-        RoundButton(UiIcon.TROPHY, onProfile, Color(Pal.PURPLE))
-        Spacer(Modifier.width(8.dp))
-        RoundButton(if (save.muted) UiIcon.MUTED else UiIcon.SOUND, onToggleMute, Color(Pal.TEAL))
     }
 }
+
+/** The pill's approximate height (a token icon plus its padding), which its glow's corners are sized to. */
+private val PILL_HEIGHT = 40.dp
 
 /**
  * Fades the hall's interface in and out as [visible] changes instead of popping, keeping it
@@ -144,11 +175,11 @@ fun HudExtras(onMap: () -> Unit, onSettings: () -> Unit, modifier: Modifier = Mo
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.safeDrawing)
             // Hud's padding, its buttons (50 + their 4 lip) and a small gap.
-            .padding(start = 10.dp, end = 10.dp, top = 70.dp),
+            .padding(start = HUD_MARGIN, end = HUD_MARGIN, top = 70.dp),
         horizontalArrangement = Arrangement.End,
     ) {
         RoundButton(UiIcon.MAP, onMap, Color(Pal.SKY))
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(HUD_GAP))
         RoundButton(UiIcon.GEAR, onSettings, Color(Pal.ORANGE))
     }
 }
