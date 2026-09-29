@@ -188,10 +188,11 @@ class CabinetBuild internal constructor(
         // to the floor and trails off a little way behind, towards the wall socket.
         val px = xb - w * (if (tall) 0.4f else 0.25f)
         val py = y1 - hgt * (if (tall) 0.86f else 0.72f)
-        val rubber = MachineKit.rubber.full
-        b.capsule(px, py, zf - 0.4f, px - 0.6f, py * 0.4f, zf - 2.2f, 0.45f, rubber, slices = 5, gloss = 0.3f)
-        b.capsule(px - 0.6f, py * 0.4f, zf - 2.2f, px - 1.4f, 0.45f, zf - 2.8f, 0.45f, rubber, slices = 5, gloss = 0.3f)
-        b.capsule(px - 1.4f, 0.45f, zf - 2.8f, px - 3f, 0.45f, zf - 6f, 0.45f, rubber, slices = 5, gloss = 0.3f)
+        // In the cabinet's own dark paint, which it already draws with: no extra draw call.
+        val cable = art.darkPaint.full
+        b.capsule(px, py, zf - 0.4f, px - 0.6f, py * 0.4f, zf - 2.2f, 0.45f, cable, slices = 5, gloss = 0.3f)
+        b.capsule(px - 0.6f, py * 0.4f, zf - 2.2f, px - 1.4f, 0.45f, zf - 2.8f, 0.45f, cable, slices = 5, gloss = 0.3f)
+        b.capsule(px - 1.4f, 0.45f, zf - 2.8f, px - 3f, 0.45f, zf - 6f, 0.45f, cable, slices = 5, gloss = 0.3f)
     }
 
     /** A face at height [y] looking down, closing the underside of a part hung above eye level. */
