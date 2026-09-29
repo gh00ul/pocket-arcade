@@ -40,9 +40,11 @@ import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.ScreenShake
 import com.pocketarcade.engine.gl.Gfx
 import com.pocketarcade.engine.gl.GfxFailureNotice
+import com.pocketarcade.engine.gl.GfxQuality
 import com.pocketarcade.engine.gl.GlSurface
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.games.GameRegistry
+import com.pocketarcade.games.racer.RacerGame
 import com.pocketarcade.hub.HubScreen
 import com.pocketarcade.hub.HubWorld
 import com.pocketarcade.hub.Spot
@@ -132,13 +134,21 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         audio.sfxVolume = s.sfxGain
         audio.ambienceVolume = s.ambienceGain
         services.haptics.enabled = s.haptics
+        services.haptics.strength = s.hapticsStrength
         ScreenShake.intensity = if (s.reduceMotion) 0f else 1f
+        GfxQuality.tier = when (s.quality) {
+            GameSettings.QUALITY_BATTERY -> GfxQuality.Tier.BATTERY
+            GameSettings.QUALITY_BEST -> GfxQuality.Tier.QUALITY
+            else -> GfxQuality.Tier.AUTO
+        }
+        GfxQuality.frameCap = s.frameCap
+        for (g in games) if (g is RacerGame) g.tiltSteering = s.tiltSteering
     }
 
     fun changeSettings(next: GameSettings) {
         val s = next.sanitized()
         if (s == settings) return
-        val hapticsTurnedOn = s.haptics && !settings.haptics
+        val hapticsTurnedOn = s.haptics && (!settings.haptics || s.hapticsPercent != settings.hapticsPercent)
         settings = s
         applySettings(s)
         audio.play(Sfx.BLIP, 0.5f, 1.2f)

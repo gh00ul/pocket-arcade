@@ -51,11 +51,27 @@ data class GameSettings(
     /** Sound effect and ambience volumes, 0..100 (see [gain]). */
     val sfxPercent: Int = 100,
     val ambiencePercent: Int = 100,
+    /** How hard the haptics hit, as a percentage (100 is the full strength they always had). */
+    val hapticsPercent: Int = 100,
+    /** Racer: lean the phone to steer instead of dragging (drag stays available). */
+    val tiltSteering: Boolean = false,
+    /** Graphics quality tier: [QUALITY_AUTO], [QUALITY_BATTERY] or [QUALITY_BEST]. */
+    val quality: Int = QUALITY_AUTO,
+    /** Frame-rate cap: [CAP_AUTO] (60 where the screen allows), 30 or 60. */
+    val frameCap: Int = CAP_AUTO,
 ) {
     companion object {
         val LOOK = StepRange(50, 200, 10)
         val FOV = StepRange(60, 90, 5)
         val VOLUME = StepRange(0, 100, 10)
+        val HAPTIC_STRENGTH = StepRange(20, 100, 20)
+
+        const val QUALITY_AUTO = 0
+        const val QUALITY_BATTERY = 1
+        const val QUALITY_BEST = 2
+        const val CAP_AUTO = 0
+        /** The frame caps a player can pick, in the order the button cycles through them. */
+        val CAPS = intArrayOf(CAP_AUTO, 30, 60)
 
         /**
          * The loudness multiplier for a volume of [percent]: squared, so the steps sound even
@@ -76,12 +92,18 @@ data class GameSettings(
     /** Ambience loudness multiplier. */
     val ambienceGain: Float get() = gain(ambiencePercent)
 
+    /** Haptic strength as the 0..1 multiplier `Haptics.strength` takes. */
+    val hapticsStrength: Float get() = hapticsPercent / 100f
+
     /** This, with every number put back in its range. */
     fun sanitized(): GameSettings = copy(
         lookPercent = LOOK.clamp(lookPercent),
         fovDeg = FOV.clamp(fovDeg),
         sfxPercent = VOLUME.clamp(sfxPercent),
         ambiencePercent = VOLUME.clamp(ambiencePercent),
+        hapticsPercent = HAPTIC_STRENGTH.clamp(hapticsPercent),
+        quality = quality.coerceIn(QUALITY_AUTO, QUALITY_BEST),
+        frameCap = if (frameCap in CAPS) frameCap else CAP_AUTO,
     )
 }
 
@@ -100,6 +122,10 @@ class SettingsStore(context: Context) {
         private val HAPTICS = booleanPreferencesKey("haptics")
         private val SFX = intPreferencesKey("sfx_percent")
         private val AMBIENCE = intPreferencesKey("ambience_percent")
+        private val HAPTIC_STRENGTH = intPreferencesKey("haptics_percent")
+        private val TILT = booleanPreferencesKey("tilt_steering")
+        private val QUALITY = intPreferencesKey("gfx_quality")
+        private val FRAME_CAP = intPreferencesKey("gfx_frame_cap")
 
         /** Everything stored, in range; whatever is missing is the default. */
         fun read(p: Preferences): GameSettings {
@@ -114,6 +140,10 @@ class SettingsStore(context: Context) {
                 haptics = p[HAPTICS] ?: d.haptics,
                 sfxPercent = p[SFX] ?: d.sfxPercent,
                 ambiencePercent = p[AMBIENCE] ?: d.ambiencePercent,
+                hapticsPercent = p[HAPTIC_STRENGTH] ?: d.hapticsPercent,
+                tiltSteering = p[TILT] ?: d.tiltSteering,
+                quality = p[QUALITY] ?: d.quality,
+                frameCap = p[FRAME_CAP] ?: d.frameCap,
             ).sanitized()
         }
 
@@ -129,6 +159,10 @@ class SettingsStore(context: Context) {
             p[HAPTICS] = v.haptics
             p[SFX] = v.sfxPercent
             p[AMBIENCE] = v.ambiencePercent
+            p[HAPTIC_STRENGTH] = v.hapticsPercent
+            p[TILT] = v.tiltSteering
+            p[QUALITY] = v.quality
+            p[FRAME_CAP] = v.frameCap
         }
     }
 

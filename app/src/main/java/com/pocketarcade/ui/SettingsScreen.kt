@@ -54,18 +54,52 @@ fun SettingsScreen(settings: GameSettings, onChange: (GameSettings) -> Unit, onC
                 ) { onChange(s.copy(runLatch = !s.runLatch)) }
             }
             Spacer(Modifier.height(12.dp))
+            Section("RACER", "") {
+                Toggle("TILT STEERING", s.tiltSteering, "LEAN THE PHONE TO STEER,\nDRAGGING STILL WORKS") { onChange(s.copy(tiltSteering = it)) }
+            }
+            Spacer(Modifier.height(12.dp))
             Section("COMFORT", "") {
                 Toggle("REDUCE MOTION", s.reduceMotion, "NO HEAD BOB, RUN ZOOM\nOR SCREEN SHAKE") { onChange(s.copy(reduceMotion = it)) }
-                // A haptics strength row goes under this one.
                 Toggle("HAPTICS", s.haptics, "VIBRATION ON HITS\nAND WINS") { onChange(s.copy(haptics = it)) }
+                if (s.haptics) {
+                    Stepper("HAPTIC STRENGTH", "${s.hapticsPercent}%", GameSettings.HAPTIC_STRENGTH, s.hapticsPercent) { onChange(s.copy(hapticsPercent = it)) }
+                }
             }
             Spacer(Modifier.height(12.dp))
             Section("SOUND", "") {
                 Stepper("EFFECTS VOLUME", "${s.sfxPercent}%", GameSettings.VOLUME, s.sfxPercent) { onChange(s.copy(sfxPercent = it)) }
                 Stepper("AMBIENCE VOLUME", "${s.ambiencePercent}%", GameSettings.VOLUME, s.ambiencePercent) { onChange(s.copy(ambiencePercent = it)) }
             }
-            // GRAPHICS: render-quality options (render scale, bloom, anti-aliasing) get a Section
-            // here, above the reset button, once the renderer exposes them.
+            Spacer(Modifier.height(12.dp))
+            Section("GRAPHICS", "CHANGES APPLY AT ONCE") {
+                ChoiceRow(
+                    "QUALITY",
+                    when (s.quality) {
+                        GameSettings.QUALITY_BATTERY -> "COOLER AND LIGHTER,\nGIVES UP EFFECTS EARLY"
+                        GameSettings.QUALITY_BEST -> "KEEPS EVERY EFFECT,\nLOWERS SHARPNESS FIRST"
+                        else -> "ADAPTS TO YOUR PHONE\nAS YOU PLAY"
+                    },
+                    when (s.quality) {
+                        GameSettings.QUALITY_BATTERY -> "BATTERY"
+                        GameSettings.QUALITY_BEST -> "BEST"
+                        else -> "AUTO"
+                    },
+                    Color(Pal.PURPLE),
+                ) { onChange(s.copy(quality = (s.quality + 1) % 3)) }
+                ChoiceRow(
+                    "FRAME RATE",
+                    "30 SAVES BATTERY,\n60 IS SMOOTHER",
+                    when (s.frameCap) {
+                        30 -> "30 FPS"
+                        60 -> "60 FPS"
+                        else -> "AUTO"
+                    },
+                    Color(Pal.PURPLE),
+                ) {
+                    val caps = GameSettings.CAPS
+                    onChange(s.copy(frameCap = caps[(caps.indexOf(s.frameCap).coerceAtLeast(0) + 1) % caps.size]))
+                }
+            }
             Spacer(Modifier.height(16.dp))
             ArcadeButton("RESET ALL", { onChange(GameSettings()) }, color = Color(Pal.RED), unit = 2.4.dp)
             Spacer(Modifier.height(8.dp))

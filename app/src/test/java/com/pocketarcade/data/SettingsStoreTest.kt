@@ -61,6 +61,67 @@ class SettingsStoreTest {
     }
 
     @Test
+    fun theGraphicsHapticAndTiltOptionsDefaultToHowTheGamePlayedBefore() {
+        val s = SettingsStore.read(mutablePreferencesOf())
+        assertEquals(100, s.hapticsPercent)
+        assertEquals(1f, s.hapticsStrength, 0f)
+        assertFalse(s.tiltSteering)
+        assertEquals(GameSettings.QUALITY_AUTO, s.quality)
+        assertEquals(GameSettings.CAP_AUTO, s.frameCap)
+    }
+
+    @Test
+    fun theGraphicsHapticAndTiltOptionsRoundTrip() {
+        val want = GameSettings(hapticsPercent = 40, tiltSteering = true, quality = GameSettings.QUALITY_BATTERY, frameCap = 30)
+        val p = mutablePreferencesOf()
+        SettingsStore.write(p, want)
+        assertEquals(want, SettingsStore.read(p))
+        SettingsStore.write(p, want.copy(quality = GameSettings.QUALITY_BEST, frameCap = 60))
+        val back = SettingsStore.read(p)
+        assertEquals(GameSettings.QUALITY_BEST, back.quality)
+        assertEquals(60, back.frameCap)
+        // The other options ride along untouched.
+        assertEquals(40, back.hapticsPercent)
+        assertTrue(back.tiltSteering)
+    }
+
+    @Test
+    fun theGraphicsAndHapticOptionsStayInRangeWhateverTheFileSays() {
+        val p = mutablePreferencesOf(
+            intPreferencesKey("haptics_percent") to 999,
+            intPreferencesKey("gfx_quality") to 7,
+            intPreferencesKey("gfx_frame_cap") to 45,
+        )
+        val s = SettingsStore.read(p)
+        assertEquals(100, s.hapticsPercent)
+        assertEquals(GameSettings.QUALITY_BEST, s.quality)
+        // A cap that isn't on offer falls back to automatic, never to some odd frame rate.
+        assertEquals(GameSettings.CAP_AUTO, s.frameCap)
+        // Haptics are never silenced by the strength alone: the lowest stop is still felt.
+        assertEquals(20, GameSettings(hapticsPercent = 0).sanitized().hapticsPercent)
+        assertEquals(GameSettings.QUALITY_AUTO, GameSettings(quality = -3).sanitized().quality)
+        assertEquals(60, GameSettings(frameCap = 60).sanitized().frameCap)
+    }
+
+    @Test
+    fun theHapticStrengthStepperWalksItsStopsAndTheCapsCycle() {
+        val r = GameSettings.HAPTIC_STRENGTH
+        assertEquals(listOf(20, 40, 60, 80, 100), generateSequence(r.min) { v -> r.nudge(v, 1).takeIf { it != v } }.toList())
+        assertEquals(20, r.nudge(20, -1))
+        assertEquals(100, r.nudge(100, 1))
+        // Every cap the button offers survives sanitising, and stepping through them comes back round.
+        for (cap in GameSettings.CAPS) assertEquals(cap, GameSettings(frameCap = cap).sanitized().frameCap)
+        var cap = GameSettings.CAP_AUTO
+        val seen = ArrayList<Int>()
+        repeat(GameSettings.CAPS.size) {
+            seen += cap
+            cap = GameSettings.CAPS[(GameSettings.CAPS.indexOf(cap) + 1) % GameSettings.CAPS.size]
+        }
+        assertEquals(GameSettings.CAP_AUTO, cap)
+        assertEquals(GameSettings.CAPS.toList(), seen)
+    }
+
+    @Test
     fun theOptionsShareNoKeysWithTheSave() {
         // A different DataStore file as well, but the names alone must not collide either.
         val p = mutablePreferencesOf()
