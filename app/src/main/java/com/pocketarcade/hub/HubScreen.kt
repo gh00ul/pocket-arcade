@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import com.pocketarcade.data.SaveState
 import com.pocketarcade.engine.gl.Gfx
 import com.pocketarcade.engine.rememberGameLoop
+import com.pocketarcade.engine.thumbZoneGestureExclusion
 
 /**
  * The walkable 3D hall. Runs the hub simulation on the fixed-step loop and renders it every
@@ -62,6 +63,8 @@ fun HubScreen(
         modifier
             .fillMaxSize()
             .onSizeChanged { world.setViewport(it.width.toFloat(), it.height.toFloat()) }
+            // The stick and the look drag start low on either side: keep Back swipes off them.
+            .thumbZoneGestureExclusion(density)
             .pointerInput(world) {
                 awaitPointerEventScope {
                     while (true) {

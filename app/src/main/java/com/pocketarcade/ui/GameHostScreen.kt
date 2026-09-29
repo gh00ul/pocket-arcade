@@ -49,6 +49,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.pocketarcade.ArcadeServices
 import com.pocketarcade.data.SaveState
@@ -58,6 +59,7 @@ import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.ScreenShake
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.TouchType
+import com.pocketarcade.engine.thumbZoneGestureExclusion
 import com.pocketarcade.engine.clamp01
 import com.pocketarcade.engine.gl.Gfx
 import com.pocketarcade.engine.r3d.GameViewport
@@ -283,6 +285,7 @@ fun GameHostScreen(
     }
 
     val density = LocalDensity.current
+    val view = LocalView.current
     val topInset = WindowInsets.safeDrawing.getTop(density).toFloat()
     val bottomInset = WindowInsets.safeDrawing.getBottom(density).toFloat()
 
@@ -290,11 +293,15 @@ fun GameHostScreen(
         Canvas(
             Modifier
                 .fillMaxSize()
+                // Thumbs rest low on both sides (pinball flippers, racer steering): no Back swipes there.
+                .thumbZoneGestureExclusion(density)
                 .pointerInput(game) {
                     awaitPointerEventScope {
                         while (true) {
                             val event = awaitPointerEvent()
-                            for (c in event.changes) {
+                            val changes = event.changes
+                            for (i in 0 until changes.size) {
+                                val c = changes[i]
                                 val type = when {
                                     c.changedToDownIgnoreConsumed() -> TouchType.DOWN
                                     c.changedToUpIgnoreConsumed() -> TouchType.UP
@@ -302,10 +309,35 @@ fun GameHostScreen(
                                     else -> null
                                 }
                                 if (type != null) {
-                                    val lx = (c.position.x - state.gx) / state.gs
-                                    val ly = (c.position.y - state.gy) / state.gs
                                     when (state.phase) {
-                                        HostPhase.PLAYING -> game.onTouch(type, c.id.value, lx, ly, c.uptimeMillis)
+                                        HostPhase.PLAYING -> {
+                                            if (type == TouchType.DOWN) {
+                                                // Deliver this touch stream as it arrives, not batched to the
+                                                // frame (a no-op unless the event is the first finger's DOWN).
+                                                val raw = event.motionEvent
+                                                if (raw != null) view.requestUnbufferedDispatch(raw)
+                                            } else if (type == TouchType.MOVE) {
+                                                // Compose batches the samples between two frames: hand the
+                                                // game every one, oldest first, each at its own time, so a
+                                                // flick's speed is measured on all of them, not one per frame.
+                                                val past = c.historical
+                                                for (h in 0 until past.size) {
+                                                    val s = past[h]
+                                                    game.onTouch(
+                                                        TouchType.MOVE, c.id.value,
+                                                        (s.position.x - state.gx) / state.gs,
+                                                        (s.position.y - state.gy) / state.gs,
+                                                        s.uptimeMillis,
+                                                    )
+                                                }
+                                            }
+                                            game.onTouch(
+                                                type, c.id.value,
+                                                (c.position.x - state.gx) / state.gs,
+                                                (c.position.y - state.gy) / state.gs,
+                                                c.uptimeMillis,
+                                            )
+                                        }
                                         HostPhase.RESULTS -> if (type == TouchType.DOWN && !state.printingDone && state.phaseT > 0.9f) {
                                             state.printed = state.resultTickets
                                         }
@@ -375,7 +407,7 @@ fun GameHostScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(8.dp),
         ) {
-            RoundButton(UiIcon.CLOSE, { onExitPressed() }, Color(Pal.RED), size = 44.dp)
+            RoundButton(UiIcon.CLOSE, { onExitPressed() }, Color(Pal.RED), size = 48.dp)
         }
     }
 }
