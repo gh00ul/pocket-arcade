@@ -106,15 +106,16 @@ class Figure(val look: CharacterLook) {
         fun heldItem(look: CharacterLook): Int = if ((look.hashCode() and 0x7FFFFFFF) % 3 == 0) ITEM_CONE else ITEM_CUP
 
         /** A slushie cup with a domed lid and a straw, gripped at its middle. */
-        private val cupModels = HashMap<Int, Model>()
         private val slushColors = intArrayOf(0xFF2FB8FF.toInt(), 0xFFFF3D6E.toInt(), 0xFF7CF25A.toInt(), 0xFFB070FF.toInt())
-        private fun cup(color: Int): Model = cupModels.getOrPut(color) {
+        // One cup per flavour, in an array so picking one each frame allocates nothing.
+        private val cups: Array<Model> by lazy { Array(slushColors.size) { cup(slushColors[it]) } }
+        private fun cup(color: Int): Model {
             val b = ModelBuilder()
             b.lathe(0f, -3.2f, 0f, floatArrayOf(1.35f, 0f, 1.6f, 2.4f, 1.9f, 6.4f), 12, paint(color), gloss = 0.5f)
             b.cylinder(0f, 0f, -1.1f, 1.3f, 1.72f, 12, HallArt.solid(-1).full, gloss = 0.3f)
             b.sphere(0f, 3.2f, 0f, 1.95f, HallArt.solid(0xFFE8F4FF.toInt()).full, slices = 12, stacks = 4, yFrom = 0f, sy = 0.45f, gloss = 0.9f)
             b.capsule(0.3f, 3.6f, 0f, 0.9f, 7.2f, -0.3f, 0.3f, paint(0xFFFF4FA8.toInt()), slices = 5)
-            b.build()
+            return b.build()
         }
         private val cone by lazy {
             val b = ModelBuilder()
@@ -136,7 +137,7 @@ class Figure(val look: CharacterLook) {
 
         /** The model for café treat [item] (a cup's colour picked by [seed]), or null for none. */
         fun itemModel(item: Int, seed: Int): Model? = when (item) {
-            ITEM_CUP -> cup(slushColors[(seed and 0x7FFFFFFF) % slushColors.size])
+            ITEM_CUP -> cups[(seed and 0x7FFFFFFF) % cups.size]
             ITEM_CONE -> cone
             else -> null
         }

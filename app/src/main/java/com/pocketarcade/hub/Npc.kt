@@ -14,6 +14,10 @@ import kotlin.random.Random
 class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: Random, val seed: Float) {
     enum class State { IDLE, WALK, PLAY, SIT, QUEUE }
 
+    private companion object {
+        val NO_PATH = IntArray(0)
+    }
+
     var yaw = rng.range(0f, 6.28f)
         private set
     var pose = Pose.STAND
@@ -35,7 +39,7 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
         private set
 
     private var timer = rng.range(0.5f, 3f)
-    private var path: IntArray = IntArray(0)
+    private var path: IntArray = NO_PATH
     private var pathPos = 0
     private val speed = rng.range(30f, 44f)
     private var stuckT = 0f
@@ -221,7 +225,7 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
             world.cafe.moveUp(this, k)
             queueSpot = k - 1
             val q = world.map.cafeQueue[k - 1]
-            path = IntArray(0)
+            path = NO_PATH
             pathPos = 0
             hangout = -1
             hasEnd = true
