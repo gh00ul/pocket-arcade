@@ -103,6 +103,18 @@ internal class GlRenderer {
     /** Whether the pass being drawn renders into a multisampled target. */
     private var msActive = false
 
+    /** Draw calls and vertices issued by the last [drawFrame], for [FrameStats] (to judge instancing). */
+    var drawCalls = 0
+        private set
+    var vertsDrawn = 0L
+        private set
+
+    private fun drawArrays(mode: Int, first: Int, count: Int) {
+        drawCalls++
+        vertsDrawn += count
+        GLES30.glDrawArrays(mode, first, count)
+    }
+
     /** Skips floor reflections whatever the passes ask (for A/B timing from [FrameStats]). */
     var floorReflectOff = false
 
@@ -694,7 +706,7 @@ internal class GlRenderer {
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.reflTex)
         // Streaked a little more up and down the screen, like light on a polished floor.
         GLES30.glUniform2f(down.loc("uTexel"), 1f / t.reflW, 2f / t.reflH)
-        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+        drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.reflFbo)
         GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardColor, 0)
         GLES30.glViewport(0, 0, t.reflW, t.reflH)
@@ -703,7 +715,7 @@ internal class GlRenderer {
         GLES30.glUniform1f(up.loc("uWeight"), 1f)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.refl2Tex)
         GLES30.glUniform2f(up.loc("uTexel"), 1f / w2, 1.5f / h2)
-        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+        drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
         GLES30.glBindVertexArray(0)
     }
 
@@ -712,6 +724,8 @@ internal class GlRenderer {
     /** Draws every pass into the window surface ([surfaceW] × [surfaceH]). */
     fun drawFrame(passes: Collection<RenderPass>, surfaceW: Int, surfaceH: Int) {
         frameNo++
+        drawCalls = 0
+        vertsDrawn = 0L
         if (frameNo % 120 == 0L) collectGarbage()
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         GLES30.glViewport(0, 0, surfaceW, surfaceH)
@@ -841,7 +855,7 @@ internal class GlRenderer {
             GLES30.glUniform1i(bright.loc("uTex"), 0)
             GLES30.glUniform2f(bright.loc("uTexel"), 1f / rw, 1f / rh)
             GLES30.glUniform1f(bright.loc("uThreshold"), p.bloomThreshold)
-            GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+            drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             GLES30.glUseProgram(downProg)
             GLES30.glUniform1i(down.loc("uTex"), 0)
             for (i in 1 until levels) {
@@ -850,7 +864,7 @@ internal class GlRenderer {
                 GLES30.glViewport(0, 0, t.bloomW[i], t.bloomH[i])
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTex[i - 1])
                 GLES30.glUniform2f(down.loc("uTexel"), 1f / t.bloomW[i - 1], 1f / t.bloomH[i - 1])
-                GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+                drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             }
             GLES30.glUseProgram(upProg)
             GLES30.glUniform1i(up.loc("uTex"), 0)
@@ -868,7 +882,7 @@ internal class GlRenderer {
                 }
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTex[i + 1])
                 GLES30.glUniform2f(up.loc("uTexel"), 1f / t.bloomW[i + 1], 1f / t.bloomH[i + 1])
-                GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+                drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             }
             GLES30.glDisable(GLES30.GL_BLEND)
             t.bloomDone = true
@@ -904,7 +918,7 @@ internal class GlRenderer {
         GLES30.glUniform1f(comp.loc("uVignette"), p.vignette)
         GLES30.glUniform1f(comp.loc("uSharpen"), p.sharpen)
         GLES30.glUniform1f(comp.loc("uGrade"), p.grade)
-        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+        drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
         GLES30.glBindVertexArray(0)
@@ -934,12 +948,12 @@ internal class GlRenderer {
         if (halo > 0) {
             GLES30.glUniform1f(uSoft, 1f)
             GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE)
-            GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, halo)
+            drawArrays(GLES30.GL_TRIANGLES, 0, halo)
         }
         if (n > halo) {
             GLES30.glUniform1f(uSoft, 0f)
             GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
-            GLES30.glDrawArrays(GLES30.GL_TRIANGLES, halo, n - halo)
+            drawArrays(GLES30.GL_TRIANGLES, halo, n - halo)
         }
         GLES30.glDisable(GLES30.GL_BLEND)
         GLES30.glDepthMask(true)
@@ -973,7 +987,7 @@ internal class GlRenderer {
         GLES30.glDisable(GLES30.GL_DEPTH_TEST)
         GLES30.glDepthMask(false)
         GLES30.glDisable(GLES30.GL_BLEND)
-        for (i in 0 until n) GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, i * 4, 4)
+        for (i in 0 until n) drawArrays(GLES30.GL_TRIANGLE_STRIP, i * 4, 4)
         GLES30.glDepthMask(true)
     }
 
@@ -1113,7 +1127,7 @@ internal class GlRenderer {
                 setCull(false)
                 bindTexture(p.textures[index])
                 GLES30.glBindVertexArray(streamVao)
-                GLES30.glDrawArrays(GLES30.GL_TRIANGLES, p.draws[o + 3], p.draws[o + 4])
+                drawArrays(GLES30.GL_TRIANGLES, p.draws[o + 3], p.draws[o + 4])
             } else {
                 val io = index * 22
                 val model = p.models[p.instances[io + 21].toInt()]
@@ -1129,7 +1143,7 @@ internal class GlRenderer {
                     if (g[go + 1] != blend || (mirror && g[go + 5] == 0)) continue
                     setCull(g[go + 2] == 1)
                     bindTexture(mesh.textures[g[go]])
-                    GLES30.glDrawArrays(GLES30.GL_TRIANGLES, g[go + 3], g[go + 4])
+                    drawArrays(GLES30.GL_TRIANGLES, g[go + 3], g[go + 4])
                 }
             }
         }

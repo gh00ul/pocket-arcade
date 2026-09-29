@@ -208,6 +208,7 @@ internal class GlThread : Thread("ArcadeGL") {
             if (stats.enabled) for (p in current.values) stats.notePass(p)
             renderer.floorReflectOff = stats.noFloorReflect
             renderer.drawFrame(current.values, drawW, drawH)
+            stats.noteDraws(renderer.drawCalls, renderer.vertsDrawn)
             stats.endFrame()
             if (!EGL14.eglSwapBuffers(display, surface)) {
                 val err = EGL14.eglGetError()
