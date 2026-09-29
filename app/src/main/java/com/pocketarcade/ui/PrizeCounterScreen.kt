@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.selection.selectable
@@ -561,38 +562,43 @@ fun PlushCollectionGrid(save: SaveState, modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.spacedBy(UiSpace.sm),
         verticalArrangement = Arrangement.spacedBy(UiSpace.sm),
     ) {
-        itemsIndexed(Catalog.plushies, key = { _, it -> it.id }) { i, p ->
-            val count = save.collection[p.id] ?: 0
-            val known = count > 0
-            val gold = p.rare && known
-            val spoken = if (known) "${p.name.lowercase()}, won $count" else "not found yet"
-            Column(
-                Modifier
-                    .staggerIn(1 + i / 3)
-                    .cardFrame(
-                        edge = if (gold) Color(Pal.GOLD) else if (known) Color(p.main).copy(alpha = 0.6f) else UiColors.glassEdge,
-                        thick = gold, glow = if (gold) UiGlow.ACTIVE else 0f,
-                        tint = if (gold) Color(Pal.GOLD) else if (known) Color(p.main) else Color.Transparent,
-                    )
-                    .semantics(mergeDescendants = false) { contentDescription = spoken }
-                    .padding(6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Column(Modifier.clearAndSetSemantics {}, horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(10.dp))) {
-                        Thumb("plush:${p.id}:$known", Modifier.fillMaxSize()) { plush(p, silhouette = !known) }
-                        if (!known) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                ArcadeText("?", UiText.DISPLAY, color = UiColors.textLow.copy(alpha = 0.8f))
-                            }
+        plushItems(save)
+    }
+}
+
+/** The plush cards as items of a three-column grid: the collection grid, and the profile's, share them. */
+internal fun LazyGridScope.plushItems(save: SaveState) {
+    itemsIndexed(Catalog.plushies, key = { _, it -> it.id }) { i, p ->
+        val count = save.collection[p.id] ?: 0
+        val known = count > 0
+        val gold = p.rare && known
+        val spoken = if (known) "${p.name.lowercase()}, won $count" else "not found yet"
+        Column(
+            Modifier
+                .staggerIn(1 + i / 3)
+                .cardFrame(
+                    edge = if (gold) Color(Pal.GOLD) else if (known) Color(p.main).copy(alpha = 0.6f) else UiColors.glassEdge,
+                    thick = gold, glow = if (gold) UiGlow.ACTIVE else 0f,
+                    tint = if (gold) Color(Pal.GOLD) else if (known) Color(p.main) else Color.Transparent,
+                )
+                .semantics(mergeDescendants = false) { contentDescription = spoken }
+                .padding(6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Column(Modifier.clearAndSetSemantics {}, horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(10.dp))) {
+                    Thumb("plush:${p.id}:$known", Modifier.fillMaxSize()) { plush(p, silhouette = !known) }
+                    if (!known) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            ArcadeText("?", UiText.DISPLAY, color = UiColors.textLow.copy(alpha = 0.8f))
                         }
-                        if (gold) IconBadge(UiIcon.STAR, Color(Pal.GOLD), Modifier.align(Alignment.TopEnd).padding(3.dp))
                     }
-                    Spacer(Modifier.size(4.dp))
-                    ArcadeText(if (known) p.name else "???", UiText.CAPTION, color = if (known) Color.White else UiColors.textLow, centered = true)
-                    Spacer(Modifier.height(4.dp))
-                    if (known) ArcadeChip("×$count", UiColors.gold) else ArcadeText("NOT FOUND", UiText.CAPTION, color = UiColors.textOff, centered = true)
+                    if (gold) IconBadge(UiIcon.STAR, Color(Pal.GOLD), Modifier.align(Alignment.TopEnd).padding(3.dp))
                 }
+                Spacer(Modifier.size(4.dp))
+                ArcadeText(if (known) p.name else "???", UiText.CAPTION, color = if (known) Color.White else UiColors.textLow, centered = true)
+                Spacer(Modifier.height(4.dp))
+                if (known) ArcadeChip("×$count", UiColors.gold) else ArcadeText("NOT FOUND", UiText.CAPTION, color = UiColors.textOff, centered = true)
             }
         }
     }
