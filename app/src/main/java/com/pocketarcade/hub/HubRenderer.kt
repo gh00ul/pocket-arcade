@@ -26,6 +26,9 @@ class HubRenderer {
     companion object {
         const val SLOT = "hub"
         private const val FLOOR_GLOW = 0.45f
+        /** Neon, screens and marquees mirrored in the glossy tiles; a faint haze on the carpet. */
+        private const val FLOOR_REFLECT = 1.3f
+        private const val FLOOR_REFLECT_MATTE = 0.18f
     }
 
     private val r = Renderer3D(1, 1)
@@ -44,6 +47,8 @@ class HubRenderer {
         r.resize(w, h)
         // The blacklight carpet: its neon print fluoresces a little.
         r.floorGlow = FLOOR_GLOW
+        r.floorReflect = FLOOR_REFLECT
+        r.floorReflectMatte = FLOOR_REFLECT_MATTE
         world.camera.apply(r.camera, w, h)
         sc.render(r, world, save)
         Gfx.submit(SLOT, r.finishFrame(0, 0, w, h))

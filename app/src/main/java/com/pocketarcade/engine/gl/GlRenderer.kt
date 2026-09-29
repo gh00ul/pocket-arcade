@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.opengl.GLES30
 import android.util.Log
 import com.pocketarcade.engine.r3d.Blend
+import com.pocketarcade.engine.r3d.EnvMap
 import com.pocketarcade.engine.r3d.Model
 import com.pocketarcade.engine.r3d.RenderPass
 import com.pocketarcade.engine.r3d.Texture
@@ -30,6 +31,14 @@ internal class GlRenderer {
         private const val BLOOM_LEVELS = 4
         /** Share of the sharp quarter-size bright pass kept under the wider octaves. */
         private const val BLOOM_CORE = 0.5f
+        /** Ints per model mesh group. */
+        private const val GROUP = 6
+        /** How far up the screen (fraction of its height) floor streaks gather glow from. */
+        private const val STREAK = 0.12f
+        /** Brightness of the streaks relative to a mirrored image. */
+        private const val STREAK_GAIN = 2f
+        /** The render scale a screen starts at (the adaptive resolution's usual ceiling). */
+        const val START_SCALE = 0.8f
     }
 
     /**
@@ -64,14 +73,18 @@ internal class GlRenderer {
     private var quadVbo = 0
     private var quadVao = 0
     private var gridTex = 0
+    private var envTex = 0
     private var gridTexW = 0
     private var gridTexH = 0
     private var whiteTex = 0
     private var samples = 0
     private var anisotropy = 1f
 
+    /** Skips floor reflections whatever the passes ask (for A/B timing from [FrameStats]). */
+    var floorReflectOff = false
+
     /** Fraction of full resolution the scene renders at; eased down if frames run slow. */
-    var renderScale = 0.8f
+    var renderScale = START_SCALE
 
     private class Targets(val w: Int, val h: Int) {
         var msFbo = 0
@@ -85,11 +98,23 @@ internal class GlRenderer {
         val bloomFbo = IntArray(BLOOM_LEVELS)
         val bloomTex = IntArray(BLOOM_LEVELS)
         var bloomLevels = 0
+        /** Whether the bloom chain holds a finished frame (read back as floor streaks). */
+        var bloomDone = false
         var lastUsed = 0L
+        // Floor reflections (made on first use): the mirrored glow at 1/4 size with depth, and
+        // a 1/8-size step for blurring it.
+        var reflW = 0
+        var reflH = 0
+        var reflFbo = 0
+        var reflTex = 0
+        var reflDepth = 0
+        var refl2Fbo = 0
+        var refl2Tex = 0
     }
     private val targets = ArrayList<Targets>()
     private var frameNo = 0L
 
+    /** Per group ([GROUP] ints): texture index, blend, cull, first vertex, count, glows. */
     private class Mesh(val vbo: Int, val vao: Int, val groups: IntArray, val textures: Array<Texture>)
     private val meshRefs = ArrayList<Pair<WeakReference<Model>, Mesh>>()
     private val texRefs = ArrayList<Pair<WeakReference<Texture>, Int>>()
@@ -112,6 +137,9 @@ internal class GlRenderer {
     private var boundBlend = -1
     private var cullOn = false
     private var uCut = -1
+    private var uGlass = -1
+    /** Drawing the mirrored floor-reflection pass (no multisampling, glowing things only). */
+    private var mirror = false
 
     // ------------------------------------------------------------------ setup
 
@@ -180,12 +208,36 @@ internal class GlRenderer {
         GLES30.glGenTextures(1, tmp, 0); gridTex = tmp[0]
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, gridTex)
         texParams(GLES30.GL_NEAREST, GLES30.GL_NEAREST, false)
+        envTex = envCubemap()
         GLES30.glGenTextures(1, tmp, 0); whiteTex = tmp[0]
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, whiteTex)
         upload.clear()
         upload.put(byteArrayOf(-1, -1, -1, -1)).position(0)
         GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, 1, 1, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, upload)
         texParams(GLES30.GL_NEAREST, GLES30.GL_NEAREST, false)
+    }
+
+    /** Uploads the reflected room ([EnvMap]) as a mipmapped cube map. */
+    private fun envCubemap(): Int {
+        GLES30.glGenTextures(1, tmp, 0)
+        val id = tmp[0]
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_CUBE_MAP, id)
+        val n = EnvMap.SIZE
+        ensureUpload(n * n * 4)
+        for (f in 0 until 6) {
+            uploadInts.clear()
+            uploadInts.put(EnvMap.face(f), 0, n * n)
+            upload.position(0)
+            GLES30.glTexImage2D(GLES30.GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, 0, GLES30.GL_RGBA, n, n, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, upload)
+        }
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_CUBE_MAP, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR_MIPMAP_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_CUBE_MAP, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_CUBE_MAP, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_CUBE_MAP, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_CUBE_MAP, GLES30.GL_TEXTURE_WRAP_R, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glGenerateMipmap(GLES30.GL_TEXTURE_CUBE_MAP)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_CUBE_MAP, 0)
+        return id
     }
 
     private fun sceneAttribs() {
@@ -298,9 +350,11 @@ internal class GlRenderer {
         val S = RenderPass.STRIDE
         data class Key(val tex: Texture, val blend: Int, val cull: Boolean)
         val groups = LinkedHashMap<Key, ArrayList<FloatArray>>()
+        val glowing = HashSet<Key>()
         for (p in m.polys) {
             val key = Key(p.region.tex, p.blend.ordinal, p.cull)
             val list = groups.getOrPut(key) { ArrayList() }
+            if (p.emissive > 0f) glowing += key
             val tris = p.n - 2
             // Wind culled polygons counter-clockwise as seen from the side their normal faces.
             var flip = false
@@ -351,7 +405,7 @@ internal class GlRenderer {
         var total = 0
         for (l in groups.values) for (a in l) total += a.size
         val fb = ByteBuffer.allocateDirect(total * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
-        val info = IntArray(groups.size * 5)
+        val info = IntArray(groups.size * GROUP)
         val textures = ArrayList<Texture>()
         var gi = 0
         var first = 0
@@ -360,11 +414,13 @@ internal class GlRenderer {
             for (a in list) {
                 fb.put(a); count += a.size / S
             }
-            info[gi * 5] = textures.size
-            info[gi * 5 + 1] = key.blend
-            info[gi * 5 + 2] = if (key.cull) 1 else 0
-            info[gi * 5 + 3] = first
-            info[gi * 5 + 4] = count
+            val o = gi * GROUP
+            info[o] = textures.size
+            info[o + 1] = key.blend
+            info[o + 2] = if (key.cull) 1 else 0
+            info[o + 3] = first
+            info[o + 4] = count
+            info[o + 5] = if (key in glowing) 1 else 0
             textures += key.tex
             first += count
             gi++
@@ -491,6 +547,73 @@ internal class GlRenderer {
         for (i in 0 until t.bloomLevels) {
             fbo(t.bloomFbo[i]); tex(t.bloomTex[i])
         }
+        fbo(t.reflFbo); tex(t.reflTex); rb(t.reflDepth)
+        fbo(t.refl2Fbo); tex(t.refl2Tex)
+    }
+
+    /** Creates the floor-reflection targets for [t] the first time a pass wants them. */
+    private fun ensureReflTargets(t: Targets) {
+        if (t.reflFbo != 0) return
+        t.reflW = max(8, t.w / 4)
+        t.reflH = max(8, t.h / 4)
+        GLES30.glGenFramebuffers(1, tmp, 0); t.reflFbo = tmp[0]
+        t.reflTex = colorTexture(t.reflW, t.reflH)
+        GLES30.glGenRenderbuffers(1, tmp, 0); t.reflDepth = tmp[0]
+        GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.reflDepth)
+        GLES30.glRenderbufferStorage(GLES30.GL_RENDERBUFFER, GLES30.GL_DEPTH_COMPONENT16, t.reflW, t.reflH)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.reflFbo)
+        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, t.reflTex, 0)
+        GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, t.reflDepth)
+        GLES30.glGenFramebuffers(1, tmp, 0); t.refl2Fbo = tmp[0]
+        t.refl2Tex = colorTexture(max(4, t.reflW / 2), max(4, t.reflH / 2))
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.refl2Fbo)
+        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, t.refl2Tex, 0)
+    }
+
+    /**
+     * The floor mirror: glowing geometry drawn upside down about y = 0 into a quarter-size
+     * target, then softened (down to 1/8 and back up with tent filters). Leaves the result in
+     * [Targets.reflTex].
+     */
+    private fun drawMirror(p: RenderPass, t: Targets) {
+        ensureReflTargets(t)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.reflFbo)
+        GLES30.glViewport(0, 0, t.reflW, t.reflH)
+        GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
+        GLES30.glClearColor(0f, 0f, 0f, 1f)
+        GLES30.glDepthMask(true)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
+        mirror = true
+        drawScene(p)
+        mirror = false
+        GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardDepth, 0)
+        GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glDisable(GLES30.GL_CULL_FACE)
+        GLES30.glDisable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
+        GLES30.glBindVertexArray(quadVao)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        val w2 = max(4, t.reflW / 2)
+        val h2 = max(4, t.reflH / 2)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.refl2Fbo)
+        GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardColor, 0)
+        GLES30.glViewport(0, 0, w2, h2)
+        GLES30.glUseProgram(downProg)
+        GLES30.glUniform1i(down.loc("uTex"), 0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.reflTex)
+        // Streaked a little more up and down the screen, like light on a polished floor.
+        GLES30.glUniform2f(down.loc("uTexel"), 1f / t.reflW, 2f / t.reflH)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.reflFbo)
+        GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardColor, 0)
+        GLES30.glViewport(0, 0, t.reflW, t.reflH)
+        GLES30.glUseProgram(upProg)
+        GLES30.glUniform1i(up.loc("uTex"), 0)
+        GLES30.glUniform1f(up.loc("uWeight"), 1f)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.refl2Tex)
+        GLES30.glUniform2f(up.loc("uTexel"), 1f / w2, 1.5f / h2)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+        GLES30.glBindVertexArray(0)
     }
 
     // ------------------------------------------------------------------ frame
@@ -557,6 +680,25 @@ internal class GlRenderer {
         val rw = (p.vw * scale).roundToInt().coerceAtLeast(16)
         val rh = (p.vh * scale).roundToInt().coerceAtLeast(16)
         val t = targetsFor(rw, rh)
+        reflReady = false
+        streamed = false
+        passW = rw
+        passH = rh
+        reflStreak = 0f
+        if ((p.floorReflect > 0f || p.floorReflectMatte > 0f) && !floorReflectOff) {
+            if (p.floorMirror) {
+                if (p.glowDraws > 0) {
+                    drawMirror(p, t)
+                    reflReady = true
+                    reflTex = t.reflTex
+                }
+            } else if (t.bloomDone) {
+                // Free streaks: last frame's softened glow (1/8 size) gathered up the screen.
+                reflReady = true
+                reflTex = t.bloomTex[if (t.bloomLevels > 1) 1 else 0]
+                reflStreak = STREAK
+            }
+        }
         val drawFbo = if (t.msFbo != 0) t.msFbo else t.sceneFbo
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, drawFbo)
         GLES30.glViewport(0, 0, rw, rh)
@@ -568,6 +710,12 @@ internal class GlRenderer {
 
         drawBackground(p)
         drawScene(p)
+        if (reflReady) {
+            // Let go of the reflection source before the bloom chain draws into it.
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE3)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, whiteTex)
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        }
 
         // Resolve the multisampled image, then tell the driver the samples and depth can be
         // thrown away (tilers otherwise write them back to memory).
@@ -628,6 +776,7 @@ internal class GlRenderer {
                 GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             }
             GLES30.glDisable(GLES30.GL_BLEND)
+            t.bloomDone = true
         }
 
         // Composite into the window at the pass's rectangle (GL's origin is bottom-left).
@@ -705,6 +854,16 @@ internal class GlRenderer {
         return vertBuf
     }
 
+    /** Whether this pass's floor reflection is ready in [reflTex] ([reflStreak] > 0: bloom streaks). */
+    private var reflReady = false
+    private var reflTex = 0
+    private var reflStreak = 0f
+    /** Whether this pass's immediate geometry is already in the stream buffer. */
+    private var streamed = false
+    /** The size this pass renders at. */
+    private var passW = 1
+    private var passH = 1
+
     private fun drawScene(p: RenderPass) {
         val prog = sceneProg
         GLES30.glUseProgram(prog)
@@ -723,6 +882,25 @@ internal class GlRenderer {
         GLES30.glUniform1f(scene.loc("uExposure"), p.exposure)
         GLES30.glUniform1f(scene.loc("uRim"), p.rim)
         GLES30.glUniform1f(scene.loc("uFloorGlow"), p.floorGlow)
+        GLES30.glUniform1f(scene.loc("uMirror"), if (mirror) -1f else 1f)
+        GLES30.glUniform1f(scene.loc("uEnvAmount"), p.envReflect)
+        // Units 2 and 3: the reflected room and the floor mirror (a blank stand-in while the
+        // mirror itself is being drawn, so it is never read and written at once).
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_CUBE_MAP, envTex)
+        GLES30.glUniform1i(scene.loc("uEnv"), 2)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE3)
+        if (!mirror && reflReady) {
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, reflTex)
+            // The glow is fainter than the mirrored image itself: lift the streaks to match.
+            val k = if (reflStreak > 0f) STREAK_GAIN else 1f
+            GLES30.glUniform4f(scene.loc("uReflInfo"), 1f / passW, 1f / passH, p.floorReflect * k, p.floorReflectMatte * k)
+        } else {
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, whiteTex)
+            GLES30.glUniform4f(scene.loc("uReflInfo"), 0f, 0f, 0f, 0f)
+        }
+        GLES30.glUniform1f(scene.loc("uReflStreak"), if (mirror) 0f else reflStreak)
+        GLES30.glUniform1i(scene.loc("uRefl"), 3)
         for (i in 0 until p.lightCount) {
             val o = i * 8
             lightPos[i * 4] = p.lights[o]; lightPos[i * 4 + 1] = p.lights[o + 1]
@@ -737,7 +915,7 @@ internal class GlRenderer {
         // Light grid.
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, gridTex)
-        if (p.gridW > 0) {
+        if (p.gridW > 0 && !mirror) {
             val bytes = p.gridW * 2 * p.gridH * 4
             ensureUpload(bytes)
             upload.put(p.grid, 0, bytes).position(0)
@@ -757,8 +935,9 @@ internal class GlRenderer {
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glUniform1i(scene.loc("uTex"), 0)
 
-        // Stream the immediate geometry.
-        if (p.vertCount > 0) {
+        // Stream the immediate geometry (once per pass, shared by the mirror and the scene).
+        if (p.vertCount > 0 && !streamed) {
+            streamed = true
             val floats = p.vertCount * RenderPass.STRIDE
             val fb = floatBuffer(floats)
             fb.put(p.verts, 0, floats).position(0)
@@ -768,7 +947,8 @@ internal class GlRenderer {
 
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         GLES30.glDepthFunc(GLES30.GL_LEQUAL)
-        GLES30.glFrontFace(GLES30.GL_CCW)
+        // Mirroring flips every triangle's winding.
+        GLES30.glFrontFace(if (mirror) GLES30.GL_CW else GLES30.GL_CCW)
         GLES30.glCullFace(GLES30.GL_BACK)
         boundBlend = -1
         boundTex = -1
@@ -779,6 +959,7 @@ internal class GlRenderer {
         val uTint = scene.loc("uTint")
         val uEm = scene.loc("uEmissiveMul")
         uCut = scene.loc("uAlphaCut")
+        uGlass = scene.loc("uGlass")
         GLES30.glUniformMatrix4fv(uModel, 1, false, ident, 0)
         GLES30.glUniform4f(uTint, 1f, 1f, 1f, 1f)
         GLES30.glUniform1f(uEm, 1f)
@@ -787,6 +968,7 @@ internal class GlRenderer {
             val kind = p.draws[o]
             val blend = p.draws[o + 1]
             val index = p.draws[o + 2]
+            if (mirror && !p.drawGlow[d]) continue
             setBlend(blend)
             if (kind == RenderPass.KIND_BATCH) {
                 if (boundModelMatrix) {
@@ -809,11 +991,12 @@ internal class GlRenderer {
                 boundModelMatrix = true
                 GLES30.glBindVertexArray(mesh.vao)
                 val g = mesh.groups
-                for (k in 0 until g.size / 5) {
-                    if (g[k * 5 + 1] != blend) continue
-                    setCull(g[k * 5 + 2] == 1)
-                    bindTexture(mesh.textures[g[k * 5]])
-                    GLES30.glDrawArrays(GLES30.GL_TRIANGLES, g[k * 5 + 3], g[k * 5 + 4])
+                for (k in 0 until g.size / GROUP) {
+                    val go = k * GROUP
+                    if (g[go + 1] != blend || (mirror && g[go + 5] == 0)) continue
+                    setCull(g[go + 2] == 1)
+                    bindTexture(mesh.textures[g[go]])
+                    GLES30.glDrawArrays(GLES30.GL_TRIANGLES, g[go + 3], g[go + 4])
                 }
             }
         }
@@ -821,6 +1004,7 @@ internal class GlRenderer {
         GLES30.glDisable(GLES30.GL_BLEND)
         GLES30.glDisable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
         GLES30.glDepthMask(true)
+        GLES30.glFrontFace(GLES30.GL_CCW)
         GLES30.glBindVertexArray(0)
     }
 
@@ -837,8 +1021,10 @@ internal class GlRenderer {
             Blend.OPAQUE.ordinal -> {
                 GLES30.glDisable(GLES30.GL_BLEND)
                 GLES30.glDepthMask(true)
-                if (samples > 1) GLES30.glEnable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
-                GLES30.glUniform1f(uCut, if (samples > 1) 0.08f else 0.5f)
+                val ms = samples > 1 && !mirror
+                if (ms) GLES30.glEnable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
+                GLES30.glUniform1f(uCut, if (ms) 0.08f else 0.5f)
+                GLES30.glUniform1f(uGlass, 0f)
             }
             Blend.ALPHA.ordinal -> {
                 GLES30.glDisable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
@@ -846,6 +1032,7 @@ internal class GlRenderer {
                 GLES30.glBlendFuncSeparate(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA, GLES30.GL_ONE, GLES30.GL_ONE_MINUS_SRC_ALPHA)
                 GLES30.glDepthMask(false)
                 GLES30.glUniform1f(uCut, 0.003f)
+                GLES30.glUniform1f(uGlass, 1f)
             }
             else -> {
                 GLES30.glDisable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
@@ -853,6 +1040,7 @@ internal class GlRenderer {
                 GLES30.glBlendFuncSeparate(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE, GLES30.GL_ZERO, GLES30.GL_ONE)
                 GLES30.glDepthMask(false)
                 GLES30.glUniform1f(uCut, 0.003f)
+                GLES30.glUniform1f(uGlass, 0f)
             }
         }
     }

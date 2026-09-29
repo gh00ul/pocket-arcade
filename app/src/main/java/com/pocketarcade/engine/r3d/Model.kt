@@ -48,6 +48,9 @@ class Model(val polys: List<Poly>) {
     val hasAlpha = polys.any { it.blend == Blend.ALPHA }
     val hasAdd = polys.any { it.blend == Blend.ADD }
 
+    /** Bit (1 shl blend ordinal) set for each blend layer holding glowing (emissive) polygons. */
+    internal val glowMask: Int = polys.fold(0) { m, p -> if (p.emissive > 0f) m or (1 shl p.blend.ordinal) else m }
+
     // Owned by the GL thread.
     @Volatile internal var glMesh: Any? = null
     internal var glGen = -1

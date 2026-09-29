@@ -35,9 +35,7 @@ internal class GlThread : Thread("ArcadeGL") {
     private val current = LinkedHashMap<String, RenderPass>()
 
     // Frame pacing for the adaptive resolution.
-    private var slowFrames = 0
-    private var fastFrames = 0
-    private var lastSwap = 0L
+    private val pacer = ScalePacer(start = GlRenderer.START_SCALE)
 
     fun setSurface(st: SurfaceTexture, w: Int, h: Int) {
         synchronized(lock) {
@@ -105,7 +103,15 @@ internal class GlThread : Thread("ArcadeGL") {
                     ensureContext()
                     if (surface == EGL14.EGL_NO_SURFACE) createSurface(surfaceTexture!!)
                     needDraw = true
+                    // Uploads and shader compiles make the first frames slow: don't judge them.
+                    pacer.reset(SystemClock.elapsedRealtimeNanos(), keepScale = true)
                 }
+            }
+            if (Gfx.slotsChanged) {
+                // A different screen: start again from the default scale.
+                Gfx.slotsChanged = false
+                pacer.reset(SystemClock.elapsedRealtimeNanos())
+                renderer.renderScale = pacer.scale
             }
             if (!needDraw || surface == EGL14.EGL_NO_SURFACE) continue
             if (!EGL14.eglMakeCurrent(display, surface, surface, context)) {
@@ -120,6 +126,7 @@ internal class GlThread : Thread("ArcadeGL") {
             }
             stats.beginFrame(renderer.generation)
             if (stats.enabled) for (p in current.values) stats.notePass(p)
+            renderer.floorReflectOff = stats.noFloorReflect
             renderer.drawFrame(current.values, width, height)
             stats.endFrame()
             if (!EGL14.eglSwapBuffers(display, surface)) {
@@ -133,27 +140,12 @@ internal class GlThread : Thread("ArcadeGL") {
 
     /** Lowers the render resolution when frames run long and raises it again when there's headroom. */
     private fun pace() {
+        val gpu = stats.takeGpuMs()
         if (stats.pinScale) {
-            renderer.renderScale = 0.8f
+            renderer.renderScale = GlRenderer.START_SCALE
             return
         }
-        val now = SystemClock.elapsedRealtimeNanos()
-        if (lastSwap != 0L) {
-            val ms = (now - lastSwap) / 1_000_000f
-            if (ms > 24f && ms < 200f) {
-                slowFrames++; fastFrames = 0
-            } else if (ms < 17.5f) {
-                fastFrames++; slowFrames = 0
-            }
-            if (slowFrames > 30 && renderer.renderScale > 0.5f) {
-                renderer.renderScale = (renderer.renderScale - 0.1f).coerceAtLeast(0.5f)
-                slowFrames = 0
-            } else if (fastFrames > 300 && renderer.renderScale < 0.8f) {
-                renderer.renderScale = (renderer.renderScale + 0.1f).coerceAtMost(0.8f)
-                fastFrames = 0
-            }
-        }
-        lastSwap = now
+        renderer.renderScale = pacer.onFrame(SystemClock.elapsedRealtimeNanos(), gpu)
     }
 
     private fun ensureContext() {
@@ -203,6 +195,7 @@ internal class GlThread : Thread("ArcadeGL") {
         if (context != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(display, context)
         context = EGL14.EGL_NO_CONTEXT
         ensureContext()
+        pacer.reset(SystemClock.elapsedRealtimeNanos(), keepScale = true)
         surfaceTexture?.let { createSurface(it) }
     }
 }

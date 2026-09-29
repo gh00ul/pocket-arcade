@@ -10,14 +10,17 @@ import com.pocketarcade.engine.r3d.RenderPass
  * `adb shell setprop log.tag.PocketArcade3D DEBUG` (then restart the app). Once a second it logs
  * the UI thread's recording time per pass (startFrame → finishFrame), the GL thread's time to
  * issue a frame, the interval between buffer swaps, the GPU time when the driver has
- * `GL_EXT_disjoint_timer_query`, and the render scale. Nothing is measured or allocated per
- * frame while logging is off.
+ * `GL_EXT_disjoint_timer_query`, and the render scale. Nothing is logged or allocated per
+ * frame while logging is off; the GPU timer queries (when the driver has them) always run, since
+ * the adaptive resolution uses them ([takeGpuMs]).
  */
 internal class FrameStats {
     companion object {
         const val TAG = "PocketArcade3D"
         /** `adb shell setprop log.tag.PocketArcade3DPin DEBUG` holds the render scale steady. */
         const val PIN_TAG = "PocketArcade3DPin"
+        /** `adb shell setprop log.tag.PocketArcade3DNoRefl DEBUG` skips floor reflections (A/B timing). */
+        const val NO_REFL_TAG = "PocketArcade3DNoRefl"
         private const val GL_TIME_ELAPSED_EXT = 0x88BF
         private const val GL_GPU_DISJOINT_EXT = 0x8FBB
         private const val RING = 4
@@ -29,6 +32,10 @@ internal class FrameStats {
 
     /** Whether the adaptive resolution is held at its ceiling, so runs compare like for like. */
     var pinScale = false
+        private set
+
+    /** Whether floor reflections are switched off, to time them against the same scene. */
+    var noFloorReflect = false
         private set
     private var checkedAt = 0L
 
@@ -53,6 +60,14 @@ internal class FrameStats {
     private var queryAt = 0
     private val tmp = IntArray(1)
     private var gen = -1
+    private var lastGpuMs = -1f
+
+    /** The newest GPU frame time in ms not yet taken, or -1 (none new, or no timer queries). */
+    fun takeGpuMs(): Float {
+        val v = lastGpuMs
+        lastGpuMs = -1f
+        return v
+    }
 
     /** Call once per frame before drawing; [generation] notices a new GL context. */
     fun beginFrame(generation: Int) {
@@ -63,17 +78,18 @@ internal class FrameStats {
             if (on && !enabled) reset()
             enabled = on
             pinScale = Log.isLoggable(PIN_TAG, Log.DEBUG)
+            noFloorReflect = Log.isLoggable(NO_REFL_TAG, Log.DEBUG)
         }
-        if (!enabled) return
         if (gen != generation) {
             gen = generation
             val ext = GLES30.glGetString(GLES30.GL_EXTENSIONS) ?: ""
             timerExt = ext.contains("GL_EXT_disjoint_timer_query")
             if (timerExt) GLES30.glGenQueries(RING, queries, 0)
             queryUsed.fill(false)
-            Log.d(TAG, "timer queries ${if (timerExt) "available" else "not available"}")
+            queryAt = 0
+            if (enabled) Log.d(TAG, "timer queries ${if (timerExt) "available" else "not available"}")
         }
-        drawStart = System.nanoTime()
+        if (enabled) drawStart = System.nanoTime()
         if (timerExt) {
             // Collect the oldest query in the ring if it has finished, then reuse it.
             val q = queryAt
@@ -85,8 +101,12 @@ internal class FrameStats {
                     val disjoint = tmp[0] != 0
                     GLES30.glGetQueryObjectuiv(queries[q], GLES30.GL_QUERY_RESULT, tmp, 0)
                     if (!disjoint) {
-                        gpuNs += tmp[0].toLong() and 0xFFFFFFFFL
-                        gpuCount++
+                        val ns = tmp[0].toLong() and 0xFFFFFFFFL
+                        lastGpuMs = ns / 1e6f
+                        if (enabled) {
+                            gpuNs += ns
+                            gpuCount++
+                        }
                     }
                     queryUsed[q] = false
                 }
@@ -105,15 +125,14 @@ internal class FrameStats {
 
     /** Call after the frame's GL calls are issued (before swapping). */
     fun endFrame() {
+        if (timerExt && !queryUsed[queryAt]) {
+            GLES30.glEndQuery(GL_TIME_ELAPSED_EXT)
+            queryUsed[queryAt] = true
+            queryAt = (queryAt + 1) % RING
+        }
         if (!enabled) return
         drawNs += System.nanoTime() - drawStart
-        if (timerExt) {
-            if (!queryUsed[queryAt]) {
-                GLES30.glEndQuery(GL_TIME_ELAPSED_EXT)
-                queryUsed[queryAt] = true
-                queryAt = (queryAt + 1) % RING
-            }
-        } else {
+        if (!timerExt) {
             // Without timer queries, wait for the GPU so the frame's full cost can be seen.
             GLES30.glFinish()
             finishNs += System.nanoTime() - drawStart

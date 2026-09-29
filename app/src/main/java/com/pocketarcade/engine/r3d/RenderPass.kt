@@ -54,6 +54,10 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
     var vignette = Look.VIGNETTE
     var rim = Look.RIM
     var floorGlow = 0f
+    var envReflect = Look.ENV_REFLECT
+    var floorReflect = 0f
+    var floorReflectMatte = 0f
+    var floorMirror = false
 
     /** UI-thread time spent recording this pass (startFrame → finishFrame), for frame stats. */
     var recordNs = 0L
@@ -75,6 +79,11 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
     /** Draw list: per entry kind, blend ordinal, texture index or instance index, first vertex, vertex count. */
     var draws = IntArray(64 * 5)
     var drawCount = 0
+
+    /** Per draw-list entry: whether it holds glowing (emissive) geometry, for floor reflections. */
+    var drawGlow = BooleanArray(64)
+    /** How many draw-list entries glow. */
+    var glowDraws = 0
 
     // Model instances: model, which blend layer, 4×4 matrix, tint RGBA, emissive boost.
     val models = ArrayList<Model>()
@@ -98,6 +107,10 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
         vignette = Look.VIGNETTE
         rim = Look.RIM
         floorGlow = 0f
+        envReflect = Look.ENV_REFLECT
+        floorReflect = 0f
+        floorReflectMatte = 0f
+        floorMirror = false
         recordNs = 0L
         statsTaken = false
         gridW = 0
@@ -105,6 +118,7 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
         vertCount = 0
         textures.clear()
         drawCount = 0
+        glowDraws = 0
         models.clear()
         instanceCount = 0
     }
@@ -119,10 +133,13 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
         if (need > verts.size) verts = verts.copyOf(maxOf(need, verts.size * 2))
     }
 
-    internal fun addDraw(kind: Int, blend: Int, index: Int, first: Int, count: Int) {
+    internal fun addDraw(kind: Int, blend: Int, index: Int, first: Int, count: Int, glow: Boolean = false) {
         if ((drawCount + 1) * 5 > draws.size) draws = draws.copyOf(draws.size * 2)
+        if (drawCount + 1 > drawGlow.size) drawGlow = drawGlow.copyOf(drawGlow.size * 2)
         val o = drawCount * 5
         draws[o] = kind; draws[o + 1] = blend; draws[o + 2] = index; draws[o + 3] = first; draws[o + 4] = count
+        drawGlow[drawCount] = glow
+        if (glow) glowDraws++
         drawCount++
     }
 

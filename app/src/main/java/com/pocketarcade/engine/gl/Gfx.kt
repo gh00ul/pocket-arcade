@@ -16,6 +16,9 @@ object Gfx {
     private val snapshots = ArrayDeque<Pair<RenderPass, (Bitmap) -> Unit>>()
     private val main by lazy { Handler(Looper.getMainLooper()) }
 
+    /** GL thread: set by [take] when a slot appeared or went away (a different screen). */
+    internal var slotsChanged = false
+
     /** Queues [pass] as the next picture for [slot], replacing one the GL thread hasn't taken yet. */
     fun submit(slot: String, pass: RenderPass) {
         synchronized(lock) {
@@ -61,9 +64,18 @@ object Gfx {
         synchronized(lock) {
             if (pending.isEmpty() && removed.isEmpty() && snapshots.isEmpty()) lock.wait(timeoutMs)
             if (pending.isEmpty() && removed.isEmpty()) return snapshots.isNotEmpty()
-            for (s in removed) current.remove(s)?.recycle()
+            for (s in removed) {
+                val old = current.remove(s)
+                if (old != null) {
+                    old.recycle()
+                    slotsChanged = true
+                }
+            }
             removed.clear()
-            for ((s, p) in pending) current.put(s, p)?.recycle()
+            for ((s, p) in pending) {
+                val old = current.put(s, p)
+                if (old != null) old.recycle() else slotsChanged = true
+            }
             pending.clear()
             return true
         }
