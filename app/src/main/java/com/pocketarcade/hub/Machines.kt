@@ -32,6 +32,11 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
     val lights = ArrayList<PointLight>()
     var screen: LiveScreen? = null
         private set
+    /** How lit-up the "you're standing here" highlight is, 0..1 ([Highlight] eases and shapes it). */
+    var highlight = 0f
+        private set
+    /** The emissive multiplier for this frame's draws: 1 unless highlighted. */
+    private var boost = 1f
 
     private val x0 = prop.x0
     private val x1 = prop.x1
@@ -353,9 +358,19 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         art.updateDisplay(best, t)
     }
 
+    /**
+     * Fades the highlight in while [active] is this cabinet's own play spot and out otherwise,
+     * and works out this frame's emissive boost. Cheap enough to run for every cabinet, on screen
+     * or not, so one that was lit as the kid walked away fades out rather than freezing.
+     */
+    fun stepHighlight(active: Spot?, dt: Float, t: Float) {
+        highlight = Highlight.step(highlight, Highlight.isSpotOf(active, prop), dt)
+        boost = Highlight.boost(highlight, t)
+    }
+
     /** Draws the solid parts and whatever moves in attract mode. */
     fun drawOpaque(r: Renderer3D, t: Float) {
-        model.draw(r, Blend.OPAQUE)
+        model.draw(r, Blend.OPAQUE, emissiveBoost = boost)
         val d = design
         if (d != null) {
             d.animate(r, box, t)
@@ -442,23 +457,26 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
      * pools under the cabinet, neon edges) over them.
      */
     fun drawTransparent(r: Renderer3D) {
-        if (model.hasAlpha) model.draw(r, Blend.ALPHA)
-        if (model.hasAdd) model.draw(r, Blend.ADD)
+        if (model.hasAlpha) model.draw(r, Blend.ALPHA, emissiveBoost = boost)
+        if (model.hasAdd) model.draw(r, Blend.ADD, emissiveBoost = boost)
     }
 
-    /** Chasing marquee bulbs, with a soft halo each. */
+    /** Chasing marquee bulbs, with a soft halo each; the highlight brightens the idle bulbs and the flashing halos. */
     fun drawBulbs(r: Renderer3D, t: Float, bulb: Region, halo: Region) {
         val n = bulbs.size / 3
         if (n == 0) return
         val chase = ((t + seed * 0.19f) * 9f).toInt()
+        val hl = Highlight.ease(highlight)
+        val idle = 0.7f + Highlight.BULB_BOOST * hl
+        val haloAlpha = 0.55f + Highlight.BULB_HALO * hl
         for (i in 0 until n) {
             val x = bulbs[i * 3]
             val y = bulbs[i * 3 + 1]
             val z = bulbs[i * 3 + 2]
             val on = (chase + i) % 3 == 0
             val c = if (on) 0xFFFFF4C0.toInt() else dim(art.trim, 0.45f)
-            r.sprite(x, y, z, 1.4f, 1.4f, bulb, emissive = if (on) 1.8f else 0.7f, tint = c)
-            if (on) r.sprite(x, y, z + 0.3f, 6f, 6f, halo, blend = Blend.ADD, emissive = 1f, alpha = 0.55f, tint = 0xFFFFE08A.toInt())
+            r.sprite(x, y, z, 1.4f, 1.4f, bulb, emissive = if (on) 1.8f else idle, tint = c)
+            if (on) r.sprite(x, y, z + 0.3f, 6f, 6f, halo, blend = Blend.ADD, emissive = 1f, alpha = haloAlpha, tint = 0xFFFFE08A.toInt())
         }
     }
 

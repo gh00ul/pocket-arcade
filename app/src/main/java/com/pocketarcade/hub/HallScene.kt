@@ -49,6 +49,11 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         .sortedBy { it.prop.z0 }
     private val fixtureProps = ArrayList<Prop>()
     private val fixtureModels = ArrayList<Model>()
+    /** The token kiosk and prize counter light up like a cabinet: each fixture's fade level and this frame's emissive boost. */
+    private val fixtureLevel: FloatArray
+    private val fixtureBoost: FloatArray
+    /** Hall time at the last frame, for the highlight fades (the world only hands over its clock). */
+    private var lastTime = 0f
     private val lights = ArrayList<PointLight>()
     /** Each light's steady intensity (the per-frame flicker scales it). */
     private val baseIntensity: FloatArray
@@ -89,6 +94,8 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
             fixtureProps += p
             fixtureModels += Props.build(p, lights)
         }
+        fixtureLevel = FloatArray(fixtureProps.size)
+        fixtureBoost = FloatArray(fixtureProps.size) { 1f }
         for (u in units) lights += u.lights
         // Ceiling downlights in a grid.
         var z = 90f
@@ -355,11 +362,28 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         }
     }
 
+    /**
+     * Fades the highlight in on whatever [active] is the play spot of (a cabinet, the kiosk, the
+     * prize counter) and out on everything else. Runs for every cabinet, seen or not, so one the
+     * kid walked away from finishes fading even if it left the screen meanwhile.
+     */
+    private fun stepHighlights(active: Spot?, t: Float) {
+        val dt = (t - lastTime).coerceIn(0f, 0.1f)
+        lastTime = t
+        for (i in units.indices) units[i].stepHighlight(active, dt, t)
+        for (i in fixtureProps.indices) {
+            val level = Highlight.step(fixtureLevel[i], Highlight.isSpotOf(active, fixtureProps[i]), dt)
+            fixtureLevel[i] = level
+            fixtureBoost[i] = Highlight.boost(level, t)
+        }
+    }
+
     fun render(r: Renderer3D, world: HubWorld, save: SaveState) {
         val t = world.time
         // 0 overhead … 1 first person (eased while switching).
         val fp = world.camera.fpAmount
         cullFor(r, fp)
+        stepHighlights(world.activeSpot, t)
 
         // Lighting: dim hall, warm downlights, every machine glowing its colour.
         val l = r.lighting
@@ -386,7 +410,7 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         for (i in fixtureProps.indices) {
             val p = fixtureProps[i]
             if (!fixtureVisible(p)) continue
-            fixtureModels[i].draw(r, Blend.OPAQUE)
+            fixtureModels[i].draw(r, Blend.OPAQUE, emissiveBoost = fixtureBoost[i])
         }
         for (i in units.indices) {
             val u = units[i]
@@ -419,7 +443,7 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
             val u = units[i]
             val p = u.prop
             if (!unitVisible(p)) continue
-            val pulse = 0.28f + 0.06f * sin(t * 2f + p.centerX * 0.1f)
+            val pulse = 0.28f + 0.06f * sin(t * 2f + p.centerX * 0.1f) + Highlight.POOL_ALPHA * Highlight.ease(u.highlight)
             r.decal(p.x0 - 12f, p.z1 - 4f, p.x1 + 12f, p.z1 + 40f, 0.15f, halo, Blend.ADD, emissive = 1f, alpha = pulse, tint = u.art.glow)
         }
         if (showPlayer) shadowAt(r, pl.x, pl.y, 1f)
@@ -438,7 +462,7 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         for (i in fixtureProps.indices) {
             val p = fixtureProps[i]
             if (!fixtureVisible(p)) continue
-            fixtureModels[i].draw(r, Blend.ALPHA)
+            fixtureModels[i].draw(r, Blend.ALPHA, emissiveBoost = fixtureBoost[i])
         }
         for (i in units.indices) {
             val u = units[i]
@@ -451,7 +475,7 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         for (i in fixtureProps.indices) {
             val p = fixtureProps[i]
             if (!fixtureVisible(p)) continue
-            fixtureModels[i].draw(r, Blend.ADD)
+            fixtureModels[i].draw(r, Blend.ADD, emissiveBoost = fixtureBoost[i])
         }
         rig.drawGlow(r, t, rigMinX, rigMaxX, rigMinZ, rigMaxZ)
         if (hasDisco) drawDiscoSpots(r, t)
