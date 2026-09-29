@@ -15,7 +15,13 @@ import com.pocketarcade.games.MiniGame
 import com.pocketarcade.games.claw.Plush3D
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.sin
+
+/** The live screens' glow: just above 1 so the picture reads as lit but stays under the bloom threshold. */
+private const val SCREEN_GLOW = 1.15f
+/** Radius of the cap of a control-panel button on an upright. */
+private const val BUTTON_R = 0.9f
 
 // Attract-mode props, looked up once rather than per frame.
 private val skeeBall: Model by lazy { MachineKit.ball(0xFFB0213A.toInt()) }
@@ -95,44 +101,64 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
 
     // ------------------------------------------------------------------ cabinets
 
-    /** A classic upright: kick panel, control panel, screen, lit marquee. The tower is taller with one big button. */
+    /**
+     * A classic upright: a kick plate with the coin door and a ticket dispenser, a sloped control
+     * deck with a joystick and lit buttons on its printing, a screen under glass in a raised
+     * bezel, and a framed, lit marquee. The tower is taller, with one big button.
+     */
     private fun upright(c: CabinetBuild, tall: Boolean) {
         val b = c.b
         val st = 1.8f
         val ix0 = x0 + st
         val ix1 = x1 - st
+        val pw = ix1 - ix0
         val panelY = if (tall) 28f else 26f
         val cpBack = z1 - 9f
+        val zf = z1 - 1f
         val screenTop = h - (if (tall) 14f else 11f)
         c.sidePanels(h)
         val dark = art.darkPaint.full
-        b.beveledBox(ix0, 0f, z0, ix1, panelY, z1 - 1f, BoxFaces(front = art.kick.full, top = dark, back = dark), bevel = 0f)
-        b.quad(ix0, panelY + 4f, cpBack, ix1, panelY + 4f, cpBack, ix1, panelY, z1 - 1f, ix0, panelY, z1 - 1f, art.panel.full, 0f, 0.91f, 0.41f, gloss = 0.55f)
+        val metal = HallArt.darkMetal.full
+        b.beveledBox(ix0, 0f, z0, ix1, panelY, zf, BoxFaces(front = art.kick.full, top = dark, back = dark), bevel = 0f)
+        b.quad(ix0, panelY + 4f, cpBack, ix1, panelY + 4f, cpBack, ix1, panelY, zf, ix0, panelY, zf, (if (tall) art.panelBig else art.panel).full, 0f, 0.91f, 0.41f, gloss = 0.55f)
+        // A raised lip along the front of the deck, chrome on top.
+        b.box(ix0, panelY - 0.7f, zf - 0.6f, ix1, panelY + 0.5f, zf + 0.7f, BoxFaces(front = metal, top = HallArt.chrome.full, left = metal, right = metal, gloss = 0.8f))
+        // The screen: housing, a bezel round it, the live picture, and a pane of glass over it.
         b.box(ix0, panelY + 4f, z0, ix1, screenTop, cpBack, BoxFaces(front = art.bezel.full, top = dark, back = dark, gloss = 0.6f))
         val live = c.liveScreen()
-        b.quad(
-            ix0 + 1.6f, screenTop - 1.6f, cpBack + 0.15f, ix1 - 1.6f, screenTop - 1.6f, cpBack + 0.15f,
-            ix1 - 1.6f, panelY + 6.5f, cpBack + 0.15f, ix0 + 1.6f, panelY + 6.5f, cpBack + 0.15f,
-            live.texture.full, 0f, 0f, 1f, emissive = 1.15f,
-        )
+        val sxa = ix0 + 1.6f
+        val sxb = ix1 - 1.6f
+        val sya = panelY + 6.5f
+        val syb = screenTop - 1.6f
+        val sz = cpBack + 0.15f
+        b.quad(sxa, syb, sz, sxb, syb, sz, sxb, sya, sz, sxa, sya, sz, live.texture.full, 0f, 0f, 1f, emissive = SCREEN_GLOW)
+        c.screenBezel(sxa, sxb, sya, syb, sz)
+        c.screenGlass(sxa, sxb, sya, syb, sz + 0.09f)
         c.marqueeBox(ix0, ix1, screenTop, h - 1f, z0, cpBack + 3f)
-        b.box(x0, h - 1f, z0, x1, h, cpBack + 4f, BoxFaces(top = art.topper.full, front = art.trimTex.full, back = dark, left = dark, right = dark, frontEmissive = 0.9f, topEmissive = 0.9f, gloss = 0.5f))
+        val te = MachineKit.glowFor(art.trim, 0.7f)
+        b.box(x0, h - 1f, z0, x1, h, cpBack + 4f, BoxFaces(top = art.topper.full, front = art.trimTex.full, back = dark, left = dark, right = dark, frontEmissive = te, topEmissive = CabinetBuild.TOPPER_GLOW, gloss = 0.5f))
         c.rearPanel(ix0, ix1, 1f, screenTop)
-        c.coinDoor(cx, 6f, z1 - 1f, 8f)
-        // Lit T-molding edges down the screen's sides.
-        c.neonStrip(ix0 + 0.2f, panelY + 4f, ix0 + 0.8f, screenTop, cpBack + 0.2f, emissive = 1.3f)
-        c.neonStrip(ix1 - 0.8f, panelY + 4f, ix1 - 0.2f, screenTop, cpBack + 0.2f, emissive = 1.3f)
-        // Controls sit on the sloping panel.
-        fun panelY(z: Float) = panelY + 4f * (z1 - 1f - z) / (z1 - 1f - cpBack)
+        // The kick plate's hardware: the coin door, and the ticket dispenser under it.
+        c.coinDoor(cx, 8f, zf, 8f)
+        c.ticketDispenser(cx, 2.4f, zf + 0.5f, 7f)
+        // Controls sit on the sloping deck, on the rings and well printed there.
+        val tilt = atan2(4f, zf - cpBack)
+        fun deckZ(v: Float) = cpBack + v * (zf - cpBack)
+        fun deckY(z: Float) = panelY + 4f * (zf - z) / (zf - cpBack)
         if (tall) {
-            val bz = z1 - 5f
-            b.add(MachineKit.button(art.glow, 3f), xf.set(cx, panelY(bz), bz))
-            b.add(MachineKit.button(art.trim, 1.3f), xf.set(cx - 7f, panelY(bz + 1f), bz + 1f))
-            b.add(MachineKit.button(art.trim, 1.3f), xf.set(cx + 7f, panelY(bz + 1f), bz + 1f))
+            val bz = deckZ(0.45f)
+            b.add(MachineKit.button(art.glow, 2.3f), xf.set(cx, deckY(bz), bz, pitch = tilt))
+            val sz2 = deckZ(0.48f)
+            for (s in intArrayOf(-1, 1)) b.add(MachineKit.button(art.trim, 0.8f), xf.set(cx + s * 0.305f * pw, deckY(sz2), sz2, pitch = tilt))
         } else {
-            val bz = z1 - 5f
-            b.add(MachineKit.joystick, xf.set(cx - 6f, panelY(bz), bz))
-            for (k in 0 until 3) b.add(MachineKit.button(if (k == 0) art.glow else art.trim, 1.2f), xf.set(cx + 2f + k * 3.4f, panelY(bz), bz))
+            val jz = deckZ(0.45f)
+            b.add(MachineKit.joystick(art.glow), xf.set(ix0 + MachineKit.PANEL_STICK_U * pw, deckY(jz), jz, pitch = tilt))
+            val ringColors = intArrayOf(art.glow, art.trim, lift(art.glow, 0.4f))
+            for (row in 0 until 2) for (k in 0 until 3) {
+                val bx = ix0 + (MachineKit.PANEL_BUTTON_U + k * MachineKit.PANEL_BUTTON_STEP_U + row * MachineKit.PANEL_BUTTON_ROW_SHIFT_U) * pw
+                val bz = deckZ(if (row == 0) MachineKit.PANEL_ROW_V else MachineKit.PANEL_ROW2_V)
+                b.add(MachineKit.button(ringColors[k], BUTTON_R), xf.set(bx, deckY(bz), bz, pitch = tilt))
+            }
         }
         c.light(cx, panelY + 16f, z1 + 4f, art.glow, 50f, 0.7f)
     }
