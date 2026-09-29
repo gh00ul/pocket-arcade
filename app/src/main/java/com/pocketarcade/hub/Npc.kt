@@ -25,6 +25,12 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
         const val GIVE_WAY = Body.RADIUS + HubWorld.KID_RADIUS + 4f
         /** A kid waiting for the player to pass gives up on where they were going after this long. */
         const val WAIT_LIMIT = 2f
+        /**
+         * Having given up, a kid walks on regardless of the player for this long (they are softly
+         * bumped aside): a kid pinned against a cabinet can't step aside, and every place they
+         * could go next starts the same way.
+         */
+        const val IMPATIENT_TIME = 3f
     }
 
     var yaw = rng.range(0f, 6.28f)
@@ -63,6 +69,8 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
     private var waited = 0f
     /** How long this kid has been waiting for the player to get out of the way. */
     private var giveWayT = 0f
+    /** Seconds left of walking on regardless of the player (see [IMPATIENT_TIME]). */
+    private var impatientT = 0f
 
     fun update(dt: Float, world: HubWorld) {
         if (world.firstPerson && giveWay(dt, world)) {
@@ -306,8 +314,10 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
         val d2 = dx * dx + dy * dy
         if (d2 >= GIVE_WAY * GIVE_WAY) {
             giveWayT = 0f
+            impatientT = 0f
             return false
         }
+        if (impatientT > 0f) impatientT -= dt
         val d = sqrt(d2).coerceAtLeast(1e-3f)
         val solids = world.map.solids
         var stepping = false
@@ -325,7 +335,7 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
                 val hx = sin(heading)
                 val hy = cos(heading)
                 // The player is ahead: step aside, away from them, if there's room; else wait.
-                if (-(dx * hx + dy * hy) / d > 0.2f) {
+                if (impatientT <= 0f && -(dx * hx + dy * hy) / d > 0.2f) {
                     var sx = -hy
                     var sy = hx
                     if (sx * dx + sy * dy < 0f) {
@@ -346,6 +356,7 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
                     if (!stepping) {
                         // Waited long enough: go somewhere else.
                         giveWayT = 0f
+                        impatientT = IMPATIENT_TIME
                         state = State.IDLE
                         hangout = -1
                         if (queueSpot >= 0) {

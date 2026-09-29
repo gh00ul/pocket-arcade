@@ -66,4 +66,15 @@ class KidsGiveWayTest {
         val worst = longestFreeze(parkedAt(spot))
         assertTrue("a kid stood frozen next to the player at the prize counter for ${worst}s", worst < 30f)
     }
+
+    @Test
+    fun kidsPinnedAgainstACabinetDoNotFreezeBesideThePlayer() {
+        val w0 = HubWorld(games, null)
+        // The claw machines' spots: the bank's strip in front of them is narrow, so a kid pushed
+        // against a cabinet has no room to step aside.
+        for (spot in w0.map.spots.indices.filter { w0.map.spots[it].type == SpotType.MACHINE && w0.map.spots[it].machine == 0 }) {
+            val worst = longestFreeze(parkedAt(spot))
+            assertTrue("a kid stood frozen next to the player at spot $spot for ${worst}s", worst < 30f)
+        }
+    }
 }
