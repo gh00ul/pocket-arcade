@@ -22,10 +22,16 @@ object Highlight {
     const val PULSE_DEPTH = 0.4f
     /** Pulse speed, radians per second (about one breath a second). */
     const val PULSE_RATE = 6f
-    /** Extra alpha on the additive light pool on the floor in front of a highlighted cabinet. */
-    const val POOL_ALPHA = 0.14f
-    /** Extra emissive on the marquee bulbs that are between flashes. */
-    const val BULB_BOOST = 0.4f
+    /**
+     * Extra alpha on the additive light pool on the floor in front of a highlighted cabinet (its
+     * everyday alpha is about 0.3; the pool sits close to the bloom threshold on pale glows).
+     */
+    const val POOL_ALPHA = 0.08f
+    /**
+     * Extra emissive on the marquee bulbs that are between flashes (0.7 normally). A white-trimmed
+     * cabinet's idle bulbs reach the bloom threshold at about 1.0, so stay a little under that.
+     */
+    const val BULB_BOOST = 0.25f
     /** Extra alpha on the halo of a bulb that is flashing. */
     const val BULB_HALO = 0.2f
 

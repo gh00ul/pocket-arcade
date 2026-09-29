@@ -75,7 +75,9 @@ class HighlightTest {
         // The marquee glows at 1.25 and the brightest neon at 1.8: a quarter more is the most that
         // stays a highlight rather than a flare (the hall's café tiles crossed the threshold twice).
         assertTrue("boost cap", hi <= 1.25f)
-        assertTrue(Highlight.POOL_ALPHA <= 0.2f)
+        assertTrue(Highlight.POOL_ALPHA <= 0.1f)
+        // Idle marquee bulbs are 0.7 dimmed to under half of white trim: 1.0 is where they'd start to glow.
+        assertTrue(0.7f + Highlight.BULB_BOOST <= 1.0f)
         // Fading in raises it steadily.
         var prev = 1f
         for (i in 0..20) {
