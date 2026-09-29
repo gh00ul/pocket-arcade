@@ -6,7 +6,9 @@ import com.pocketarcade.engine.len
  * Floating virtual joystick: it appears wherever the thumb lands and the base trails the thumb
  * if it is dragged past the rim. It is thumb-sized on any screen ([radiusFor]). Output is an
  * analog vector through a response curve ([curve]): a small dead zone, fine control near the
- * centre, full walking speed a little short of the rim, and [run] ramping up at the rim.
+ * centre, full walking speed a little short of the rim, and [run] ramping up at the rim. With
+ * [runLatch] on, reaching the rim locks the run in ([latched]) so the thumb can ease off the rim
+ * and keep running, until it lifts or falls back under [LATCH_RELEASE].
  */
 class Joystick {
     companion object {
@@ -23,6 +25,11 @@ class Joystick {
         /** [run] ramps from 0 to 1 between these deflections, right at the rim. */
         const val RUN_FROM = 0.9f
         const val RUN_FULL = 0.98f
+        /**
+         * A latched run lets go when the thumb comes back under this deflection: half way, so a
+         * relaxed thumb keeps running and a real ease-off (a turn, a stop) doesn't.
+         */
+        const val LATCH_RELEASE = 0.5f
 
         /** The base radius in pixels for a screen [w] × [h] at [density] pixels per dp. */
         fun radiusFor(density: Float, w: Float, h: Float): Float {
@@ -63,6 +70,14 @@ class Joystick {
     /** 0..1: how hard the thumb is pushing at the rim (first person runs). */
     var run = 0f
         private set
+    /**
+     * Whether reaching the rim latches the run (see [latched]). Off, running takes the thumb at
+     * the rim throughout. Set before the touch lands; the world turns it on in first person only.
+     */
+    var runLatch = false
+    /** A run is locked in: full speed in the stick's direction until the thumb lifts or eases under [LATCH_RELEASE]. */
+    var latched = false
+        private set
     /** How far (pixels) the thumb has strayed from where it landed; a tap barely moves. */
     var travel = 0f
         private set
@@ -83,6 +98,7 @@ class Joystick {
         outX = 0f
         outY = 0f
         run = 0f
+        latched = false
     }
 
     fun move(id: Long, x: Float, y: Float) {
@@ -102,14 +118,22 @@ class Joystick {
         knobY = y
         val l = len(dx, dy)
         val m = l / radius
-        val out = curve(m)
+        if (!runLatch) {
+            latched = false
+        } else if (!latched) {
+            latched = m >= RUN_FULL
+        } else if (m < LATCH_RELEASE) {
+            latched = false
+        }
+        // A locked run holds full speed whichever way the thumb points, however far it has eased off.
+        val out = if (latched) 1f else curve(m)
         if (out <= 0f) {
             outX = 0f; outY = 0f
         } else {
             outX = dx / l * out
             outY = dy / l * out
         }
-        run = runFor(m)
+        run = if (latched) 1f else runFor(m)
     }
 
     fun up(id: Long) {
@@ -123,5 +147,6 @@ class Joystick {
         outX = 0f
         outY = 0f
         run = 0f
+        latched = false
     }
 }

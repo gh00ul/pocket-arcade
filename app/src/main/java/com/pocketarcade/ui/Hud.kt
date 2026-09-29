@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -76,5 +77,32 @@ fun Hud(
         RoundButton(UiIcon.TROPHY, onProfile, Color(Pal.PURPLE))
         Spacer(Modifier.width(8.dp))
         RoundButton(if (save.muted) UiIcon.MUTED else UiIcon.SOUND, onToggleMute, Color(Pal.TEAL))
+    }
+}
+
+/**
+ * How much further down than [Hud]'s row the [HudExtras] row reaches: that row ends 76 dp below
+ * the safe area (which is what [com.pocketarcade.hub.HubWorld.hudBottom] keeps the prompt under)
+ * and this one ends at 124.
+ */
+val HudExtrasReach = 48.dp
+
+/**
+ * A second row of round buttons under [Hud]'s, at the right, for the hall's map and the
+ * settings. The first row is already full on a narrow phone, so these get their own line.
+ */
+@Composable
+fun HudExtras(onMap: () -> Unit, onSettings: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            // Hud's padding, its buttons (50 + their 4 lip) and a small gap.
+            .padding(start = 10.dp, end = 10.dp, top = 70.dp),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        RoundButton(UiIcon.MAP, onMap, Color(Pal.SKY))
+        Spacer(Modifier.width(8.dp))
+        RoundButton(UiIcon.GEAR, onSettings, Color(Pal.ORANGE))
     }
 }

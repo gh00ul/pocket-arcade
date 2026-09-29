@@ -31,6 +31,7 @@ class HubRenderer {
         private const val FLOOR_REFLECT_MATTE = 0.18f
         private const val WALK_HINT = "DRAG ANYWHERE TO WALK"
         private val FP_HINT = "${ArcadeFont.LEFT} DRAG TO WALK      DRAG TO LOOK ${ArcadeFont.RIGHT}"
+        private val FP_HINT_LEFT_HANDED = "${ArcadeFont.LEFT} DRAG TO LOOK      DRAG TO WALK ${ArcadeFont.RIGHT}"
         private const val FP_TAP_HINT = "OR TAP A MACHINE TO WALK THERE"
         private val STICK_GLOW = listOf(Color.White.copy(alpha = 0.02f), Color.White.copy(alpha = 0.14f))
         private val KNOB = listOf(Color(0xFFFFB8DD), Color(Pal.PINK), Color(0xFFB02070))
@@ -69,7 +70,7 @@ class HubRenderer {
         } else if (fp > 0.5f) {
             if (!world.hasWalked || !world.hasLooked) {
                 // Above where the left thumb and its stick go.
-                ArcadeFont.drawCentered(scope, FP_HINT, sw / 2f, sh * 0.68f, px * 1.2f, Color.White, a, tiny = true)
+                ArcadeFont.drawCentered(scope, if (world.settings.leftHanded) FP_HINT_LEFT_HANDED else FP_HINT, sw / 2f, sh * 0.68f, px * 1.2f, Color.White, a, tiny = true)
                 ArcadeFont.drawCentered(scope, FP_TAP_HINT, sw / 2f, sh * 0.68f + px * 12f, px * 1.1f, Color.White, a * 0.8f, tiny = true)
             }
         } else if (!world.hasWalked) {
@@ -93,10 +94,17 @@ class HubRenderer {
             val running = fp > 0.5f && js.run > 0.5f
             scope.drawCircle(Brush.radialGradient(if (running) KNOB_RUN else KNOB, knob - Offset(rad * 0.12f, rad * 0.15f), rad * 0.6f), kr, knob)
             scope.drawCircle(Color.White, kr, knob, alpha = 0.35f + 0.25f * fp, style = Stroke(width = px))
+            if (js.latched && fp > 0.5f) {
+                // A locked run: a gold ring round the stick, and RUN on the knob.
+                val pulse = 0.65f + 0.35f * sin(world.time * 8f)
+                scope.drawCircle(Color(Pal.GOLD), rad * 1.08f, base, alpha = 0.6f * pulse, style = Stroke(width = px * 2.4f))
+                val cue = px * 0.9f
+                ArcadeFont.drawCentered(scope, "RUN", knob.x, knob.y - ArcadeFont.height(cue, true) / 2f, cue, Color(0xFF5A3300), tiny = true, shadow = false)
+            }
         } else if (fp > 0.5f && world.camera.dive <= 0.01f && !world.route.active) {
             // First person with no thumb down: a faint ghost of the stick where a left thumb rests.
             val rad = js.radius
-            val base = Offset(sw * 0.22f, sh - rad - 56f * scope.density)
+            val base = Offset(sw * (if (world.settings.leftHanded) 0.78f else 0.22f), sh - rad - 56f * scope.density)
             scope.drawCircle(Color.Black, rad, base, alpha = 0.12f * fp)
             scope.drawCircle(Color.White, rad, base, alpha = 0.16f * fp, style = Stroke(width = px))
             scope.drawCircle(Color.White, rad * 0.42f, base, alpha = 0.12f * fp)

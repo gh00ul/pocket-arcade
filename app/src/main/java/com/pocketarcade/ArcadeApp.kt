@@ -27,12 +27,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.pocketarcade.data.ArcadeRepository
+import com.pocketarcade.data.GameSettings
 import com.pocketarcade.data.SaveState
+import com.pocketarcade.data.SettingsStore
 import com.pocketarcade.engine.AudioSynth
 import com.pocketarcade.engine.Haptics
 import com.pocketarcade.engine.Pal
+import com.pocketarcade.engine.ScreenShake
 import com.pocketarcade.engine.gl.GlSurface
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.games.GameRegistry
@@ -42,16 +47,21 @@ import com.pocketarcade.hub.Spot
 import com.pocketarcade.hub.SpotType
 import com.pocketarcade.ui.GameHostScreen
 import com.pocketarcade.ui.Hud
+import com.pocketarcade.ui.HudExtras
+import com.pocketarcade.ui.HudExtrasReach
 import com.pocketarcade.ui.ArcadeText
 import com.pocketarcade.ui.GlassBox
+import com.pocketarcade.ui.MapScreen
 import com.pocketarcade.ui.PrizeCounterScreen
 import com.pocketarcade.ui.ProfileScreen
+import com.pocketarcade.ui.SettingsScreen
 import com.pocketarcade.ui.TitleScreen
 import com.pocketarcade.ui.TokenMachineScreen
 import com.pocketarcade.ui.playerLook
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -83,7 +93,7 @@ class AppSignals {
 }
 
 private enum class Screen { TITLE, HUB, GAME }
-private enum class Overlay { NONE, PRIZES, TOKENS, PROFILE }
+private enum class Overlay { NONE, PRIZES, TOKENS, PROFILE, MAP, SETTINGS }
 
 /**
  * Top-level flow: title → hall ↔ machines, with the camera diving into a cabinet's screen and
@@ -91,6 +101,7 @@ private enum class Overlay { NONE, PRIZES, TOKENS, PROFILE }
  */
 @Composable
 fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
+    val context = LocalContext.current
     val save by services.repo.state.collectAsState(initial = SaveState())
     val games = remember { GameRegistry.createAll() }
     val world = remember { HubWorld(games, services.audio) }
@@ -107,6 +118,37 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     // The hall's camera: taken from the save once, then driven by the HUD button (and saved).
     var firstPerson by remember { mutableStateOf(false) }
     var viewRestored by remember { mutableStateOf(false) }
+    // The player's options: read once, then this is the truth and every change is saved behind it.
+    val settingsStore = remember { SettingsStore(context.applicationContext) }
+    var settings by remember { mutableStateOf(GameSettings()) }
+    val hudExtra = with(LocalDensity.current) { HudExtrasReach.toPx() }
+    world.hudExtra = hudExtra
+
+    /** Puts [s] to work: the hall's controls and view, the volumes, the haptics and the shake. */
+    fun applySettings(s: GameSettings) {
+        world.applySettings(s)
+        audio.sfxVolume = s.sfxGain
+        audio.ambienceVolume = s.ambienceGain
+        services.haptics.enabled = s.haptics
+        ScreenShake.intensity = if (s.reduceMotion) 0f else 1f
+    }
+
+    fun changeSettings(next: GameSettings) {
+        val s = next.sanitized()
+        if (s == settings) return
+        val hapticsTurnedOn = s.haptics && !settings.haptics
+        settings = s
+        applySettings(s)
+        audio.play(Sfx.BLIP, 0.5f, 1.2f)
+        // So you can feel what you just switched on.
+        if (hapticsTurnedOn) services.haptics.hit()
+        scope.launch { settingsStore.save(s) }
+    }
+
+    LaunchedEffect(Unit) {
+        settings = settingsStore.settings.first()
+        applySettings(settings)
+    }
 
     LaunchedEffect(save.hat, save.outfit) { world.setPlayerLook(save.playerLook()) }
     LaunchedEffect(save.owned) { world.setDecor(save.ownedDecor) }
@@ -274,11 +316,32 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                             scope.launch { services.repo.setFirstPerson(on) }
                         },
                     )
+                    HudExtras(
+                        onMap = {
+                            world.cancelInput()
+                            overlay = Overlay.MAP
+                            audio.play(Sfx.SELECT)
+                        },
+                        onSettings = {
+                            world.cancelInput()
+                            overlay = Overlay.SETTINGS
+                            audio.play(Sfx.SELECT)
+                        },
+                    )
                 }
                 when (overlay) {
                     Overlay.PRIZES -> PrizeCounterScreen(save, services) { overlay = Overlay.NONE }
                     Overlay.TOKENS -> TokenMachineScreen(save, services) { overlay = Overlay.NONE }
                     Overlay.PROFILE -> ProfileScreen(save, games) { overlay = Overlay.NONE }
+                    Overlay.MAP -> MapScreen(
+                        world,
+                        onGo = { pin ->
+                            overlay = Overlay.NONE
+                            if (pin.go(world)) audio.play(Sfx.WHOOSH, 0.3f, 1.4f) else audio.play(Sfx.ERROR)
+                        },
+                        onClose = { overlay = Overlay.NONE },
+                    )
+                    Overlay.SETTINGS -> SettingsScreen(settings, ::changeSettings) { overlay = Overlay.NONE }
                     Overlay.NONE -> Unit
                 }
                 BackHandler(enabled = overlay != Overlay.NONE) {
@@ -302,7 +365,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                 Modifier
                     .align(Alignment.TopCenter)
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(top = 84.dp, start = 12.dp, end = 12.dp),
+                    // Under both rows of HUD buttons.
+                    .padding(top = 132.dp, start = 12.dp, end = 12.dp),
             ) {
                 GlassBox(Modifier.background(Color(0xE6120C22), RoundedCornerShape(16.dp)), highlight = Color(Pal.YELLOW)) {
                     ArcadeText(text, unit = 2.2.dp, color = Color(Pal.YELLOW), centered = true)

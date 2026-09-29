@@ -43,6 +43,10 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 - Blacklight carpet that fluoresces, terrazzo at the entrance, walls rising into the dark with acoustic panels, uplights and a backlit mural, and the street outside through the cut-away shopfront.
 - 3D kids with a walk cycle, poses for playing, cheering and sitting, and hats. Yours follows a floating joystick that appears wherever your thumb lands. The other kids find their way between machines, play them, queue at the café till and sit down with a drink or a cone. A barista wipes the counter and makes each order at the slushie, espresso or soft-serve station.
 - **First person.** The eye button next to the trophy switches between the overhead camera and a kid's-eye view, easing between the two. In first person the left thumb walks (forward, back and strafe), the right thumb drags to look, and your choice is remembered. Up close the hall is finished on every side: closed cabinet backs with service panels, a ceiling of acoustic tiles, light panels, ducts and sprinklers, and a glass shopfront onto the street.
+- **Run lock.** In first person, push the stick to its rim to lock a run: ease your thumb off and keep running until you lift it or come back under half a push. A ring and RUN on the stick show it's locked. (Settings can go back to running only while the thumb is at the rim.)
+- **Tap to walk, in either view.** Tap a machine, the token kiosk, the prize counter or a patch of floor and your kid walks there and turns to face it. Touching the stick takes over at once.
+- **Map.** The map button (under the trophy) opens the floor plan: props as tinted boxes, a marker for every machine in its neon colour and marquee text, the café, the token kiosk, the prize counter and the doors, and a pulsing dot where you stand. Tap a place and your kid walks there.
+- **Settings.** The gear button opens look speed, invert look, left-handed (the walk and look halves swap), first-person field of view, run mode, reduce motion (no head bob, run zoom or screen shake), haptics, and effects and ambience volume.
 - Collision against walls, cabinets and furniture, with sliding along edges.
 - Walk up to a machine and a **▶ PLAY (1 token)** prompt pops up. Tap it and the camera flies into the screen of the cabinet you're standing at. Exiting flies you back out to exactly where you stood (in first person, facing the machine).
 - An ambient arcade soundscape: mains hum, crowd murmur and distant machine bleeps.
@@ -68,7 +72,7 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 - Smooth type with vector icons for tokens, tickets and stars, glossy arcade buttons, and one bright palette across the whole app.
 - The prize counter shows each prize as a 3D model on a turntable, photographed by the GPU.
 
-**Progress** is saved with DataStore: tokens, tickets, prize collection, owned and equipped cosmetics, bought decorations, high scores and the daily refill date.
+**Progress** is saved with DataStore: tokens, tickets, prize collection, owned and equipped cosmetics, bought decorations, high scores and the daily refill date. The settings live in a separate DataStore file, so options and progress never touch.
 
 - You start with **20 tokens** and get **10 free every day**.
 - The token machine trades **40 tickets for 1 token**. If you are completely out, you can grab a free spare token every 3 minutes, so tokens never run out for good.
@@ -201,9 +205,9 @@ app/src/main/java/com/pocketarcade/
 │   ├── claw/  skeeball/  whackamole/  coinpusher/  hoops/
 │   ├── airhockey/  racer/  stacker/
 │   └── shooter/  pinball/  fishing/
-├── data/                  DataStore repository, save state, prize catalog
-└── ui/                    HUD, title, prize counter, token machine, profile, game host, widgets,
-                           and the thumbnail studio
+├── data/                  DataStore repository, save state, prize catalog, settings store
+└── ui/                    HUD, title, prize counter, token machine, profile, map, settings,
+                           game host, widgets, and the thumbnail studio
 ```
 
 Tuning knobs for every game (difficulty and payouts) are grouped at the top of each game file in a `*Tuning` object: `ClawTuning`, `SkeeTuning`, `WhackTuning`, `PusherTuning`, `HoopsTuning`, `HockeyTuning`, `RacerTuning`, `StackerTuning`, `ShooterTuning`, `PinballTuning` and `FishingTuning`.
