@@ -106,28 +106,15 @@ object Props {
         for (cx in floatArrayOf(p.x0 - 2.5f, p.x1)) {
             b.box(cx, 0f, p.z0, cx + 2.5f, p.height + 2f, p.z1 + 1f, BoxFaces(front = edge, left = cheek, right = cheek, top = cheek, frontEmissive = 1.2f, gloss = 0.4f))
         }
-        val shelves = 5
-        for (k in 0 until shelves) {
-            val y = 14f + k * 17f
+        for (k in 0 until PrizeWall.SHELVES) {
+            val y = PrizeWall.shelfY(k)
             b.box(p.x0, y - 1.2f, p.z0 + 2f, p.x1, y, p.z1, BoxFaces(front = shelf, top = shelf, gloss = 0.3f))
-            // Alternate plush rows and boxed toys.
-            var x = p.x0 + 4f
-            var i = 0
-            while (x < p.x1 - 6f) {
-                if ((k + i) % 3 == 0) {
-                    val w = 9f + hash01(i, k) * 5f
-                    val hgt = 8f + hash01(i, k + 9) * 6f
-                    val tex = boxTextures[(i + k * 3) % boxTextures.size]
-                    b.box(x, y, p.z0 + 4f, x + w, y + hgt, p.z1 - 2f, BoxFaces(front = tex.full, top = tex.full, left = tex.full, right = tex.full, gloss = 0.35f))
-                    x += w + 2f
-                } else {
-                    val plush = Catalog.plushies[(i * 7 + k * 3) % Catalog.plushies.size]
-                    val s = if (k == shelves - 1) 0.75f else 0.55f
-                    b.add(Plush3D.model(plush), xf.set(x + 5f, y, (p.z0 + p.z1) / 2f + 1f, yaw = (hash01(i, k + 3) - 0.5f) * 0.6f, scale = s))
-                    x += 12f * s + 4f
-                }
-                i++
-            }
+        }
+        // Boxed toys are part of the wall. The plushies between them aren't: they're drawn each
+        // frame (PrizeWallDisplay), in colour once won and as dark silhouettes until then.
+        for (t in PrizeWall.layout(p).boxes) {
+            val tex = boxTextures[t.art % boxTextures.size]
+            b.box(t.x, t.y, p.z0 + 4f, t.x + t.w, t.y + t.h, p.z1 - 2f, BoxFaces(front = tex.full, top = tex.full, left = tex.full, right = tex.full, gloss = 0.35f))
         }
         // Neon over the wall.
         b.quad(p.centerX - 70f, p.height + 36f, p.z0 + 2.2f, p.centerX + 70f, p.height + 36f, p.z0 + 2.2f, p.centerX + 70f, p.height + 1f, p.z0 + 2.2f, p.centerX - 70f, p.height + 1f, p.z0 + 2.2f, HallArt.neon("PRIZES", 0xFFFF4FA8.toInt()).full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1.6f, cull = false)
@@ -282,6 +269,34 @@ object Props {
         b.quad(p.x0 + 2f, p.height - 12f, p.z1 - 0.5f, p.x1 - 2f, p.height - 12f, p.z1 - 0.5f, p.x1 - 2f, 4f, p.z1 - 0.5f, p.x0 + 2f, 4f, p.z1 - 0.5f, curtain.full, 0f, 0f, 1f)
         b.quad(p.x0, p.height, p.z1 + 0.1f, p.x1, p.height, p.z1 + 0.1f, p.x1, p.height - 12f, p.z1 + 0.1f, p.x0, p.height - 12f, p.z1 + 0.1f, HallArt.lightbox("PHOTO", 0xFF2FB8FF.toInt(), -1, 384, 128, 76f).full, 0f, 0f, 1f, emissive = 1.3f)
         lights += light(p.centerX, 50f, p.z1 + 8f, 0xFF7ACBFF.toInt(), 60f, 0.8f)
+        photoWall(b, p)
+    }
+
+    /**
+     * The photo wall: the last four strips as posters on the right wall above the booth, on a
+     * dark board under a neon sign. The posters are one live texture ([PhotoWall]) that the booth
+     * repaints as strips are saved, so the model is built once. Nothing is hung if the booth isn't
+     * by the wall.
+     */
+    private fun photoWall(b: ModelBuilder, p: Prop) {
+        val wallX = HubLayout.WIDTH - HubLayout.WALL
+        if (wallX - p.x1 > PhotoWallLayout.REACH) return
+        val z0 = PhotoWallLayout.startZ(p)
+        val z1 = z0 + PhotoWallLayout.WORLD_LENGTH
+        val metal = HallArt.darkMetal.full
+        // The board is 1.4 deep against the wall; its face, and what hangs on it, look west into the hall.
+        b.box(wallX - 1.4f, PhotoWallLayout.Y0 - 2f, z0 - 2f, wallX, PhotoWallLayout.Y1 + 2f, z1 + 2f, BoxFaces.all(metal, 0.5f))
+        val tex = PhotoWall.texture
+        val x = wallX - 1.6f
+        for (slot in 0 until PhotoWallLayout.SLOTS) {
+            val za = PhotoWallLayout.posterZ(p, slot)
+            val zb = za + PhotoWallLayout.WORLD_W
+            val region = tex.region(PhotoWallLayout.texX(slot), 0, PhotoWallLayout.POSTER_W, PhotoWallLayout.POSTER_H)
+            b.quad(x, PhotoWallLayout.Y1, za, x, PhotoWallLayout.Y1, zb, x, PhotoWallLayout.Y0, zb, x, PhotoWallLayout.Y0, za, region, -1f, 0f, 0f, emissive = 0.35f, gloss = 0.4f)
+        }
+        val sign = HallArt.neon("PHOTO WALL", 0xFF2FB8FF.toInt(), 640, 160, 100f).full
+        val sx = wallX - 1.8f
+        b.quad(sx, PhotoWallLayout.SIGN_Y1, z0, sx, PhotoWallLayout.SIGN_Y1, z1, sx, PhotoWallLayout.SIGN_Y0, z1, sx, PhotoWallLayout.SIGN_Y0, z0, sign, -1f, 0f, 0f, blend = Blend.ADD, emissive = 1.6f, cull = false)
     }
 
     private fun doors(b: ModelBuilder, p: Prop, lights: MutableList<PointLight>) {

@@ -47,7 +47,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /** What a pin on the quick-travel map is. */
-enum class PinKind { MACHINE, TOKENS, PRIZES, CAFE, DOORS }
+enum class PinKind { MACHINE, TOKENS, PRIZES, CAFE, DOORS, PHOTO }
 
 /**
  * A place you can travel to from the map, drawn at ([x], [z]) on the floor plan. Going there
@@ -97,7 +97,11 @@ object HallMap {
             when (s.type) {
                 SpotType.TOKENS -> out += MapPin(PinKind.TOKENS, "TOKENS", Pal.GOLD, s.area.centerX, s.area.centerY, s)
                 SpotType.PRIZES -> out += MapPin(PinKind.PRIZES, "PRIZES", Pal.PINK, s.area.centerX, s.area.centerY, s)
-                SpotType.MACHINE -> Unit
+                SpotType.PHOTO -> out += MapPin(PinKind.PHOTO, "PHOTOS", Pal.PURPLE, s.area.centerX, s.area.centerY, s)
+                // Machines have their own pins above, and the café has one below. The rest only
+                // earn a pin once their prop does something worth walking over for.
+                SpotType.MACHINE, SpotType.TROPHY, SpotType.TANK, SpotType.CAFE,
+                SpotType.RIDE, SpotType.JUKEBOX, SpotType.VENDING -> Unit
             }
         }
         // The café: labelled over its tables, walking to the front of the till queue.

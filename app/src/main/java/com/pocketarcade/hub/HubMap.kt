@@ -35,11 +35,46 @@ class Prop(
     val frontZ: Float get() = z1
 }
 
-enum class SpotType { MACHINE, TOKENS, PRIZES }
+/**
+ * What a spot is for. The machines, the token kiosk and the prize counter are placed by hand;
+ * every other type belongs to an interactive prop and is generated for it ([HubLayout.spotTypeOf],
+ * [HubLayout.propSpots]). The prompt's words are in `HubRenderer.drawPrompt`, what tapping it
+ * does is in `ArcadeApp.onSpot`.
+ */
+enum class SpotType {
+    MACHINE,
+
+    TOKENS,
+
+    PRIZES,
+
+    /** The photo booth. */
+    PHOTO,
+
+    /** The trophy case (a bought decoration). */
+    TROPHY,
+
+    /** The fish tank (a bought decoration). */
+    TANK,
+
+    /** The café's service counter, at the till. */
+    CAFE,
+
+    /** A kiddie ride ([Spot.prop]'s variant says which). */
+    RIDE,
+
+    /** The jukebox (a bought decoration). */
+    JUKEBOX,
+
+    /** A vending machine ([Spot.prop]'s variant says which). */
+    VENDING,
+}
 
 /**
  * A place the player can stand to use something. [area] is where they must be; the prompt
- * floats at the anchor, and the enter transition flies the camera to the focus point.
+ * floats at the anchor, and the enter transition flies the camera to the focus point. A spot
+ * generated for an interactive prop carries that [prop], so a handler can tell which of several
+ * (vending machine, ride) was tapped.
  */
 class Spot(
     val type: SpotType,
@@ -51,6 +86,7 @@ class Spot(
     val focusX: Float,
     val focusY: Float,
     val focusZ: Float,
+    val prop: Prop? = null,
 )
 
 /**
@@ -178,6 +214,17 @@ object HubLayout {
     /** How far in front of a cabinet its play spot reaches. */
     const val PROMPT_DEPTH = 26f
     /**
+     * An interactive prop's spot is never narrower than this (half width), and never wider than
+     * [MAX_STAND_HALF], however wide the prop: a long counter gets a spot the size of a till.
+     */
+    const val MIN_STAND_HALF = 12f
+    const val MAX_STAND_HALF = 22f
+    /**
+     * The least depth a prop's spot may be cut down to by something standing in front of it:
+     * enough for the body to stop at [HubWorld.STAND_DEPTH] and still be inside it.
+     */
+    const val MIN_STAND_DEPTH = 22f
+    /**
      * The main aisle: nothing stands between these x from the doors to the prize counter, and
      * the play spots in front of the banks either side keep to their own side of it.
      */
@@ -273,8 +320,9 @@ object HubLayout {
         // Back wall, either side of the prize counter.
         DecorStyle.TROPHY_CASE to (182f to 42f),
         DecorStyle.PLUSH_BEAR to (442f to 92f),
-        // In the café, against the wall between the booths and the snack machine.
-        DecorStyle.JUKEBOX to (34f to 1036f),
+        // In the café, against the wall between the booths and the snack machine. Its front is
+        // clear of the lava lamp's corner, so there's room to stand and pick a song.
+        DecorStyle.JUKEBOX to (34f to 1030f),
         // At the right-wall end of the cross aisle between the table and video games.
         DecorStyle.FISH_TANK to (562f to 486f),
         // In the café's front corner, by the window.
@@ -397,6 +445,9 @@ object HubLayout {
 
         for (p in props) p.foot?.let { solids += it }
 
+        // A spot in front of every interactive prop, now that all the solids are known.
+        spots += propSpots(props, solids)
+
         // Walkable tile grid for the kids' path finding.
         val cols = w / TILE
         val rows = h / TILE
@@ -441,6 +492,78 @@ object HubLayout {
             machineSlots = machineSlots,
             cafeQueue = cafeQueue,
         )
+    }
+
+    /**
+     * What [p] does when the player uses it, or null for a prop that only decorates: the photo
+     * booth, the kiddie rides, the vending machines, the café's service counter and the bought
+     * trophy case, fish tank and jukebox. Making another prop interactive starts here: give it a
+     * [SpotType] (and a line in `HubRenderer.drawPrompt` and `ArcadeApp.onSpot`).
+     */
+    fun spotTypeOf(p: Prop): SpotType? = when (p.kind) {
+        PropKind.PHOTO_BOOTH -> SpotType.PHOTO
+
+        PropKind.KIDDIE_RIDE -> SpotType.RIDE
+
+        PropKind.VENDING -> SpotType.VENDING
+
+        PropKind.CAFE_COUNTER -> SpotType.CAFE
+
+        PropKind.DECOR -> when (p.decor) {
+            DecorStyle.TROPHY_CASE -> SpotType.TROPHY
+
+            DecorStyle.FISH_TANK -> SpotType.TANK
+
+            DecorStyle.JUKEBOX -> SpotType.JUKEBOX
+
+            else -> null
+        }
+
+        else -> null
+    }
+
+    /**
+     * The floor where the player stands to use [p]: the stand-in-front rule. A strip along the
+     * prop's front, [PROMPT_DEPTH] deep, centred on it (a long counter is served at its till, the
+     * rest at their middle) and at most [MAX_STAND_HALF] either side, cut short before any of
+     * [solids] that stands in it. The strip starts exactly at the prop's front, so first person
+     * keeps its body [Body.FRONT_GAP] off it, as it does for a cabinet. Fails loudly if less than
+     * [MIN_STAND_DEPTH] is left, like a bank that doesn't fit: move the prop.
+     */
+    fun standArea(p: Prop, solids: List<Box>): Box {
+        val cx = if (p.kind == PropKind.CAFE_COUNTER) CafeLayout.TILL_X else p.centerX
+        val half = ((p.x1 - p.x0) / 2f - 1f).coerceIn(MIN_STAND_HALF, MAX_STAND_HALF)
+        val left = cx - half
+        val right = cx + half
+        val front = p.frontZ
+        var bottom = front + PROMPT_DEPTH
+        for (b in solids) {
+            if (b.left < right && b.right > left && b.bottom > front && b.top < bottom) bottom = maxOf(b.top, front)
+        }
+        check(bottom - front >= MIN_STAND_DEPTH) {
+            "No room to stand in front of the ${p.kind} at ($left..$right, $front): only ${bottom - front} clear, it needs $MIN_STAND_DEPTH"
+        }
+        return Box(left, front, right, bottom)
+    }
+
+    /**
+     * A spot for every interactive prop in [props] ([spotTypeOf]), standing in front of it
+     * ([standArea]) with its prompt floating over the top and the view turning to face it. Each
+     * spot keeps its [Spot.prop].
+     */
+    fun propSpots(props: List<Prop>, solids: List<Box>): List<Spot> {
+        val out = ArrayList<Spot>()
+        for (p in props) {
+            val type = spotTypeOf(p) ?: continue
+            val area = standArea(p, solids)
+            out += Spot(
+                type, -1, area,
+                area.centerX, p.height + 6f, p.frontZ - 4f,
+                area.centerX, p.height * 0.6f, p.frontZ - 2f,
+                prop = p,
+            )
+        }
+        return out
     }
 
     private fun addMachine(

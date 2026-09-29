@@ -656,11 +656,15 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
         return ok
     }
 
-    /** The play spot belonging to a prop: a machine's own, the token kiosk's, the prize counter's. */
-    private fun spotOf(p: Prop): Spot? {
+    /**
+     * The play spot belonging to a prop: a machine's own, the token kiosk's, the prize counter's,
+     * or the one generated for an interactive prop ([Spot.prop]).
+     */
+    internal fun spotOf(p: Prop): Spot? {
         val spots = map.spots
         for (i in spots.indices) {
             val s = spots[i]
+            if (s.prop === p) return s
             val mine = when (p.kind) {
                 PropKind.MACHINE -> s.type == SpotType.MACHINE && s.machine == p.machine &&
                     abs(s.area.centerX - p.centerX) < 1f && abs(s.area.top - p.z1) < 1f

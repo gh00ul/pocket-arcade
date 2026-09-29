@@ -49,6 +49,9 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 - **Settings.** The gear button opens look speed, invert look, left-handed (the walk and look halves swap), first-person field of view, run mode, reduce motion (no head bob, run zoom or screen shake), haptics, and effects and ambience volume.
 - Collision against walls, cabinets and furniture, with sliding along edges.
 - Walk up to a machine and a **▶ PLAY (1 token)** prompt pops up, and the cabinet you're standing at (or the token kiosk, or the prize counter) glows a little brighter and pulses gently, with its floor light pool swelling, fading in and out as you step up and away. Tap the prompt and the camera flies into the screen of the cabinet you're standing at. Exiting flies you back out to exactly where you stood (in first person, facing the machine).
+- **The prize wall shows what you've won.** The plushies on the shelves behind the counter are in colour once you've won them from the claw machine, and dark silhouettes until then.
+- **The photo booth** by the doors opens from its own prompt: your kid in their current hat and outfit, a 3-2-1 countdown, then four shots in four poses (idle, cheer, sit, cheers with a drink). The strip is composed under your arcade's name and the date, saved in the app's own storage (the last four are kept) and can be sent through the Android share sheet. It asks for no storage permission. The kept strips hang as posters on the photo wall on the wall above the booth (blank "PHOTO WALL" frames until there are some), repainted into a live texture whenever a new one is saved.
+- The photo booth, kiddie rides, vending machines, café counter and bought trophy case, fish tank and jukebox all show a prompt when you stand at them. Only the photo booth does anything yet; the rest say COMING SOON (see "Add an interactive prop").
 - An ambient arcade soundscape: mains hum, crowd murmur and distant machine bleeps.
 
 **Eleven machines**, each a full 3D game that pays out tickets:
@@ -193,6 +196,17 @@ To give the machine its own hall cabinet instead of a generic one, point `overri
 
 Each game gets a headless test in `app/src/test/java/com/pocketarcade/games/<name>/` built on `SimHarness`, which plays rounds exactly like the host (including the 1.2 s ending) and checks the payout bands.
 
+## Add an interactive prop
+
+Machines aren't the only thing in the hall that can be used. The photo booth, kiddie rides, vending machines, the café counter and the bought trophy case, fish tank and jukebox each get a *spot*, the same way a cabinet gets its PLAY prompt: stand in front of one and a bubble pops up; tap it (or, in first person, tap the prop itself and you walk there and face it) and something opens. A prop with no feature yet shows a "COMING SOON" banner, so any of them can be made real one at a time.
+
+1. **Give the prop a spot.** `SpotType` (`hub/HubMap.kt`) has one value per kind of prop, and `HubLayout.spotTypeOf(prop)` maps a prop to its type (`null` means it only decorates). `HubLayout.propSpots` then generates the spot with the *stand-in-front* rule (`HubLayout.standArea`): a strip along the prop's front, up to 26 deep and 24 to 44 wide, centred on it (the café counter is served at its till) and cut short before anything that stands in it. The spot keeps its `prop`, so a handler can tell which of two vending machines or rides it was. If less than 22 is left to stand in, `HubLayout.build` fails loudly, like a bank a cabinet doesn't fit: move the prop. To make a new prop interactive, add its `SpotType` and one line to `spotTypeOf`.
+2. **Say what the prompt says.** `HubRenderer.drawPrompt` has a `when` branch per type with its title, action and info line (the info can read the save, like the token count).
+3. **Say what tapping it does.** `ArcadeApp.onSpot` has one line per type. Replace your `comingSoon()` with your own handler; most open a full-screen panel with `openOverlay(Overlay.MINE)` (add a value to `Overlay` and a screen in the `when (overlay)` below). `ArcadePanel`, `ArcadeButton` and `GlassBox` in `ui/Widgets.kt` give it the arcade's look, and `Thumb` (`ui/Thumbs.kt`) photographs 3D scenes into it. Saves go through `services.persist { services.repo.addStat("mine") }`, so leaving the screen can't drop them.
+4. **The tests come free.** `InteractivePropsTest` checks every interactive prop, decor included, for exactly one spot in front of it that overlaps nothing, stays out of the main aisle, is reachable from the doors on the kids' walk grid, has room for the first-person body and is found by tap-to-walk.
+
+The photo booth is the first one built (`ui/PhotoBoothScreen.kt`, with its pure timing in `ui/PhotoBoothPlan.kt` and the strip's geometry, saving and sharing in `share/`), and a fair example of the recipe: an overlay that photographs 3D scenes with `Thumbs`, counts a stat with `services.persist` and shares a file through a `FileProvider` (declared in the manifest, `res/xml/file_paths.xml`).
+
 ## Project layout
 
 ```
@@ -210,7 +224,8 @@ app/src/main/java/com/pocketarcade/
 │   ├── airhockey/  racer/  stacker/
 │   └── shooter/  pinball/  fishing/
 ├── data/                  DataStore repository, save state, prize catalog, settings store
-└── ui/                    HUD, title, prize counter, token machine, profile, map, settings,
+├── share/                 photo strips: layout and painting, keeping the last four, the share sheet
+└── ui/                    HUD, title, prize counter, token machine, profile, map, settings, photo booth,
                            game host, widgets, and the thumbnail studio
 ```
 
