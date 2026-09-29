@@ -50,6 +50,7 @@ import com.pocketarcade.hub.HubWorld
 import com.pocketarcade.hub.PhotoWall
 import com.pocketarcade.hub.Spot
 import com.pocketarcade.hub.SpotType
+import com.pocketarcade.startup.Startup
 import com.pocketarcade.ui.GameHostScreen
 import com.pocketarcade.ui.Hud
 import com.pocketarcade.ui.HudExtras
@@ -125,8 +126,9 @@ private enum class Overlay {
 fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     val context = LocalContext.current
     val save by services.repo.state.collectAsState(initial = SaveState())
-    val games = remember { GameRegistry.createAll() }
-    val world = remember { HubWorld(games, services.audio, services.haptics) }
+    remember { Startup.mark("ArcadeApp first composition") }
+    val games = remember { GameRegistry.createAll().also { Startup.mark("games created") } }
+    val world = remember { HubWorld(games, services.audio, services.haptics).also { Startup.mark("hub world created") } }
     var screen by remember { mutableStateOf(Screen.TITLE) }
     var overlay by remember { mutableStateOf(Overlay.NONE) }
     var activeGame by remember { mutableIntStateOf(-1) }
@@ -270,6 +272,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             if (refund) services.repo.refundToken()
             audio.play(Sfx.WHOOSH, 0.6f, 0.8f)
             fade.animateTo(1f, tween(250))
+            Startup.awaitHallFrame("machine exit -> first hall frame")
             screen = Screen.HUB
             activeGame = -1
             dive.snapTo(1f)
@@ -344,6 +347,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                         audio.play(Sfx.COIN)
                         audio.play(Sfx.WHOOSH, 0.5f)
                         fade.animateTo(1f, tween(300))
+                        Startup.awaitHallFrame("title tap -> first hall frame")
                         screen = Screen.HUB
                         fade.animateTo(0f, tween(500))
                         busy = false
