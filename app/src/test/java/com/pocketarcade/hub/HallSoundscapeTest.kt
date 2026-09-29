@@ -28,6 +28,7 @@ class HallSoundscapeTest {
         var cafeX = Float.NaN
         var cafeZ = Float.NaN
         var lastCrowd = -1f
+        var lastIntensity = -1f
         val played = ArrayList<Played>()
         var playedThisFrame = 0
 
@@ -51,6 +52,10 @@ class HallSoundscapeTest {
 
         override fun setCrowd(level: Float) {
             lastCrowd = level
+        }
+
+        override fun setMusicIntensity(level: Float) {
+            lastIntensity = level
         }
 
         override fun playAt(sfx: Sfx, x: Float, z: Float, volume: Float, pitch: Float) {
@@ -208,6 +213,28 @@ class HallSoundscapeTest {
         sound.update(0.2f)
         val far = rec.lastCrowd
         assertTrue("café $atCafe vs far $far", atCafe > far)
+    }
+
+    @Test
+    fun theHallMusicOpensUpWhenYouWalkAndAmongTheCrowd() {
+        val calm = HallSoundscape.hallIntensity(false, HallSoundscape.CROWD_FLOOR)
+        val walking = HallSoundscape.hallIntensity(true, HallSoundscape.CROWD_FLOOR)
+        val busyStanding = HallSoundscape.hallIntensity(false, 0.9f)
+        val busyWalking = HallSoundscape.hallIntensity(true, 0.9f)
+        // Layers of the hall theme start at 0.3 and 0.65.
+        assertTrue("standing alone stays with the bed: $calm", calm < 0.3f)
+        assertTrue("walking brings in the first layer: $walking", walking in 0.3f..0.65f)
+        assertTrue("the café brings it in too: $busyStanding", busyStanding >= 0.3f)
+        assertTrue("walking through it brings in the lead: $busyWalking", busyWalking >= 0.65f)
+        assertTrue(HallSoundscape.hallIntensity(true, 1f) <= 1f)
+        // The world reports it every frame.
+        val world = HubWorld(games, null)
+        val rec = Recorder()
+        val sound = HallSoundscape(world, rec)
+        world.player.x = 560f
+        world.player.y = 120f
+        sound.update(0.2f)
+        assertTrue(rec.lastIntensity in 0f..1f)
     }
 
     @Test

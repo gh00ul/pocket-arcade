@@ -26,6 +26,9 @@ interface HallSoundSink {
 
     /** Plays [sfx] from a world point as heard from the listener. */
     fun playAt(sfx: Sfx, x: Float, z: Float, volume: Float = 1f, pitch: Float = 1f)
+
+    /** How lively the hall is around the player, 0..1: the music's arpeggio and lead fade in with it. */
+    fun setMusicIntensity(level: Float)
 }
 
 /**
@@ -64,6 +67,14 @@ class HallSoundscape(private val world: HubWorld, private val sink: HallSoundSin
         const val CAFE_RADIUS = 240f
         const val CAFE_WEIGHT = 0.5f
 
+        /**
+         * The music's intensity in the hall: the crowd around you (the café, a room full of kids) and whether you
+         * are walking. Standing alone it stays with the bed (under the hall theme's first layer at 0.3); walking
+         * brings in the arpeggio and the beat; walking through a busy spot brings in the lead as well (0.65).
+         */
+        const val INTENSITY_CROWD = 0.65f
+        const val INTENSITY_WALKING = 0.35f
+
         /** The crowd level of an empty hall, and how much of the rest the kids can add. */
         const val CROWD_FLOOR = 0.15f
         const val CROWD_KIDS = 0.4f
@@ -82,6 +93,10 @@ class HallSoundscape(private val world: HubWorld, private val sink: HallSoundSin
             return clamp01(CROWD_FLOOR + CROWD_KIDS * kids + CAFE_WEIGHT * cafe)
         }
 
+        /** The hall music's intensity for a player who is [moving] (or not) at crowd level [crowd]. */
+        fun hallIntensity(moving: Boolean, crowd: Float): Float =
+            clamp01(INTENSITY_CROWD * crowd + if (moving) INTENSITY_WALKING else 0f)
+
         /**
          * The listener's yaw: overhead the camera looks at the back wall (pi), in first person along the
          * player's gaze, and while the view eases between them so do the ears. [firstPersonAmount] is the
@@ -96,6 +111,7 @@ class HallSoundscape(private val world: HubWorld, private val sink: HallSoundSin
     private var lastStep = IntArray(0)
     private var wasCheering = BooleanArray(0)
     private var crowdTimer = 0f
+    private var crowdNow = CROWD_FLOOR
     private var cheerCooldown = 0f
     private val rng = Random(2024)
 
@@ -152,8 +168,10 @@ class HallSoundscape(private val world: HubWorld, private val sink: HallSoundSin
                 val d = kotlin.math.hypot(npcs[i].x - px, npcs[i].y - pz)
                 if (d < CROWD_RADIUS) weight += 1f - d / CROWD_RADIUS
             }
-            s.setCrowd(crowdLevel(weight, kotlin.math.hypot(CAFE_X - px, CAFE_Z - pz)))
+            crowdNow = crowdLevel(weight, kotlin.math.hypot(CAFE_X - px, CAFE_Z - pz))
+            s.setCrowd(crowdNow)
         }
+        s.setMusicIntensity(hallIntensity(world.player.moving, crowdNow))
     }
 
     private fun near(x: Float, z: Float, px: Float, pz: Float, range: Float): Boolean {

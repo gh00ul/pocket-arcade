@@ -69,6 +69,7 @@ fun SettingsScreen(settings: GameSettings, onChange: (GameSettings) -> Unit, onC
             Section("SOUND", "") {
                 Stepper("EFFECTS VOLUME", "${s.sfxPercent}%", GameSettings.VOLUME, s.sfxPercent) { onChange(s.copy(sfxPercent = it)) }
                 Stepper("AMBIENCE VOLUME", "${s.ambiencePercent}%", GameSettings.VOLUME, s.ambiencePercent) { onChange(s.copy(ambiencePercent = it)) }
+                Stepper("MUSIC VOLUME", "${s.musicPercent}%", GameSettings.VOLUME, s.musicPercent) { onChange(s.copy(musicPercent = it)) }
             }
             Spacer(Modifier.height(12.dp))
             Section("GRAPHICS", "CHANGES APPLY AT ONCE") {

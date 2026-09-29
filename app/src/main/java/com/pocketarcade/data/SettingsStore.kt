@@ -51,6 +51,8 @@ data class GameSettings(
     /** Sound effect and ambience volumes, 0..100 (see [gain]). */
     val sfxPercent: Int = 100,
     val ambiencePercent: Int = 100,
+    /** The music's volume, 0..100 (see [gain]). */
+    val musicPercent: Int = 100,
     /** How hard the haptics hit, as a percentage (100 is the full strength they always had). */
     val hapticsPercent: Int = 100,
     /** Racer: lean the phone to steer instead of dragging (drag stays available). */
@@ -92,6 +94,9 @@ data class GameSettings(
     /** Ambience loudness multiplier. */
     val ambienceGain: Float get() = gain(ambiencePercent)
 
+    /** Music loudness multiplier. */
+    val musicGain: Float get() = gain(musicPercent)
+
     /** Haptic strength as the 0..1 multiplier `Haptics.strength` takes. */
     val hapticsStrength: Float get() = hapticsPercent / 100f
 
@@ -101,6 +106,7 @@ data class GameSettings(
         fovDeg = FOV.clamp(fovDeg),
         sfxPercent = VOLUME.clamp(sfxPercent),
         ambiencePercent = VOLUME.clamp(ambiencePercent),
+        musicPercent = VOLUME.clamp(musicPercent),
         hapticsPercent = HAPTIC_STRENGTH.clamp(hapticsPercent),
         quality = quality.coerceIn(QUALITY_AUTO, QUALITY_BEST),
         frameCap = if (frameCap in CAPS) frameCap else CAP_AUTO,
@@ -122,6 +128,7 @@ class SettingsStore(context: Context) {
         private val HAPTICS = booleanPreferencesKey("haptics")
         private val SFX = intPreferencesKey("sfx_percent")
         private val AMBIENCE = intPreferencesKey("ambience_percent")
+        private val MUSIC = intPreferencesKey("music_percent")
         private val HAPTIC_STRENGTH = intPreferencesKey("haptics_percent")
         private val TILT = booleanPreferencesKey("tilt_steering")
         private val QUALITY = intPreferencesKey("gfx_quality")
@@ -140,6 +147,7 @@ class SettingsStore(context: Context) {
                 haptics = p[HAPTICS] ?: d.haptics,
                 sfxPercent = p[SFX] ?: d.sfxPercent,
                 ambiencePercent = p[AMBIENCE] ?: d.ambiencePercent,
+                musicPercent = p[MUSIC] ?: d.musicPercent,
                 hapticsPercent = p[HAPTIC_STRENGTH] ?: d.hapticsPercent,
                 tiltSteering = p[TILT] ?: d.tiltSteering,
                 quality = p[QUALITY] ?: d.quality,
@@ -159,6 +167,7 @@ class SettingsStore(context: Context) {
             p[HAPTICS] = v.haptics
             p[SFX] = v.sfxPercent
             p[AMBIENCE] = v.ambiencePercent
+            p[MUSIC] = v.musicPercent
             p[HAPTIC_STRENGTH] = v.hapticsPercent
             p[TILT] = v.tiltSteering
             p[QUALITY] = v.quality

@@ -35,6 +35,7 @@ import com.pocketarcade.data.GameSettings
 import com.pocketarcade.data.SaveState
 import com.pocketarcade.data.SettingsStore
 import com.pocketarcade.engine.AudioSynth
+import com.pocketarcade.engine.audio.MusicScene
 import com.pocketarcade.engine.Haptics
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.ScreenShake
@@ -99,6 +100,9 @@ class AppSignals {
 }
 
 private enum class Screen { TITLE, HUB, GAME }
+
+/** How full the title's theme is: every layer of it (they start at 0.2 and 0.5). */
+private const val TITLE_MUSIC_INTENSITY = 0.8f
 private enum class Overlay {
     NONE,
 
@@ -151,6 +155,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         world.applySettings(s)
         audio.sfxVolume = s.sfxGain
         audio.ambienceVolume = s.ambienceGain
+        audio.musicVolume = s.musicGain
         services.haptics.enabled = s.haptics
         services.haptics.strength = s.hapticsStrength
         ScreenShake.intensity = if (s.reduceMotion) 0f else 1f
@@ -202,6 +207,18 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             Screen.HUB -> 1f
             Screen.GAME -> 0.2f
             Screen.TITLE -> 0.5f
+        }
+    }
+    // The soundtrack follows the screen: the title's theme, the hall's (its layers follow the player's
+    // activity, see HallSoundscape). A machine picks its own theme in the game host.
+    LaunchedEffect(screen) {
+        when (screen) {
+            Screen.TITLE -> {
+                audio.enterScene(MusicScene.Title)
+                audio.music.setIntensity(TITLE_MUSIC_INTENSITY)
+            }
+            Screen.HUB -> audio.enterScene(MusicScene.Hall)
+            Screen.GAME -> Unit
         }
     }
     // Daily refill: checked on launch and whenever the app comes back to the foreground.

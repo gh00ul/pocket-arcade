@@ -171,6 +171,8 @@ class AudioSynth : HallSoundSink {
         engine.ambience.crowd = level.coerceIn(0f, 1f)
     }
 
+    override fun setMusicIntensity(level: Float) = engine.music.setIntensity(level)
+
     /** The synthesized samples of [sfx] once [generateAll] has run (for tests). */
     internal fun samples(sfx: Sfx): FloatArray? = engine.bank.samples(sfx)
 
