@@ -56,6 +56,7 @@ import com.pocketarcade.ui.Hud
 import com.pocketarcade.ui.HudExtras
 import com.pocketarcade.ui.HudExtrasReach
 import com.pocketarcade.ui.ArcadeText
+import com.pocketarcade.ui.DailyBonusReveal
 import com.pocketarcade.ui.GlassBox
 import com.pocketarcade.ui.HandoffWash
 import com.pocketarcade.ui.MapScreen
@@ -159,6 +160,10 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     var tutorial by remember { mutableStateOf<Tutorial?>(null) }
     var tutorialArmed by remember { mutableStateOf(false) }
     var tutorialChecked by remember { mutableStateOf(false) }
+    // The daily bonus moment (ui/DailyBonus.kt): granted on launch or on coming back, shown once the
+    // hall is quiet; [dailyShowing] is the amount the card on screen is showing.
+    var dailyGrant by remember { mutableIntStateOf(0) }
+    var dailyShowing by remember { mutableIntStateOf(0) }
     world.hintsSuppressed = tutorial != null
 
     /** Puts [s] to work: the hall's controls and view, the volumes, the haptics and the shake. */
@@ -229,11 +234,13 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     LaunchedEffect(save.loaded, signals.paused) {
         if (save.loaded && !signals.paused) {
             val granted = services.repo.applyDailyRefill()
-            if (granted > 0) {
-                banner = "DAILY BONUS: +$granted TOKENS!"
-                audio.play(Sfx.JACKPOT)
-                services.haptics.win()
-            }
+            if (granted > 0) dailyGrant = granted
+        }
+    }
+    LaunchedEffect(dailyGrant, screen, busy, overlay) {
+        if (dailyGrant > 0 && dailyShowing == 0 && screen == Screen.HUB && !busy && overlay == Overlay.NONE) {
+            dailyShowing = dailyGrant
+            dailyGrant = 0
         }
     }
     LaunchedEffect(banner) {
@@ -420,6 +427,23 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                             overlay = Overlay.SETTINGS
                             audio.play(Sfx.SELECT)
                         },
+                    )
+                }
+                if (dailyShowing > 0) {
+                    DailyBonusReveal(
+                        granted = dailyShowing,
+                        calm = settings.reduceMotion,
+                        onLand = { i -> audio.play(Sfx.COIN, 0.35f, 0.9f + 0.05f * i) },
+                        onSettled = {
+                            audio.play(Sfx.WIN, 0.7f)
+                            services.haptics.win()
+                        },
+                        onDone = { dailyShowing = 0 },
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            // Where the banners go: under both rows of HUD buttons.
+                            .padding(top = 132.dp),
                     )
                 }
                 tutorial?.let { t ->
