@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -57,13 +58,22 @@ import com.pocketarcade.ui.Hud
 import com.pocketarcade.ui.HudFade
 import com.pocketarcade.ui.HudExtras
 import com.pocketarcade.ui.HudExtrasReach
+import com.pocketarcade.ui.ArcadeText
+import com.pocketarcade.ui.DailyBonusReveal
+import com.pocketarcade.ui.GlassBox
+import com.pocketarcade.ui.HandoffWash
 import com.pocketarcade.ui.MapScreen
 import com.pocketarcade.ui.PhotoBoothScreen
 import com.pocketarcade.ui.PrizeCounterScreen
 import com.pocketarcade.ui.ProfileScreen
 import com.pocketarcade.ui.SettingsScreen
+import com.pocketarcade.ui.TitleHandoff
 import com.pocketarcade.ui.TitleScreen
+import com.pocketarcade.ui.TUTORIAL_DONE
 import com.pocketarcade.ui.TokenMachineScreen
+import com.pocketarcade.ui.Tutorial
+import com.pocketarcade.ui.TutorialOverlay
+import com.pocketarcade.ui.TutorialPolicy
 import com.pocketarcade.ui.playerLook
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -138,6 +148,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     var diveSpot by remember { mutableStateOf<Spot?>(null) }
     val dive = remember { Animatable(0f) }
     val fade = remember { Animatable(0f) }
+    // The title's push into the hall and the hall's arrival (see ui/Handoff.kt).
+    val handoff = remember { TitleHandoff() }
     val scope = rememberCoroutineScope()
     val audio = services.audio
     // The hall's camera: taken from the save once, then driven by the HUD button (and saved).
@@ -148,6 +160,16 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     var settings by remember { mutableStateOf(GameSettings()) }
     val hudExtra = with(LocalDensity.current) { HudExtrasReach.toPx() }
     world.hudExtra = hudExtra
+    // The first-run tutorial (ui/Onboarding.kt): begins once, after a new player's first arrival in
+    // the hall, or whenever Settings replays it. While it runs its coach marks replace the hints.
+    var tutorial by remember { mutableStateOf<Tutorial?>(null) }
+    var tutorialArmed by remember { mutableStateOf(false) }
+    var tutorialChecked by remember { mutableStateOf(false) }
+    // The daily bonus moment (ui/DailyBonus.kt): granted on launch or on coming back, shown once the
+    // hall is quiet; [dailyShowing] is the amount the card on screen is showing.
+    var dailyGrant by remember { mutableIntStateOf(0) }
+    var dailyShowing by remember { mutableIntStateOf(0) }
+    world.hintsSuppressed = tutorial != null
 
     /** Puts [s] to work: the hall's controls and view, the volumes, the haptics and the shake. */
     fun applySettings(s: GameSettings) {
@@ -200,6 +222,12 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     LaunchedEffect(signals.paused) {
         if (signals.paused) world.cancelInput()
     }
+    LaunchedEffect(tutorialArmed, save.loaded) {
+        if (tutorialArmed && save.loaded && !tutorialChecked) {
+            tutorialChecked = true
+            if (TutorialPolicy.shouldAutoStart(save.isUnlocked(TUTORIAL_DONE), save.totalPlays)) tutorial = Tutorial()
+        }
+    }
     LaunchedEffect(screen) {
         audio.ambientTarget = when (screen) {
             Screen.HUB -> 1f
@@ -211,11 +239,13 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     LaunchedEffect(save.loaded, signals.paused) {
         if (save.loaded && !signals.paused) {
             val granted = services.repo.applyDailyRefill()
-            if (granted > 0) {
-                banner = "DAILY BONUS: +$granted TOKENS!"
-                audio.play(Sfx.JACKPOT)
-                services.haptics.win()
-            }
+            if (granted > 0) dailyGrant = granted
+        }
+    }
+    LaunchedEffect(dailyGrant, screen, busy, overlay) {
+        if (dailyGrant > 0 && dailyShowing == 0 && screen == Screen.HUB && !busy && overlay == Overlay.NONE) {
+            dailyShowing = dailyGrant
+            dailyGrant = 0
         }
     }
     LaunchedEffect(banner) {
@@ -248,6 +278,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             services.haptics.hit()
             // The token leaves the counter and flies toward the machine as the camera dives.
             currencyFx.launch(CurrencyFx.Kind.TOKEN, currencyFx.tokenAnchor, duration = 0.6f)
+            tutorial?.onPlayed()
             diveSpot = spot
             world.cancelInput()
             val fadeIn = launch {
@@ -299,6 +330,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     /** Opens [which] over the hall (the prize counter, the token machine, the photo booth...). */
     fun openOverlay(which: Overlay) {
         world.cancelInput()
+        if (which == Overlay.PRIZES) tutorial?.onPrizesOpened()
         overlay = which
         audio.play(Sfx.SELECT)
     }
@@ -342,16 +374,21 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         // Every 3D picture is drawn by the GPU on this surface, under the interface.
         GlSurface(Modifier.fillMaxSize())
         when (screen) {
-            Screen.TITLE -> TitleScreen(save, games) {
+            Screen.TITLE -> TitleScreen(save, games, reduceMotion = settings.reduceMotion, exit = { handoff.exit.value }) {
                 if (!busy) {
                     scope.launch {
                         busy = true
                         audio.play(Sfx.COIN)
                         audio.play(Sfx.WHOOSH, 0.5f)
-                        fade.animateTo(1f, tween(300))
-                        screen = Screen.HUB
-                        fade.animateTo(0f, tween(500))
+                        // Title push -> (a loading step can go in `gate`) -> the hall easing in.
+                        handoff.run(
+                            calm = settings.reduceMotion,
+                            enterHall = { screen = Screen.HUB },
+                            onCamera = { world.camera.entrance = it },
+                        )
                         busy = false
+                        tutorialArmed = true
+                        handoff.fadeInHud()
                     }
                 }
             }
@@ -366,6 +403,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                 )
                 HudFade(visible = !busy && dive.value <= 0.01f) {
                     Hud(
+                        modifier = Modifier.graphicsLayer { alpha = handoff.hud.value },
                         save = save,
                         onProfile = {
                             world.cancelInput()
@@ -387,6 +425,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                         },
                     )
                     HudExtras(
+                        modifier = Modifier.graphicsLayer { alpha = handoff.hud.value },
                         onMap = {
                             world.cancelInput()
                             overlay = Overlay.MAP
@@ -396,6 +435,35 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                             world.cancelInput()
                             overlay = Overlay.SETTINGS
                             audio.play(Sfx.SELECT)
+                        },
+                    )
+                }
+                if (dailyShowing > 0) {
+                    DailyBonusReveal(
+                        granted = dailyShowing,
+                        calm = settings.reduceMotion,
+                        onLand = { i -> audio.play(Sfx.COIN, 0.35f, 0.9f + 0.05f * i) },
+                        onSettled = {
+                            audio.play(Sfx.WIN, 0.7f)
+                            services.haptics.win()
+                        },
+                        onDone = { dailyShowing = 0 },
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            // Where the banners go: under both rows of HUD buttons.
+                            .padding(top = 132.dp),
+                    )
+                }
+                tutorial?.let { t ->
+                    TutorialOverlay(
+                        tutorial = t,
+                        world = world,
+                        paused = busy || overlay != Overlay.NONE || dive.value > 0.01f,
+                        reduceMotion = settings.reduceMotion,
+                        onFinished = {
+                            tutorial = null
+                            services.persist { services.repo.unlock(TUTORIAL_DONE) }
                         },
                     )
                 }
@@ -413,7 +481,14 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                         },
                         onClose = { overlay = Overlay.NONE },
                     )
-                    Overlay.SETTINGS -> SettingsScreen(settings, ::changeSettings) { overlay = Overlay.NONE }
+                    Overlay.SETTINGS -> SettingsScreen(
+                        settings,
+                        ::changeSettings,
+                        onReplayTutorial = {
+                            overlay = Overlay.NONE
+                            tutorial = Tutorial()
+                        },
+                    ) { overlay = Overlay.NONE }
 
                     Overlay.PHOTO -> PhotoBoothScreen(save, services) { overlay = Overlay.NONE }
 
@@ -445,6 +520,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                 // Under both rows of HUD buttons.
                 .padding(top = 132.dp, start = 12.dp, end = 12.dp),
         )
+
+        HandoffWash(handoff, settings.reduceMotion)
 
         if (fade.value > 0.001f) {
             Canvas(Modifier.fillMaxSize()) {

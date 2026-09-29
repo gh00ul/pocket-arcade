@@ -118,6 +118,12 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
     var hasLooked = false
         private set
 
+    /**
+     * Set while the tutorial's coach marks are up: they say what the walking and looking hints
+     * say, better, so those hints keep quiet. Set by the app, never by the hall.
+     */
+    var hintsSuppressed = false
+
     /** Screen pixels per dp, for the look speed, the tap slop and the stick's size. */
     var density = 1f
 

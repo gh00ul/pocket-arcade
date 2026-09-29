@@ -46,7 +46,11 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 - **Run lock.** In first person, push the stick to its rim to lock a run: ease your thumb off and keep running until you lift it or come back under half a push. A ring and RUN on the stick show it's locked. (Settings can go back to running only while the thumb is at the rim.)
 - **Tap to walk, in either view.** Tap a machine, the token kiosk, the prize counter or a patch of floor and your kid walks there and turns to face it. Touching the stick takes over at once.
 - **Map.** The map button (under the trophy) opens the floor plan: props as tinted boxes, a marker for every machine in its neon colour and marquee text, the café, the token kiosk, the prize counter and the doors, and a pulsing dot where you stand. Tap a place and your kid walks there.
-- **Settings.** The gear button opens look speed, invert look, left-handed (the walk and look halves swap), first-person field of view, run mode, reduce motion (no head bob, run zoom, screen shake, slow motion, camera punch or flashes, and the interface stops sliding and overshooting), haptics, and effects and ambience volume.
+- **Settings.** The gear button opens look speed, invert look, left-handed (the walk and look halves swap), first-person field of view, run mode, racer tilt steering, reduce motion (no head bob, run zoom, screen shake, slow motion, camera punch or flashes, title and handoff camera moves, and the interface stops sliding and overshooting), haptics with a strength stepper, effects and ambience volume, graphics quality (auto, battery or best) and frame rate (auto, 30 or 60), and a HELP row that replays the tutorial.
+- **The title.** A full-screen showroom of every machine on a polished floor before a stage wall, lit by hanging spotlights through the haze. The camera rides a closed spline (`hub/ShowroomPath.kt`, a Catmull-Rom loop of keyframes, low and oblique along the row and craning back over it) instead of orbiting. The neon sign lights letter by letter with a stutter, breathes, gets a light sweep and the odd buzz; dust motes and stars parallax with the camera; TAP TO START pulses; a welcome line and the version sit under it. The timelines are pure functions in `ui/TitleTimeline.kt`. With reduce motion the camera holds one shot and the sign fades in as one.
+- **Title to hall.** Tapping start pushes the camera in while the sign lifts away, dips through a warm doorway of light to dark, then the hall comes up out of the dark with its camera pulled back and pushing gently in to rest (`HubCamera.entrance`), and the interface fades in last. `TitleHandoff` (`ui/Handoff.kt`) plays it in one coroutine; a loading step goes in its `gate` argument, which runs while the screen is fully dark. Reduce motion gets short crossfades.
+- **First run.** A new player (no rounds played yet, and no `tutorial_done` unlock in the save) gets a short guided tour once, after first arriving in the hall: walk, look (first person), play a machine, visit the prize counter. `Tutorial` (`ui/TutorialSteps.kt`) is a pure step machine that advances only when the player does the thing; the coach card, ghost touch and arrow (`ui/Onboarding.kt`) never block input, and the card can skip a step or end the tour. Finishing or ending it saves `unlock("tutorial_done")`; Settings replays it any time.
+- **Daily bonus.** The free tokens arrive as a card once the hall is quiet: tokens tumble in with a flip and a bounce, a +N counter ticks as each lands (`ui/DailyBonus.kt`).
 - Collision against walls, cabinets and furniture, with sliding along edges.
 - Walk up to a machine and a **▶ PLAY (1 token)** prompt pops up, and the cabinet you're standing at (or the token kiosk, or the prize counter) glows a little brighter and pulses gently, with its floor light pool swelling, fading in and out as you step up and away. Tap the prompt and the camera flies into the screen of the cabinet you're standing at. Exiting flies you back out to exactly where you stood (in first person, facing the machine).
 - **The prize wall shows what you've won.** The plushies on the shelves behind the counter are in colour once you've won them from the claw machine, and dark silhouettes until then.
@@ -81,7 +85,7 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 - Smooth type with vector icons for tokens, tickets and stars, glossy arcade buttons, and one bright palette across the whole app.
 - The prize counter shows each prize as a 3D model on a turntable, photographed by the GPU.
 
-**Progress** is saved with DataStore: tokens, tickets, prize collection, owned and equipped cosmetics, bought decorations, high scores and the daily refill date. The settings live in a separate DataStore file, so options and progress never touch.
+**Progress** is saved with DataStore: tokens, tickets, prize collection, owned and equipped cosmetics, bought decorations, high scores, the daily refill date and whether the tutorial has been seen (the unlock id `tutorial_done`). The settings live in a separate DataStore file, so options and progress never touch.
 
 - You start with **20 tokens** and get **10 free every day**.
 - The token machine trades **40 tickets for 1 token**. If you are completely out, you can grab a free spare token every 3 minutes, so tokens never run out for good.
@@ -235,8 +239,9 @@ app/src/main/java/com/pocketarcade/
 │   └── shooter/  pinball/  fishing/
 ├── data/                  DataStore repository, save state, prize catalog, settings store
 ├── share/                 photo strips: layout and painting, keeping the last four, the share sheet
-└── ui/                    HUD, title, prize counter, token machine, profile, map, settings, photo booth,
-                           game host, widgets, and the thumbnail studio
+└── ui/                    HUD, title and its handoff to the hall, tutorial, daily bonus, prize counter,
+                           token machine, profile, map, settings, photo booth, game host, widgets, and
+                           the thumbnail studio
 ```
 
 Tuning knobs for every game (difficulty and payouts) are grouped at the top of each game file in a `*Tuning` object: `ClawTuning`, `SkeeTuning`, `WhackTuning`, `PusherTuning`, `HoopsTuning`, `HockeyTuning`, `RacerTuning`, `StackerTuning`, `ShooterTuning`, `PinballTuning` and `FishingTuning`.
