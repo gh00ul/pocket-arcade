@@ -91,6 +91,7 @@ open class Haptics(private val vibrator: Vibrator?) {
 
     private var lastAt = 0L
     private var lastAmbientAt = 0L
+    private var lastBumpAt = 0L
     /** Until when a multi-beat pattern is still playing (background texture waits for it). */
     private var busyUntil = 0L
 
@@ -149,7 +150,7 @@ open class Haptics(private val vibrator: Vibrator?) {
     }
 
     /** A short dull thud, for walking into something or a flipper slamming up; rate-limited. */
-    open fun bump() = single(BUMP_GAP_MS, THUD, 0.55f, 30, 150)
+    open fun bump() = single(BUMP_GAP_MS, THUD, 0.55f, 30, 150, ownGap = true)
 
     /**
      * A short, low buzz for an engine or a rumble strip, [level] 0..1 of how hard. Rate-limited,
@@ -170,12 +171,19 @@ open class Haptics(private val vibrator: Vibrator?) {
      * The vibrator, if an effect may start now: [enabled], not silenced by [strength], and no
      * sooner than [minGapMs] after the last one. Background texture ([ambient]) also waits for a
      * pattern still playing and doesn't count against the events that follow it, so a rumble can
-     * never make a hit or a win get dropped.
+     * never make a hit or a win get dropped. A bump ([ownGap]) is the player's own doing, a wall or a
+     * flipper: only another bump is too soon for it, though it does hold off a tick right after it.
      */
-    private fun ready(minGapMs: Long, ambient: Boolean = false, holdMs: Long = 0L): Vibrator? {
+    private fun ready(minGapMs: Long, ambient: Boolean = false, holdMs: Long = 0L, ownGap: Boolean = false): Vibrator? {
         if (!enabled || strength < MIN_STRENGTH) return null
         val v = vibrator ?: return null
         val now = SystemClock.uptimeMillis()
+        if (ownGap) {
+            if (now - lastBumpAt < minGapMs) return null
+            lastBumpAt = now
+            lastAt = now
+            return v
+        }
         if (now - lastAt < minGapMs) return null
         if (ambient) {
             if (now - lastAmbientAt < minGapMs || now < busyUntil) return null
@@ -188,8 +196,8 @@ open class Haptics(private val vibrator: Vibrator?) {
     }
 
     /** One beat: a primitive where the phone has them, else a one-shot of [ms] at [amp]. */
-    private fun single(minGapMs: Long, primitive: Int, scale: Float, ms: Long, amp: Int, ambient: Boolean = false) {
-        val v = ready(minGapMs, ambient) ?: return
+    private fun single(minGapMs: Long, primitive: Int, scale: Float, ms: Long, amp: Int, ambient: Boolean = false, ownGap: Boolean = false) {
+        val v = ready(minGapMs, ambient, ownGap = ownGap) ?: return
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && (if (primitive == LOW_TICK) lowTick else primitives)) {
                 start(v, VibrationEffect.startComposition().addPrimitive(playable(primitive), (scale * strength).coerceIn(0f, 1f)).compose())
