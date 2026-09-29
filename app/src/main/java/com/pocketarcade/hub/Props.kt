@@ -106,28 +106,15 @@ object Props {
         for (cx in floatArrayOf(p.x0 - 2.5f, p.x1)) {
             b.box(cx, 0f, p.z0, cx + 2.5f, p.height + 2f, p.z1 + 1f, BoxFaces(front = edge, left = cheek, right = cheek, top = cheek, frontEmissive = 1.2f, gloss = 0.4f))
         }
-        val shelves = 5
-        for (k in 0 until shelves) {
-            val y = 14f + k * 17f
+        for (k in 0 until PrizeWall.SHELVES) {
+            val y = PrizeWall.shelfY(k)
             b.box(p.x0, y - 1.2f, p.z0 + 2f, p.x1, y, p.z1, BoxFaces(front = shelf, top = shelf, gloss = 0.3f))
-            // Alternate plush rows and boxed toys.
-            var x = p.x0 + 4f
-            var i = 0
-            while (x < p.x1 - 6f) {
-                if ((k + i) % 3 == 0) {
-                    val w = 9f + hash01(i, k) * 5f
-                    val hgt = 8f + hash01(i, k + 9) * 6f
-                    val tex = boxTextures[(i + k * 3) % boxTextures.size]
-                    b.box(x, y, p.z0 + 4f, x + w, y + hgt, p.z1 - 2f, BoxFaces(front = tex.full, top = tex.full, left = tex.full, right = tex.full, gloss = 0.35f))
-                    x += w + 2f
-                } else {
-                    val plush = Catalog.plushies[(i * 7 + k * 3) % Catalog.plushies.size]
-                    val s = if (k == shelves - 1) 0.75f else 0.55f
-                    b.add(Plush3D.model(plush), xf.set(x + 5f, y, (p.z0 + p.z1) / 2f + 1f, yaw = (hash01(i, k + 3) - 0.5f) * 0.6f, scale = s))
-                    x += 12f * s + 4f
-                }
-                i++
-            }
+        }
+        // Boxed toys are part of the wall. The plushies between them aren't: they're drawn each
+        // frame (PrizeWallDisplay), in colour once won and as dark silhouettes until then.
+        for (t in PrizeWall.layout(p).boxes) {
+            val tex = boxTextures[t.art % boxTextures.size]
+            b.box(t.x, t.y, p.z0 + 4f, t.x + t.w, t.y + t.h, p.z1 - 2f, BoxFaces(front = tex.full, top = tex.full, left = tex.full, right = tex.full, gloss = 0.35f))
         }
         // Neon over the wall.
         b.quad(p.centerX - 70f, p.height + 36f, p.z0 + 2.2f, p.centerX + 70f, p.height + 36f, p.z0 + 2.2f, p.centerX + 70f, p.height + 1f, p.z0 + 2.2f, p.centerX - 70f, p.height + 1f, p.z0 + 2.2f, HallArt.neon("PRIZES", 0xFFFF4FA8.toInt()).full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1.6f, cull = false)

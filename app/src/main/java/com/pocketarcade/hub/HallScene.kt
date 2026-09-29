@@ -56,6 +56,8 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
     /** Trusses and spotlights, the racers' hung sign, the upper-wall murals, the entrance chase lights. */
     private val rig = HallRig(map, games)
     private val floorShade: Texture
+    /** The plushies on the prize wall: won ones in colour, the rest dark silhouettes. */
+    private val prizeWall = map.props.firstOrNull { it.kind == PropKind.PRIZE_WALL }?.let { PrizeWallDisplay(it) }
     private val hasDisco = map.props.any { it.decor == DecorStyle.DISCO_BALL }
     private val figures = HashMap<CharacterLook, Figure>()
     private val corners = FloatArray(2)
@@ -382,6 +384,7 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         structure.draw(r, Blend.OPAQUE)
         rig.model.draw(r, Blend.OPAQUE)
         rig.drawOpaque(r, t, rigMinX, rigMaxX, rigMinZ, rigMaxZ)
+        prizeWall?.let { if (fixtureVisible(it.prop)) it.draw(r, save.collection) }
 
         for (i in fixtureProps.indices) {
             val p = fixtureProps[i]
