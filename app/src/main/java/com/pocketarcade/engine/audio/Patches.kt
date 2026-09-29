@@ -91,16 +91,16 @@ internal object Patches {
 
     /** A glassy bell: a sine and a fourth-harmonic overtone that ring out. */
     val BELL = Patch(
-        wave = Wave.SINE, wave2 = Wave.SINE, ratio2 = 3.99f, mix2 = 0.28f, spread = 0.25f,
+        wave = Wave.SINE, wave2 = Wave.SINE, ratio2 = 3.99f, mix2 = 0.2f, spread = 0.25f,
         attack = 0.002f, decay = 1.7f, sustain = 0f, release = 1.2f,
-        cutoffHz = 9000f, gain = 0.11f, send = 0.5f,
+        cutoffHz = 6500f, gain = 0.11f, send = 0.5f,
     )
 
     /** A music box tine: high, pure, quick to fade. */
     val MUSICBOX = Patch(
-        wave = Wave.SINE, wave2 = Wave.SINE, ratio2 = 3f, mix2 = 0.16f, spread = 0.3f,
+        wave = Wave.SINE, wave2 = Wave.SINE, ratio2 = 3f, mix2 = 0.12f, spread = 0.3f,
         attack = 0.002f, decay = 1.0f, sustain = 0f, release = 0.7f,
-        cutoffHz = 9000f, gain = 0.1f, send = 0.5f,
+        cutoffHz = 7000f, gain = 0.1f, send = 0.5f,
     )
 
     /** A xylophone: a wooden knock with a bright overtone. */
