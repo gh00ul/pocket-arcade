@@ -125,7 +125,12 @@ internal class GlThread : Thread("ArcadeGL") {
                 if (failure == null || quit) break
                 val fatal = failure is GlUnsupportedException
                 Log.e(TAG, if (fatal) "This device can't make an OpenGL ES 3 context" else "GL thread failed", failure)
-                if (!policy.shouldRestart(SystemClock.elapsedRealtime(), fatal)) {
+                // A failure while the new HDR pipeline was drawing is blamed on it first: it is
+                // switched off for the run and the restart is free, so the LDR picture (which has
+                // always worked) gets its chance before the limits below count anything.
+                val blamed = !fatal && failure !is ContextLost && renderer.hdrInFlight && !HdrGuard.blocked
+                if (blamed) HdrGuard.block("GL thread failed with the HDR picture on: ${failure.javaClass.simpleName}")
+                if (!policy.shouldRestart(SystemClock.elapsedRealtime(), fatal, blamed)) {
                     Log.e(TAG, "Giving up on graphics")
                     Gfx.reportFailure(if (fatal) GfxFailure.NEEDS_ES3 else GfxFailure.STOPPED)
                     break
@@ -215,7 +220,7 @@ internal class GlThread : Thread("ArcadeGL") {
                 if (err == EGL14.EGL_CONTEXT_LOST) throw ContextLost() else if (err == EGL14.EGL_BAD_SURFACE) destroySurface()
             }
             pace()
-            stats.afterSwap(renderer.renderScale, pacer.rung)
+            stats.afterSwap(renderer.renderScale, pacer.rung, renderer.pipeline.label)
         }
     }
 

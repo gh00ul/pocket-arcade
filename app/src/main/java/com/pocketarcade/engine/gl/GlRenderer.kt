@@ -15,6 +15,7 @@ import java.nio.FloatBuffer
 import java.nio.IntBuffer
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * Draws [RenderPass]es with OpenGL ES 3: multisampled scene rendering at an adaptive resolution,
@@ -38,6 +39,24 @@ internal class GlRenderer {
         private const val STREAK_GAIN = 2f
         /** The render scale a screen starts at (the adaptive resolution's usual ceiling). */
         const val START_SCALE = 0.8f
+
+        private const val GL_RGBA16F = 0x881A
+        private const val GL_HALF_FLOAT = 0x140B
+
+        /**
+         * How many frames after the HDR pipeline first draws are checked for GL errors. Nothing
+         * a working driver does with float targets raises one, so a single error blames the HDR
+         * pipeline, which is switched off and the frame drawn again as LDR.
+         */
+        private const val HDR_PROBE_FRAMES = 4
+
+        /**
+         * Frames a screen's HDR buffers may sit unused before their multisampled colour and depth
+         * (the biggest allocation: 8 bytes a sample in float) are given back; they are built again
+         * on demand if the screen returns. Keeps three screen sizes from holding three float
+         * multisampled sets at once.
+         */
+        private const val HDR_IDLE_FRAMES = 240L
     }
 
     /**
@@ -64,13 +83,27 @@ internal class GlRenderer {
         private val locs = HashMap<String, Int>()
         fun loc(name: String): Int = locs.getOrPut(name) { GLES30.glGetUniformLocation(id, name) }
     }
+    /** The scene program in use: [sceneLdr], or [sceneHdr] while an HDR pass draws (never for the mirror). */
     private var scene = Prog(0)
+    private var sceneLdr = Prog(0)
+    private var sceneHdr = Prog(0)
     private var bg = Prog(0)
+    private var bgHdr = Prog(0)
     private var bright = Prog(0)
+    private var brightHdr = Prog(0)
+    private var glare = Prog(0)
     private var down = Prog(0)
     private var up = Prog(0)
     private var comp = Prog(0)
+    private var compHdr = Prog(0)
     private var particle = Prog(0)
+    private var particleHdr = Prog(0)
+
+    /** What the driver offers, read at [init]; null before. */
+    private var caps: GlCaps? = null
+
+    /** Whether every HDR program compiled and linked. If not the picture is LDR, silently. */
+    private var hdrProgramsOk = false
     private var streamVbo = 0
     private var streamVao = 0
     private var bgVbo = 0
@@ -100,8 +133,22 @@ internal class GlRenderer {
     /** Bloom octaves wanted, 2..[BLOOM_LEVELS]. */
     var bloomOctaves = BLOOM_LEVELS
     var reflections = GfxQuality.Reflections.MIRROR
+    /** HDR wanted by the rung (the plan still needs the device's capabilities and [HdrGuard]'s leave). */
+    var hdrWanted = true
+    /** The rung's cinematic finish: the anamorphic glare, and film grain with chromatic aberration. */
+    var glareOn = true
+    var filmOn = true
     /** Whether the pass being drawn renders into a multisampled target. */
     private var msActive = false
+    /** Whether the pass being drawn is the HDR picture (its scene target is RGBA16F). */
+    private var hdrPass = false
+
+    /** The pipeline the last pass was drawn with, for the frame log. */
+    var pipeline = Pipeline.LDR
+        private set
+    private var loggedPipeline: Pipeline? = null
+    /** Frames drawn with the HDR pipeline that are still being checked for GL errors. */
+    private var hdrProbeLeft = HDR_PROBE_FRAMES
 
     /** Draw calls and vertices issued by the last [drawFrame], for [FrameStats] (to judge instancing). */
     var drawCalls = 0
@@ -126,6 +173,9 @@ internal class GlRenderer {
         msaa = r.msaa
         bloomOctaves = r.bloomOctaves
         reflections = r.reflections
+        hdrWanted = r.hdr
+        glareOn = r.glare
+        filmOn = r.film
     }
 
     /** The multisampling the current levers and the GPU allow: 0 (off) or 2..4. */
@@ -133,6 +183,11 @@ internal class GlRenderer {
         val n = if (msaaBroken) 0 else minOf(msaa, maxSamples)
         return if (n > 1) n else 0
     }
+
+    /** The picture the levers, the device and [HdrGuard] allow right now. */
+    private fun plan(): Pipeline = HdrPlan.choose(
+        caps, GfxQuality.tier, hdrWanted && hdrProgramsOk, wantSamples(), HdrGuard.blocked, HdrGuard.msaaBlocked,
+    )
 
     private class Targets(val w: Int, val h: Int) {
         var msFbo = 0
@@ -143,11 +198,22 @@ internal class GlRenderer {
         var sceneFbo = 0
         var sceneTex = 0
         var sceneDepth = 0
+        /** Whether the scene and bloom textures are RGBA16F (the HDR picture); false = RGBA8. */
+        var hdr = false
+        /** Whether the scene and bloom textures exist yet (they are built by [setColorFormat]). */
+        var colorBuilt = false
         val bloomW = IntArray(BLOOM_LEVELS)
         val bloomH = IntArray(BLOOM_LEVELS)
         val bloomFbo = IntArray(BLOOM_LEVELS)
         val bloomTex = IntArray(BLOOM_LEVELS)
         var bloomLevels = 0
+        // The anamorphic glare: the brightest of the bloom's second octave, blurred sideways.
+        var glareFbo = 0
+        var glareTex = 0
+        // The camera of the previous frame and the smoothed 0..1 amount of motion between frames.
+        val prevCam = FloatArray(12)
+        var hasPrevCam = false
+        var motion = 0f
         /** Whether the bloom chain holds a finished frame (read back as floor streaks). */
         var bloomDone = false
         var lastUsed = 0L
@@ -218,7 +284,8 @@ internal class GlRenderer {
             0
         }
         particlesOk = particleProg != 0
-        scene = Prog(sceneProg)
+        sceneLdr = Prog(sceneProg)
+        scene = sceneLdr
         bg = Prog(bgProg)
         bright = Prog(brightProg)
         down = Prog(downProg)
@@ -237,7 +304,17 @@ internal class GlRenderer {
             anisotropy = minOf(8f, f[0])
         }
         GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
-        Log.i(TAG, "GL ${GLES30.glGetString(GLES30.GL_VERSION)} / ${GLES30.glGetString(GLES30.GL_RENDERER)}, MSAA $maxSamples, aniso $anisotropy")
+        val version = GLES30.glGetString(GLES30.GL_VERSION) ?: ""
+        Log.i(TAG, "GL $version / $glRendererName, MSAA $maxSamples, aniso $anisotropy")
+        val c = GlCaps(version, ext, maxSamples)
+        caps = c
+        hdrProgramsOk = false
+        if (!HdrGuard.blocked && c.floatTargets) buildHdrPrograms()
+        Log.i(
+            TAG,
+            "HDR: float targets ${c.floatTargets} (color_buffer_float ${c.colorBufferFloat}, half_float ${c.colorBufferHalfFloat}), " +
+                "float MSAA ${c.floatMsaa}, programs $hdrProgramsOk" + if (HdrGuard.blocked) ", blocked: ${HdrGuard.reason}" else "",
+        )
 
         // Streaming buffer for immediate geometry.
         GLES30.glGenBuffers(1, tmp, 0); streamVbo = tmp[0]
@@ -289,6 +366,30 @@ internal class GlRenderer {
         upload.put(byteArrayOf(-1, -1, -1, -1)).position(0)
         GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, 1, 1, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, upload)
         texParams(GLES30.GL_NEAREST, GLES30.GL_NEAREST, false)
+    }
+
+    /**
+     * Compiles the HDR picture's programs. Any failure leaves [hdrProgramsOk] false, and with it
+     * the LDR picture, which has none of these programs to lose; nothing here can take the scene
+     * down. The half-built ones are deleted so a failed attempt leaks nothing.
+     */
+    private fun buildHdrPrograms() {
+        val built = ArrayList<Int>()
+        fun make(vs: String, fs: String): Int = program(vs, fs).also { built += it }
+        try {
+            sceneHdr = Prog(make(GlShaders.SCENE_VS, GlShaders.SCENE_FS_HDR))
+            bgHdr = Prog(make(GlShaders.BG_VS, GlShaders.BG_HDR_FS))
+            brightHdr = Prog(make(GlShaders.POST_VS, GlShaders.BRIGHT_HDR_FS))
+            glare = Prog(make(GlShaders.POST_VS, GlShaders.GLARE_FS))
+            compHdr = Prog(make(GlShaders.POST_VS, GlShaders.COMPOSITE_HDR_FS))
+            particleHdr = if (particlesOk) Prog(make(GlShaders.PARTICLE_VS, GlShaders.PARTICLE_HDR_FS)) else Prog(0)
+            hdrProgramsOk = true
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "HDR shaders unavailable; drawing the LDR picture", e)
+            HdrGuard.block("HDR shader failed: ${e.message?.take(120)}")
+            for (id in built) GLES30.glDeleteProgram(id)
+            hdrProgramsOk = false
+        }
     }
 
     /** Uploads the reflected room ([EnvMap]) as a mipmapped cube map. */
@@ -519,8 +620,12 @@ internal class GlRenderer {
         return mesh
     }
 
-    /** Frees GPU copies of models and textures the app no longer holds. */
+    /** Frees GPU copies of models and textures the app no longer holds, and idle HDR sets' multisampled buffers. */
     private fun collectGarbage() {
+        for (i in 0 until targets.size) {
+            val t = targets[i]
+            if (t.hdr && t.msFbo != 0 && frameNo - t.lastUsed > HDR_IDLE_FRAMES) releaseMultisample(t)
+        }
         val mi = meshRefs.iterator()
         while (mi.hasNext()) {
             val (ref, mesh) = mi.next()
@@ -547,50 +652,104 @@ internal class GlRenderer {
     }
 
     private fun targetsFor(w: Int, h: Int): Targets {
-        targets.firstOrNull { it.w == w && it.h == h }?.let {
-            it.lastUsed = frameNo
-            // The multisampling lever may have moved since this set was built.
-            val want = wantSamples()
-            if (it.msSamples != want) applyMultisample(it, want)
-            return it
+        var t = targets.firstOrNull { it.w == w && it.h == h }
+        if (t == null) {
+            // Drop the least recently used set when too many sizes pile up.
+            if (targets.size >= 3) {
+                val old = targets.minByOrNull { it.lastUsed }!!
+                freeTargets(old)
+                targets.remove(old)
+            }
+            t = Targets(w, h)
+            GLES30.glGenFramebuffers(1, tmp, 0); t.sceneFbo = tmp[0]
+            targets += t
         }
-        // Drop the least recently used set when too many sizes pile up.
-        if (targets.size >= 3) {
-            val old = targets.minByOrNull { it.lastUsed }!!
-            freeTargets(old)
-            targets.remove(old)
-        }
-        val t = Targets(w, h)
         t.lastUsed = frameNo
-        GLES30.glGenFramebuffers(1, tmp, 0); t.sceneFbo = tmp[0]
-        t.sceneTex = colorTexture(w, h)
+        // Both the picture (HDR or LDR) and the multisampling may have moved since this set was
+        // built. A build that fails marks [HdrGuard], so the plan is asked again; each step can
+        // only end at LDR, which cannot fail that way, so a few rounds always settle it.
+        for (attempt in 0 until 3) {
+            val hdr = plan().isHdr
+            if (hdr) hdrInFlight = true
+            if (!t.colorBuilt || t.hdr != hdr) setColorFormat(t, hdr)
+            val samples = wantSamples()
+            if (t.msSamples != samples) applyMultisample(t, samples)
+            if (plan().isHdr == t.hdr) break
+        }
+        return t
+    }
+
+    /**
+     * (Re)builds [t]'s scene and bloom textures and their framebuffers, RGBA16F for the HDR
+     * picture or RGBA8 for the LDR one. An HDR build is verified with `glCheckFramebufferStatus`;
+     * any incomplete target blocks HDR for the run and the set is rebuilt as LDR.
+     */
+    private fun setColorFormat(t: Targets, hdr: Boolean) {
+        freeColor(t)
+        t.hdr = hdr
+        t.colorBuilt = true
+        // The multisampled colour buffer must match the texture it resolves into.
+        t.msSamples = -1
+        var ok = true
+        t.sceneTex = colorTexture(t.w, t.h, hdr)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.sceneFbo)
         GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, t.sceneTex, 0)
-        applyMultisample(t, wantSamples())
+        if (hdr && !framebufferComplete()) ok = false
         // The bloom chain: each octave half the size of the one before, down to about 1/32.
-        var bw = w / 4
-        var bh = h / 4
+        var bw = t.w / 4
+        var bh = t.h / 4
         for (i in 0 until BLOOM_LEVELS) {
             if (i > 0 && (bw < 2 || bh < 2)) break
             t.bloomW[i] = max(1, bw)
             t.bloomH[i] = max(1, bh)
             GLES30.glGenFramebuffers(1, tmp, 0); t.bloomFbo[i] = tmp[0]
-            t.bloomTex[i] = colorTexture(t.bloomW[i], t.bloomH[i])
+            t.bloomTex[i] = colorTexture(t.bloomW[i], t.bloomH[i], hdr)
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFbo[i])
             GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, t.bloomTex[i], 0)
+            if (hdr && !framebufferComplete()) ok = false
             t.bloomLevels = i + 1
             bw /= 2
             bh /= 2
         }
+        if (hdr && t.bloomLevels > 1) {
+            // The glare lives at the second octave's size, beside the chain.
+            GLES30.glGenFramebuffers(1, tmp, 0); t.glareFbo = tmp[0]
+            t.glareTex = colorTexture(t.bloomW[1], t.bloomH[1], true)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.glareFbo)
+            GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, t.glareTex, 0)
+            if (!framebufferComplete()) ok = false
+        }
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
-        targets += t
-        return t
+        if (hdr && !ok) {
+            Log.w(TAG, "Float framebuffer incomplete at ${t.w}x${t.h}; drawing the LDR picture")
+            HdrGuard.block("float framebuffer incomplete")
+            drainErrors()
+            setColorFormat(t, false)
+        }
+    }
+
+    private fun framebufferComplete(): Boolean =
+        GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) == GLES30.GL_FRAMEBUFFER_COMPLETE
+
+    /** Forgets GL errors already raised, so a later check blames only what it should. */
+    private fun drainErrors() {
+        var guard = 0
+        while (GLES30.glGetError() != GLES30.GL_NO_ERROR && guard++ < 16) { /* drained */ }
+    }
+
+    /** Gives back [t]'s multisampled colour and depth; the next use of the set rebuilds them ([Targets.msSamples] = -1). */
+    private fun releaseMultisample(t: Targets) {
+        if (t.msFbo != 0) { tmp[0] = t.msFbo; GLES30.glDeleteFramebuffers(1, tmp, 0); t.msFbo = 0 }
+        if (t.msColor != 0) { tmp[0] = t.msColor; GLES30.glDeleteRenderbuffers(1, tmp, 0); t.msColor = 0 }
+        if (t.msDepth != 0) { tmp[0] = t.msDepth; GLES30.glDeleteRenderbuffers(1, tmp, 0); t.msDepth = 0 }
+        t.msSamples = -1
     }
 
     /**
      * Gives [t] multisampled buffers of [want] samples, or none (0): the scene is then drawn
      * straight into the scene target with a depth buffer of its own. Replaces whatever [t] had,
-     * so the multisampling lever can move while the app runs.
+     * so the multisampling lever can move while the app runs. Buffers follow the set's picture:
+     * multisampled RGBA16F for HDR, whose failure only rules out HDR with multisampling.
      */
     private fun applyMultisample(t: Targets, want: Int) {
         if (t.msFbo != 0) { tmp[0] = t.msFbo; GLES30.glDeleteFramebuffers(1, tmp, 0); t.msFbo = 0 }
@@ -607,15 +766,21 @@ internal class GlRenderer {
             GLES30.glGenRenderbuffers(1, tmp, 0); t.msColor = tmp[0]
             GLES30.glGenRenderbuffers(1, tmp, 0); t.msDepth = tmp[0]
             GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.msColor)
-            GLES30.glRenderbufferStorageMultisample(GLES30.GL_RENDERBUFFER, n, GLES30.GL_RGBA8, t.w, t.h)
+            GLES30.glRenderbufferStorageMultisample(GLES30.GL_RENDERBUFFER, n, if (t.hdr) GL_RGBA16F else GLES30.GL_RGBA8, t.w, t.h)
             GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.msDepth)
             GLES30.glRenderbufferStorageMultisample(GLES30.GL_RENDERBUFFER, n, GLES30.GL_DEPTH_COMPONENT24, t.w, t.h)
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.msFbo)
             GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_RENDERBUFFER, t.msColor)
             GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, t.msDepth)
             if (GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) != GLES30.GL_FRAMEBUFFER_COMPLETE) {
-                Log.w(TAG, "MSAA framebuffer incomplete; rendering without multisampling")
-                msaaBroken = true
+                if (t.hdr) {
+                    Log.w(TAG, "Multisampled float framebuffer incomplete; the HDR picture needs it, so drawing LDR")
+                    HdrGuard.blockMsaa("multisampled float framebuffer incomplete")
+                } else {
+                    Log.w(TAG, "MSAA framebuffer incomplete; rendering without multisampling")
+                    msaaBroken = true
+                }
+                drainErrors()
                 tmp[0] = t.msFbo; GLES30.glDeleteFramebuffers(1, tmp, 0)
                 tmp[0] = t.msColor; GLES30.glDeleteRenderbuffers(1, tmp, 0)
                 tmp[0] = t.msDepth; GLES30.glDeleteRenderbuffers(1, tmp, 0)
@@ -631,17 +796,45 @@ internal class GlRenderer {
             GLES30.glRenderbufferStorage(GLES30.GL_RENDERBUFFER, GLES30.GL_DEPTH_COMPONENT24, t.w, t.h)
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.sceneFbo)
             GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, t.sceneDepth)
+            if (t.hdr && !framebufferComplete()) {
+                Log.w(TAG, "Float scene framebuffer incomplete with depth; drawing the LDR picture")
+                HdrGuard.block("float scene framebuffer incomplete")
+                drainErrors()
+            }
         }
         t.msSamples = n
     }
 
-    private fun colorTexture(w: Int, h: Int): Int {
+    /** An RGBA8 texture, or an RGBA16F one for the HDR picture, of [w] × [h], filtered linearly. */
+    private fun colorTexture(w: Int, h: Int, hdr: Boolean = false): Int {
         GLES30.glGenTextures(1, tmp, 0)
         val id = tmp[0]
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, id)
-        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, w, h, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        if (hdr) {
+            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GLES30.GL_RGBA, GL_HALF_FLOAT, null)
+        } else {
+            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, w, h, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        }
         texParams(GLES30.GL_LINEAR, GLES30.GL_LINEAR, false)
         return id
+    }
+
+    /** Frees [t]'s scene and bloom textures (and the glare) but keeps its framebuffer object and depth. */
+    private fun freeColor(t: Targets) {
+        fun fbo(id: Int) { if (id != 0) { tmp[0] = id; GLES30.glDeleteFramebuffers(1, tmp, 0) } }
+        fun tex(id: Int) { if (id != 0) { tmp[0] = id; GLES30.glDeleteTextures(1, tmp, 0) } }
+        tex(t.sceneTex)
+        t.sceneTex = 0
+        for (i in 0 until t.bloomLevels) {
+            fbo(t.bloomFbo[i]); tex(t.bloomTex[i])
+            t.bloomFbo[i] = 0
+            t.bloomTex[i] = 0
+        }
+        t.bloomLevels = 0
+        t.bloomDone = false
+        fbo(t.glareFbo); tex(t.glareTex)
+        t.glareFbo = 0
+        t.glareTex = 0
     }
 
     private fun freeTargets(t: Targets) {
@@ -649,10 +842,8 @@ internal class GlRenderer {
         fun rb(id: Int) { if (id != 0) { tmp[0] = id; GLES30.glDeleteRenderbuffers(1, tmp, 0) } }
         fun tex(id: Int) { if (id != 0) { tmp[0] = id; GLES30.glDeleteTextures(1, tmp, 0) } }
         fbo(t.msFbo); rb(t.msColor); rb(t.msDepth)
-        fbo(t.sceneFbo); tex(t.sceneTex); rb(t.sceneDepth)
-        for (i in 0 until t.bloomLevels) {
-            fbo(t.bloomFbo[i]); tex(t.bloomTex[i])
-        }
+        fbo(t.sceneFbo); rb(t.sceneDepth)
+        freeColor(t)
         fbo(t.reflFbo); tex(t.reflTex); rb(t.reflDepth)
         fbo(t.refl2Fbo); tex(t.refl2Tex)
     }
@@ -724,8 +915,43 @@ internal class GlRenderer {
 
     // ------------------------------------------------------------------ frame
 
-    /** Draws every pass into the window surface ([surfaceW] × [surfaceH]). */
+    /**
+     * Draws every pass into the window surface ([surfaceW] × [surfaceH]). If the HDR pipeline
+     * throws, or raises a GL error in its first few frames, it is blocked for the rest of the
+     * run ([HdrGuard]) and the frame is drawn again with the LDR picture, which is unchanged
+     * and cannot fail that way: the player sees at worst one repeated frame, never a black screen.
+     */
     fun drawFrame(passes: Collection<RenderPass>, surfaceW: Int, surfaceH: Int) {
+        val probing = hdrProbeLeft > 0 && hdrProgramsOk && !HdrGuard.blocked
+        if (probing) drainErrors()
+        var failure: Throwable? = null
+        try {
+            drawFrameOnce(passes, surfaceW, surfaceH)
+        } catch (e: RuntimeException) {
+            // Only the new pipeline's failures are ours to absorb; anything else is the GL
+            // thread's restart policy's business.
+            if (!hdrInFlight) throw e
+            failure = e
+        }
+        if (failure == null && probing && pipeline.isHdr) {
+            hdrProbeLeft--
+            val err = GLES30.glGetError()
+            if (err != GLES30.GL_NO_ERROR) failure = IllegalStateException("GL error 0x" + Integer.toHexString(err))
+        }
+        if (failure != null) {
+            Log.w(TAG, "HDR pipeline failed; drawing this frame and the rest as LDR", failure)
+            HdrGuard.block("HDR frame failed: ${failure.javaClass.simpleName} ${failure.message?.take(80)}")
+            drainErrors()
+            drawFrameOnce(passes, surfaceW, surfaceH)
+        }
+    }
+
+    /** Whether the frame being (or last) drawn used or started building the HDR pipeline; see [drawFrame]. */
+    var hdrInFlight = false
+        private set
+
+    private fun drawFrameOnce(passes: Collection<RenderPass>, surfaceW: Int, surfaceH: Int) {
+        hdrInFlight = false
         frameNo++
         drawCalls = 0
         vertsDrawn = 0L
@@ -763,7 +989,13 @@ internal class GlRenderer {
         GLES30.glViewport(0, 0, w, h)
         GLES30.glClearColor(0f, 0f, 0f, 0f)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
-        drawPass(p, snapFbo, h, 1f)
+        // A thumbnail is a still: no film grain or aberration, which are for the moving picture.
+        snapshotting = true
+        try {
+            drawPass(p, snapFbo, h, 1f)
+        } finally {
+            snapshotting = false
+        }
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, snapFbo)
         val buf = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
         GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
@@ -789,9 +1021,21 @@ internal class GlRenderer {
         val rh = (p.vh * scale).roundToInt().coerceAtLeast(16)
         val t = targetsFor(rw, rh)
         msActive = t.msFbo != 0
+        val hdr = t.hdr
+        hdrPass = hdr
+        pipeline = if (!hdr) Pipeline.LDR else if (t.msFbo != 0) Pipeline.HDR_MSAA else Pipeline.HDR
+        if (pipeline != loggedPipeline) {
+            loggedPipeline = pipeline
+            Log.i(TAG, "Picture: ${pipeline.label}, MSAA ${t.msSamples}, bloom octaves ${t.bloomLevels}" + if (HdrGuard.blocked) " (HDR blocked: ${HdrGuard.reason})" else "")
+        }
+        // The finish (grain, aberration, glare) belongs to the live picture, not to thumbnails.
+        val finish = hdr && !snapshotting
+        val reduce = GfxQuality.motionReduced()
+        val motion = if (finish && filmOn && !reduce) cameraMotion(p, t) else 0f
         // Bloom octaves in use this frame: the chain may be longer than the lever asks for.
         val levels = minOf(t.bloomLevels, bloomOctaves.coerceAtLeast(1))
         reflReady = false
+        glareDrawn = false
         streamed = false
         passW = rw
         passH = rh
@@ -816,7 +1060,11 @@ internal class GlRenderer {
         GLES30.glViewport(0, 0, rw, rh)
         GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
         val cc = p.clearColor
-        GLES30.glClearColor((cc shr 16 and 255) / 255f, (cc shr 8 and 255) / 255f, (cc and 255) / 255f, 1f)
+        if (hdr) {
+            clearEncoded(cc, p.exposure)
+        } else {
+            GLES30.glClearColor((cc shr 16 and 255) / 255f, (cc shr 8 and 255) / 255f, (cc and 255) / 255f, 1f)
+        }
         GLES30.glDepthMask(true)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
 
@@ -853,11 +1101,20 @@ internal class GlRenderer {
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.bloomFbo[0])
             GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardColor, 0)
             GLES30.glViewport(0, 0, t.bloomW[0], t.bloomH[0])
-            GLES30.glUseProgram(brightProg)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.sceneTex)
-            GLES30.glUniform1i(bright.loc("uTex"), 0)
-            GLES30.glUniform2f(bright.loc("uTexel"), 1f / rw, 1f / rh)
-            GLES30.glUniform1f(bright.loc("uThreshold"), p.bloomThreshold)
+            if (hdr) {
+                // Linear light after exposure: a soft-kneed threshold, a Karis average, a cap.
+                GLES30.glUseProgram(brightHdr.id)
+                GLES30.glUniform1i(brightHdr.loc("uTex"), 0)
+                GLES30.glUniform2f(brightHdr.loc("uTexel"), 1f / rw, 1f / rh)
+                GLES30.glUniform1f(brightHdr.loc("uExposure"), p.exposure)
+                GLES30.glUniform1f(brightHdr.loc("uThreshold"), p.bloomThresholdHdr)
+            } else {
+                GLES30.glUseProgram(brightProg)
+                GLES30.glUniform1i(bright.loc("uTex"), 0)
+                GLES30.glUniform2f(bright.loc("uTexel"), 1f / rw, 1f / rh)
+                GLES30.glUniform1f(bright.loc("uThreshold"), p.bloomThreshold)
+            }
             drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             GLES30.glUseProgram(downProg)
             GLES30.glUniform1i(down.loc("uTex"), 0)
@@ -868,6 +1125,20 @@ internal class GlRenderer {
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTex[i - 1])
                 GLES30.glUniform2f(down.loc("uTexel"), 1f / t.bloomW[i - 1], 1f / t.bloomH[i - 1])
                 drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+            }
+            // Anamorphic glare: only the brightest of the second octave, smeared sideways. Taken
+            // before the up chain adds the wider octaves into that texture.
+            glareDrawn = false
+            if (finish && glareOn && levels > 1 && t.glareFbo != 0) {
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.glareFbo)
+                GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, discardColor, 0)
+                GLES30.glViewport(0, 0, t.bloomW[1], t.bloomH[1])
+                GLES30.glUseProgram(glare.id)
+                GLES30.glUniform1i(glare.loc("uTex"), 0)
+                GLES30.glUniform2f(glare.loc("uStep"), HdrLook.GLARE_SPACING / t.bloomW[1], 0f)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTex[1])
+                drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+                glareDrawn = true
             }
             GLES30.glUseProgram(upProg)
             GLES30.glUniform1i(up.loc("uTex"), 0)
@@ -898,13 +1169,14 @@ internal class GlRenderer {
             GLES30.glEnable(GLES30.GL_SCISSOR_TEST)
             GLES30.glScissor(p.cx0, surfaceH - p.cy1, (p.cx1 - p.cx0).coerceAtLeast(0), (p.cy1 - p.cy0).coerceAtLeast(0))
         }
-        GLES30.glUseProgram(compProg)
+        val c = if (hdr) compHdr else comp
+        GLES30.glUseProgram(c.id)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.sceneTex)
-        GLES30.glUniform1i(comp.loc("uScene"), 0)
+        GLES30.glUniform1i(c.loc("uScene"), 0)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.bloomTex[0])
-        GLES30.glUniform1i(comp.loc("uBloom"), 1)
+        GLES30.glUniform1i(c.loc("uBloom"), 1)
         // The octaves add up: scale back so the glow's total light stays what one level gave
         // (a little more, since the wide halo is fainter per pixel, but not so much that big
         // bright areas such as a daytime sky turn hazy).
@@ -916,15 +1188,75 @@ internal class GlRenderer {
             sum += wk
         }
         val bloomNorm = 1.25f / sum
-        GLES30.glUniform1f(comp.loc("uBloomAmount"), p.bloom * bloomNorm)
-        GLES30.glUniform2f(comp.loc("uTexel"), 1f / rw, 1f / rh)
-        GLES30.glUniform1f(comp.loc("uVignette"), p.vignette)
-        GLES30.glUniform1f(comp.loc("uSharpen"), p.sharpen)
-        GLES30.glUniform1f(comp.loc("uGrade"), p.grade)
+        GLES30.glUniform1f(c.loc("uBloomAmount"), p.bloom * bloomNorm * (if (hdr) HdrLook.BLOOM_GAIN else 1f))
+        GLES30.glUniform2f(c.loc("uTexel"), 1f / rw, 1f / rh)
+        GLES30.glUniform1f(c.loc("uVignette"), p.vignette)
+        GLES30.glUniform1f(c.loc("uSharpen"), p.sharpen)
+        GLES30.glUniform1f(c.loc("uGrade"), p.grade)
+        if (hdr) {
+            GLES30.glUniform1f(c.loc("uExposure"), p.exposure)
+            // The cinematic finish. Each strength is zero when its lever is off; reduce motion
+            // removes the animated grain, and the aberration's motion coupling.
+            val film = finish && filmOn
+            GLES30.glUniform1f(c.loc("uGrain"), if (film && !reduce) HdrLook.GRAIN else 0f)
+            GLES30.glUniform1f(c.loc("uTime"), (frameNo and 1023L).toFloat())
+            GLES30.glUniform1f(c.loc("uAberration"), if (film) HdrLook.ABERRATION * (1f + HdrLook.ABERRATION_MOTION * motion) else 0f)
+            val streak = finish && glareOn && glareDrawn
+            GLES30.glUniform1f(c.loc("uGlareAmount"), if (streak) HdrLook.GLARE_AMOUNT else 0f)
+            if (streak) {
+                GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t.glareTex)
+                GLES30.glUniform1i(c.loc("uGlare"), 2)
+            }
+        }
         drawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
         GLES30.glBindVertexArray(0)
+    }
+
+    /** Set while a thumbnail is drawn (see [snapshot]). */
+    private var snapshotting = false
+
+    /** Whether this pass's glare texture was drawn this frame. */
+    private var glareDrawn = false
+
+    /**
+     * Clears the HDR scene target to the pass's clear colour, which is authored as a display
+     * value: inverse tone mapped, un-exposed and encoded like everything else in the target.
+     */
+    private fun clearEncoded(argb: Int, exposure: Float) {
+        val k = 1f / max(exposure, 0.05f)
+        val r = HdrMath.inverseAces((argb shr 16 and 255) / 255f) * k
+        val g = HdrMath.inverseAces((argb shr 8 and 255) / 255f) * k
+        val b = HdrMath.inverseAces((argb and 255) / 255f) * k
+        val e = 1f / (1f + max(r, max(g, b)))
+        GLES30.glClearColor(r * e, g * e, b * e, 1f)
+    }
+
+    /**
+     * How much the camera moved since this set's last frame, 0..1 and smoothed: the radians its
+     * view turned plus its travel in world units over [HdrLook.MOTION_TRAVEL]. A dive, a fast
+     * turn or a cut reads as full; standing still reads as none. Allocation-free.
+     */
+    private fun cameraMotion(p: RenderPass, t: Targets): Float {
+        val c = p.cam
+        val pc = t.prevCam
+        var raw = 0f
+        if (t.hasPrevCam) {
+            val fx = c[9] - pc[9]; val fy = c[10] - pc[10]; val fz = c[11] - pc[11]
+            val ex = c[0] - pc[0]; val ey = c[1] - pc[1]; val ez = c[2] - pc[2]
+            val turned = sqrt(fx * fx + fy * fy + fz * fz)
+            val travelled = sqrt(ex * ex + ey * ey + ez * ez) / HdrLook.MOTION_TRAVEL
+            raw = ((turned + travelled) / HdrLook.MOTION_FULL).coerceIn(0f, 1f)
+        }
+        for (i in 0 until 3) {
+            pc[i] = c[i]
+            pc[9 + i] = c[9 + i]
+        }
+        t.hasPrevCam = true
+        t.motion += (raw - t.motion) * HdrLook.MOTION_SMOOTH
+        return t.motion
     }
 
     /**
@@ -938,7 +1270,9 @@ internal class GlRenderer {
         val floats = n * RenderPass.PARTICLE_STRIDE
         val fb = floatBuffer(floats)
         fb.put(p.particleVerts, 0, floats).position(0)
-        GLES30.glUseProgram(particleProg)
+        val pr = if (hdrPass) particleHdr else particle
+        GLES30.glUseProgram(pr.id)
+        if (hdrPass) GLES30.glUniform1f(pr.loc("uExposure"), p.exposure)
         GLES30.glBindVertexArray(partVao)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, partVbo)
         GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, floats * 4, fb, GLES30.GL_STREAM_DRAW)
@@ -946,7 +1280,7 @@ internal class GlRenderer {
         GLES30.glDepthMask(false)
         GLES30.glDisable(GLES30.GL_CULL_FACE)
         GLES30.glEnable(GLES30.GL_BLEND)
-        val uSoft = particle.loc("uSoft")
+        val uSoft = pr.loc("uSoft")
         val halo = p.particleHaloCount.coerceIn(0, n)
         if (halo > 0) {
             GLES30.glUniform1f(uSoft, 1f)
@@ -983,7 +1317,12 @@ internal class GlRenderer {
         }
         val fb = floatBuffer(need)
         fb.put(data, 0, need).position(0)
-        GLES30.glUseProgram(bgProg)
+        if (hdrPass) {
+            GLES30.glUseProgram(bgHdr.id)
+            GLES30.glUniform1f(bgHdr.loc("uExposure"), p.exposure)
+        } else {
+            GLES30.glUseProgram(bgProg)
+        }
         GLES30.glBindVertexArray(bgVao)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, bgVbo)
         GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, need * 4, fb, GLES30.GL_STREAM_DRAW)
@@ -1013,8 +1352,9 @@ internal class GlRenderer {
     private var passH = 1
 
     private fun drawScene(p: RenderPass) {
-        val prog = sceneProg
-        GLES30.glUseProgram(prog)
+        // The floor mirror is a display-referred RGBA8 picture, so it always uses the LDR shader.
+        scene = if (hdrPass && !mirror) sceneHdr else sceneLdr
+        GLES30.glUseProgram(scene.id)
         val c = p.cam
         GLES30.glUniform3f(scene.loc("uEye"), c[0], c[1], c[2])
         GLES30.glUniform3f(scene.loc("uRight"), c[3], c[4], c[5])

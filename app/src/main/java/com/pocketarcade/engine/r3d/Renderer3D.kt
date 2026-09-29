@@ -47,8 +47,14 @@ class Renderer3D(w: Int, h: Int) {
     var exposure = 1f
     var bloom = 0.8f
 
-    /** Brightness (0..1, after tone mapping) above which things glow. */
+    /** Brightness (0..1, after tone mapping) above which things glow, in the LDR picture. */
     var bloomThreshold = Look.BLOOM_THRESHOLD
+
+    /**
+     * The same for the HDR picture, in exposed linear scene light (about 1 is a well-lit white
+     * surface), where lit paint is held under it so only glowing things cross it.
+     */
+    var bloomThresholdHdr = Look.BLOOM_THRESHOLD_HDR
 
     /** How far glows spread (0 = a tight halo, 1 = wide and hazy). */
     var bloomRadius = Look.BLOOM_RADIUS
@@ -554,6 +560,7 @@ class Renderer3D(w: Int, h: Int) {
         p.exposure = exposure
         p.bloom = bloom
         p.bloomThreshold = bloomThreshold
+        p.bloomThresholdHdr = bloomThresholdHdr
         p.bloomRadius = bloomRadius
         p.grade = grade
         p.sharpen = sharpen
@@ -900,6 +907,9 @@ class Renderer3D(w: Int, h: Int) {
 /** Default post-processing and shading settings shared by [Renderer3D] and [RenderPass]. */
 object Look {
     const val BLOOM_THRESHOLD = 0.62f
+
+    /** The HDR picture's bloom threshold: exposed linear light, above the lit-paint ceiling's knee. */
+    const val BLOOM_THRESHOLD_HDR = 1.0f
     const val BLOOM_RADIUS = 0.65f
     const val GRADE = 1f
     const val SHARPEN = 0.25f

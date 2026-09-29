@@ -1,5 +1,6 @@
 package com.pocketarcade.engine.gl
 
+import com.pocketarcade.engine.ScreenShake
 import com.pocketarcade.engine.r3d.RenderPass
 import kotlin.math.max
 
@@ -13,10 +14,15 @@ import kotlin.math.max
  * - **bloom octaves** (4 / 3 / 2),
  * - **floor reflections**: real mirror images where a scene asks for them, cheap streaks, or off,
  * - the **light budget** packed per frame (64 / 32 / 16),
- * - the **render scale** floor, ceiling and boost.
+ * - the **render scale** floor, ceiling and boost,
+ * - the **HDR picture** (float scene, linear-light bloom, tone map and cinematic finish in the
+ *   composite) against the LDR one, and within it the **glare** and the **film** finish (grain and
+ *   chromatic aberration). These go first: rung 1 drops the finish and rung 2 drops HDR, at the
+ *   same step as multisampling falls from 4× to 2×, and [Tier.BATTERY] never starts above rung 2.
  *
- * Rung 0 of the [LADDER] is exactly how the renderer looked before quality tiers existed, so a
- * device that can hold it (and [Tier.AUTO], the default) looks unchanged.
+ * Rung 0 of the [LADDER] is the best picture: on a device whose driver passes every HDR check
+ * it is the HDR look. Everywhere else (and in every LDR rung) the renderer looks exactly as it
+ * did before HDR and tiers existed.
  */
 object GfxQuality {
     /** How the ladder is used. */
@@ -51,6 +57,12 @@ object GfxQuality {
         val bloomOctaves: Int,
         val reflections: Reflections,
         val lights: Int,
+        /** The HDR picture (RGBA16F scene, linear-light bloom, tone map in the composite) rather than the LDR one. */
+        val hdr: Boolean = false,
+        /** The anamorphic glare streak on the brightest neon (HDR only). */
+        val glare: Boolean = false,
+        /** Film grain and chromatic aberration (HDR only). */
+        val film: Boolean = false,
     )
 
     /**
@@ -59,12 +71,19 @@ object GfxQuality {
      * lights; then multisampling, which is what costs a tiling GPU the most; then the rest.
      */
     internal val LADDER = arrayOf(
-        Rung(0.5f, 0.8f, 1.0f, 4, 4, Reflections.MIRROR, RenderPass.MAX_LIGHTS),
-        Rung(0.5f, 0.8f, 0.8f, 4, 3, Reflections.STREAKS, 32),
+        Rung(0.5f, 0.8f, 1.0f, 4, 4, Reflections.MIRROR, RenderPass.MAX_LIGHTS, hdr = true, glare = true, film = true),
+        Rung(0.5f, 0.8f, 0.8f, 4, 3, Reflections.STREAKS, 32, hdr = true),
         Rung(0.5f, 0.7f, 0.7f, 2, 3, Reflections.STREAKS, 32),
         Rung(0.45f, 0.7f, 0.7f, 2, 2, Reflections.OFF, 16),
         Rung(0.4f, 0.6f, 0.6f, 0, 2, Reflections.OFF, 16),
     )
+
+    /**
+     * Whether the player asked for less motion (the Settings toggle, which zeroes
+     * [ScreenShake.intensity]): the film grain and the aberration's coupling to camera motion
+     * are switched off.
+     */
+    internal fun motionReduced(): Boolean = ScreenShake.intensity <= 0f
 
     /** The best rung [Tier.BATTERY] may use. */
     internal const val BATTERY_TOP = 2

@@ -149,8 +149,8 @@ internal class FrameStats {
         }
     }
 
-    /** Call after the swap; logs once a second. */
-    fun afterSwap(renderScale: Float, rung: Int) {
+    /** Call after the swap; logs once a second, with the quality rung and the [pipeline] (LDR, HDR16F, HDR16F+MSAA) drawn. */
+    fun afterSwap(renderScale: Float, rung: Int, pipeline: String) {
         if (!enabled) return
         val now = System.nanoTime()
         if (lastSwap != 0L) {
@@ -176,9 +176,9 @@ internal class FrameStats {
             Log.d(
                 TAG,
                 String.format(
-                    "record %.2f ms/pass (%d passes) | gl draw %.2f ms | swap %.2f ms avg, %.2f max (%.1f fps) | gpu %s | scale %.2f | rung %d | %d draws, %.1fk verts per frame",
+                    "record %.2f ms/pass (%d passes) | gl draw %.2f ms | swap %.2f ms avg, %.2f max (%.1f fps) | gpu %s | scale %.2f | rung %d | picture %s | %d draws, %.1fk verts per frame",
                     rec, recordPasses, drawNs / 1e6 / f, swapAvg, swapMax / 1e6,
-                    if (swapAvg > 0) 1000.0 / swapAvg else 0.0, gpu, renderScale, rung,
+                    if (swapAvg > 0) 1000.0 / swapAvg else 0.0, gpu, renderScale, rung, pipeline,
                     callsSum / f, vertsSum / 1e3 / f,
                 ),
             )
