@@ -4,11 +4,14 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
 import com.pocketarcade.engine.Sfx
+import com.pocketarcade.engine.TiltControlled
+import com.pocketarcade.engine.TiltMath
 import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.approach
 import com.pocketarcade.engine.clamp01
@@ -50,6 +53,8 @@ object RacerTuning {
     const val STEER_SPEED = 620f
     /** Road units the steering target moves per field unit of finger travel. */
     const val STEER_GAIN = 1.6f
+    /** Tilt steering: road units per second the target moves at full lean (about a fast thumb). */
+    const val TILT_RATE = 330f
     /** Speed the player's car coasts at once past the flag. */
     const val COAST_SPEED = 700f
 
@@ -104,19 +109,41 @@ object RacerTuning {
 }
 
 /**
- * Turbo Racer: a three-lap race round a synthwave circuit against seven rivals. Drag to steer
- * (the car accelerates by itself), hold a second finger to drift through corners and let go
- * for a turbo. The round ends at the flag (placed by finishing order) or when the clock runs
- * out (placed by how far round the course everyone got).
+ * The on-screen DRIFT button, in field units: low on the right, where the right thumb rests, and
+ * clear of the speed and drift gauges under it. Hold it to drift; the touch has a little more
+ * reach than the drawn disc.
  */
-class RacerGame : BaseMiniGame() {
+internal object DriftButton {
+    const val X = 302f
+    const val Y = 528f
+    /** Radius of the drawn disc. */
+    const val R = 34f
+    /** Radius of the touch area. */
+    const val HIT_R = 46f
+
+    /** Whether a touch at field position ([x], [y]) presses the button. */
+    fun hit(x: Float, y: Float): Boolean {
+        val dx = x - X
+        val dy = y - Y
+        return dx * dx + dy * dy <= HIT_R * HIT_R
+    }
+}
+
+/**
+ * Turbo Racer: a three-lap race round a synthwave circuit against seven rivals. Drag to steer
+ * (the car accelerates by itself), hold the DRIFT button (or a second finger) to drift through
+ * corners and let go for a turbo. Optionally, tilt the phone to steer instead ([tiltSteering]),
+ * with any touch then held to drift. The round ends at the flag (placed by finishing order) or
+ * when the clock runs out (placed by how far round the course everyone got).
+ */
+class RacerGame : BaseMiniGame(), TiltControlled {
     override val id = "racer"
     override val title = "TURBO RACER"
     override val marquee = "RACER"
     override val instructions = listOf(
         "DRAG LEFT AND RIGHT TO STEER",
         "3 LAPS - BEAT 7 RIVALS",
-        "HOLD A 2ND FINGER TO DRIFT",
+        "HOLD DRIFT (OR A 2ND FINGER)",
         "LET GO FOR A TURBO BOOST",
         "CLEAN PASSES PAY EXTRA",
     )
@@ -154,6 +181,8 @@ class RacerGame : BaseMiniGame() {
         const val PASS_GAP = 58f
         const val CARS = RacerTuning.CARS
         const val LAPS = RacerTuning.LAPS
+        /** Where the how-to-play hints centre: left of the DRIFT button. */
+        const val HINT_X = 136f
     }
 
     /** One car in the race; index 0 is the player's. */
@@ -220,6 +249,29 @@ class RacerGame : BaseMiniGame() {
         me.color = PLAYER_COLOR
     }
 
+    /**
+     * Steer by tilting the phone instead of dragging (off by default; the host listens to the
+     * sensor only while this is on and a round is on screen). Touch then only drifts: any finger
+     * held drifts, and dragging steers nothing.
+     */
+    override var tiltSteering = false
+        set(value) {
+            field = value
+            if (!value) {
+                tiltSeen = false
+                tiltInput = 0f
+            }
+        }
+    /** Latest lean of the phone (radians, right positive), the lean that counts as level, and the steering that makes. */
+    private var tiltLean = 0f
+    private var tiltNeutral = 0f
+    private var tiltInput = 0f
+    /** Set when the next reading should become level (a fresh round, or a pause that let go of the phone). */
+    private var tiltRecenter = true
+    /** Whether readings have arrived: without a sensor the option leaves touch steering as it was. */
+    private var tiltSeen = false
+    private val tiltLive: Boolean get() = tiltSteering && tiltSeen
+
     private var steerTarget = 0f
     private var steerId = -1L
     private var lastSteerX = 0f
@@ -238,6 +290,7 @@ class RacerGame : BaseMiniGame() {
     private var bumpFxT = 0f
     private var engineT = 0f
     private var skidT = 0f
+    private var rumbleT = 0f
 
     private val placeLabels = Array(CARS) { "${PLACE_TEXT[it]} PLACE! +${RacerTuning.PLACE_POINTS[it]}" }
     private val dnfLabels = Array(CARS) { "${PLACE_TEXT[it]} +${(RacerTuning.PLACE_POINTS[it] * RacerTuning.DNF_SHARE).toInt()}" }
@@ -283,6 +336,9 @@ class RacerGame : BaseMiniGame() {
         bumpFxT = 0f
         engineT = 0f
         skidT = 0f
+        rumbleT = 0f
+        tiltRecenter = true
+        tiltInput = 0f
         rankCars()
         lastPlace = place[0]
         for (i in 1 until CARS) cars[i].wasAhead = isAhead(i, 0)
@@ -311,14 +367,32 @@ class RacerGame : BaseMiniGame() {
         driftId = -1L
         drifting = false
         charge = 0f
+        // Whoever picks the phone up again holds it differently.
+        tiltRecenter = true
+    }
+
+    override fun onTilt(lean: Float) {
+        tiltSeen = true
+        tiltLean = lean
+        if (tiltRecenter) {
+            tiltNeutral = lean
+            tiltRecenter = false
+        }
+        tiltInput = TiltMath.steer(lean, tiltNeutral)
     }
 
     override fun onTouch(type: TouchType, id: Long, x: Float, y: Float, timeMs: Long) {
         when (type) {
-            TouchType.DOWN -> if (steerId < 0L && id != driftId) {
+            TouchType.DOWN -> if (id == steerId || id == driftId) {
+                // Already tracked: a repeated DOWN changes nothing.
+            } else if (driftId < 0L && (tiltLive || DriftButton.hit(x, y))) {
+                // The button always drifts, even as the first finger; under tilt any finger does.
+                driftId = id
+                startDrift()
+            } else if (steerId < 0L && !tiltLive) {
                 steerId = id
                 lastSteerX = x
-            } else if (driftId < 0L && id != steerId) {
+            } else if (driftId < 0L) {
                 driftId = id
                 startDrift()
             }
@@ -367,6 +441,12 @@ class RacerGame : BaseMiniGame() {
         bumpFxT -= dt
         if (boostT > 0f) boostT -= dt
         val racing = !timeUp && !raceDone
+        // The start of the race is the moment the phone's tilt counts as level.
+        if (time <= dt * 1.5f) tiltRecenter = true
+        if (racing && tiltLive && !tiltRecenter) {
+            // Lean as a steering wheel: the further over, the faster the target slides that way.
+            steerTarget = (steerTarget + tiltInput * RacerTuning.TILT_RATE * dt).coerceIn(-X_LIMIT, X_LIMIT)
+        }
         stepPlayer(dt, racing)
         if (!soloForTests) {
             stepRivals(dt)
@@ -386,6 +466,19 @@ class RacerGame : BaseMiniGame() {
             if (skidT <= 0f && abs(curve[segOf(me.d)]) > 0.3f) {
                 skidT = 0.45f
                 play(Sfx.SKID, 0.35f, 0.9f + clamp01(charge / RacerTuning.BOOST_CHARGE_2) * 0.4f)
+            }
+        }
+        // A light hum through the phone: faint with the engine, firmer when a wheel is over the
+        // rumble strips or the grass. (Haptics rate-limits it and never lets it cut off a hit.)
+        rumbleT -= dt
+        if (rumbleT <= 0f && racing && me.v > 150f) {
+            val pace = clamp01(me.v / RacerTuning.MAX_SPEED)
+            if (abs(me.x) + CAR_HALF_W > ROAD_HALF) {
+                rumbleT = 0.11f
+                fx.haptics.rumble(0.55f + 0.4f * pace)
+            } else {
+                rumbleT = 0.2f
+                fx.haptics.rumble(0.1f + 0.25f * pace)
             }
         }
     }
@@ -673,6 +766,9 @@ class RacerGame : BaseMiniGame() {
         return b.build()
     }
 
+    private val ringStroke = Stroke(2f)
+    private val chargeStroke = Stroke(5f)
+
     private val headlight = PointLight(0f, 40f, -120f, 0.8f, 0.9f, 1f, 420f, 0.9f)
     private val sunLight = PointLight(0f, 300f, -2600f, 1f, 0.4f, 0.6f, 2600f, 0.6f)
 
@@ -935,14 +1031,16 @@ class RacerGame : BaseMiniGame() {
                 drawRect(Color(cc), Offset(206f, 618f), Size(138f * clamp01(charge / RacerTuning.BOOST_CHARGE_2), 5f))
             }
             drawRect(Color.White, Offset(206f + 138f * RacerTuning.BOOST_CHARGE_1 / RacerTuning.BOOST_CHARGE_2, 616f), Size(1.5f, 9f))
+            drawDriftButton(this, over)
 
             if (!over) {
+                // The hints sit left of centre, clear of the DRIFT button.
                 if (time < 3f) {
-                    ArcadeFont.drawCentered(this, "DRAG TO STEER", GAME_W / 2f, 520f, 2f, Color.White, 0.5f + 0.5f * sin(time * 6f))
+                    ArcadeFont.drawCentered(this, if (tiltLive) "TILT TO STEER" else "DRAG TO STEER", HINT_X, 520f, 2f, Color.White, 0.5f + 0.5f * sin(time * 6f))
                 } else if (!everDrifted && abs(curve[segOf(me.d + 6f * SEG)]) > 0.8f) {
                     val a = 0.6f + 0.4f * sin(time * 8f)
-                    ArcadeFont.drawCentered(this, "HOLD A 2ND FINGER: DRIFT", GAME_W / 2f, 520f, 2f, Color(Pal.ORANGE), a)
-                    ArcadeFont.drawCentered(this, "LET GO: TURBO!", GAME_W / 2f, 544f, 2f, Color(Pal.CYAN), a)
+                    ArcadeFont.drawCentered(this, "HOLD DRIFT IN BENDS", HINT_X, 520f, 2f, Color(Pal.ORANGE), a)
+                    ArcadeFont.drawCentered(this, "LET GO: TURBO!", HINT_X, 544f, 2f, Color(Pal.CYAN), a)
                 }
                 if (abs(me.x) > ROAD_HALF + 4f) {
                     ArcadeFont.drawCentered(this, "OFF ROAD!", GAME_W / 2f, 470f, 3f, Color(Pal.ORANGE), 0.5f + 0.5f * sin(time * 12f))
@@ -951,6 +1049,29 @@ class RacerGame : BaseMiniGame() {
                 ArcadeFont.drawCentered(this, if (raceDone) "FINISHED" else "PLACED", GAME_W / 2f, 392f, 2.5f, Color(Pal.LAVENDER))
                 ArcadeFont.drawCentered(this, PLACE_TEXT[finalPlace - 1], GAME_W / 2f, 416f, 7f, Color(if (finalPlace == 1) Pal.GOLD else Pal.WHITE))
             }
+        }
+    }
+
+    /** The DRIFT button: dim until held, then lit and ringed with the boost charge; faded once the race is over. */
+    private fun drawDriftButton(scope: DrawScope, over: Boolean) {
+        with(scope) {
+            val c = Offset(DriftButton.X, DriftButton.Y)
+            val r = DriftButton.R
+            val fade = if (over) 0.35f else 1f
+            val base = if (boostT > 0f) Pal.CYAN else Pal.ORANGE
+            drawCircle(Color.Black, r + 4f, c, alpha = 0.55f * fade)
+            drawCircle(Color(Pal.shade(base, if (drifting) 1f else 0.5f)), r, c, alpha = (if (drifting) 0.95f else 0.7f) * fade)
+            drawCircle(Color.White, r, c, alpha = 0.4f * fade, style = ringStroke)
+            if (drifting && charge > 0f) {
+                val ring = when {
+                    charge >= RacerTuning.BOOST_CHARGE_2 -> Pal.ORANGE
+                    charge >= RacerTuning.BOOST_CHARGE_1 -> Pal.CYAN
+                    else -> Pal.LAVENDER
+                }
+                val out = r + 4f
+                drawArc(Color(ring), -90f, 360f * clamp01(charge / RacerTuning.BOOST_CHARGE_2), false, Offset(c.x - out, c.y - out), Size(out * 2f, out * 2f), style = chargeStroke)
+            }
+            ArcadeFont.drawCentered(this, "DRIFT", c.x, c.y - ArcadeFont.height(1.5f) / 2f, 1.5f, Color.White, alpha = fade)
         }
     }
 
@@ -969,6 +1090,9 @@ class RacerGame : BaseMiniGame() {
     internal val botLap: Int get() = lapOf(me.d) + 1
     internal val botRaceDone: Boolean get() = raceDone
     internal val botDrifting: Boolean get() = drifting
+    /** The steering the tilt asks for (-1..1), and whether tilt readings are steering the car. */
+    internal val botTiltInput: Float get() = tiltInput
+    internal val botTiltLive: Boolean get() = tiltLive
     internal val botBoosting: Boolean get() = boostT > 0f
     internal val botCharge: Float get() = charge
     internal val botPasses: Int get() = passes

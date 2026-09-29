@@ -48,6 +48,7 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
@@ -58,6 +59,8 @@ import com.pocketarcade.engine.Particles
 import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.ScreenShake
 import com.pocketarcade.engine.Sfx
+import com.pocketarcade.engine.TiltControlled
+import com.pocketarcade.engine.TiltSteer
 import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.thumbZoneGestureExclusion
 import com.pocketarcade.engine.clamp01
@@ -196,6 +199,16 @@ fun GameHostScreen(
     }
 
     BackHandler { onExitPressed() }
+
+    // Tilt steering (the racer, and only while its option is on): the sensor is listened to only
+    // while this round is on screen and the app is in front.
+    val tiltGame = game as? TiltControlled
+    val tiltOn = tiltGame?.tiltSteering == true
+    val context = LocalContext.current
+    DisposableEffect(game, tiltOn, appPaused) {
+        val tilt = if (tiltGame != null && tiltOn && !appPaused) TiltSteer(context).also { it.start(tiltGame) } else null
+        onDispose { tilt?.stop() }
+    }
 
     DisposableEffect(game) {
         onDispose { Gfx.remove(GameViewport.SLOT) }
