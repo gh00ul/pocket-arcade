@@ -12,6 +12,8 @@ import com.pocketarcade.engine.r3d.TexKit
 import com.pocketarcade.engine.r3d.Texture
 import com.pocketarcade.engine.r3d.paintTexture
 import com.pocketarcade.hub.HallArt
+import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -22,6 +24,9 @@ import kotlin.math.sin
  */
 internal object ShooterArt {
     // ------------------------------------------------------------------ materials
+
+    /** Strength of the lamp's light shaft at its brightest (0..1 alpha). */
+    private const val CONE_ALPHA = 0.30f
 
     private val paints = HashMap<Int, Region>()
 
@@ -258,6 +263,131 @@ internal object ShooterArt {
         }
     }
 
+    /**
+     * A second, nearer skyline of dark towers between the far backdrop and the bank: they show
+     * above the bank's roof line and give the sky depth. Alpha cut-outs; lit windows are sparse.
+     */
+    val skylineNear: Texture by lazy {
+        paintTexture(240, 30, 4) {
+            clear(0)
+            var x = 0f
+            var k = 0
+            while (x < 240f) {
+                val bw = 12f + hash01(k, 91) * 20f
+                val bh = 8f + hash01(k, 92) * 20f
+                val top = 30f - bh
+                rect(x, top, bw, bh + 1f, 0xFF0C0916.toInt())
+                // A lit edge on the side towards the moon, a rooftop unit, and a few windows.
+                rect(x + bw - 0.7f, top, 0.7f, bh + 1f, 0x55503A78)
+                if (hash01(k, 93) > 0.55f) rect(x + bw * 0.3f, top - 2.4f, bw * 0.3f, 2.4f, 0xFF0C0916.toInt())
+                for (wy in 0 until (bh / 3.4f).toInt()) for (wx in 0 until (bw / 3.4f).toInt()) {
+                    if (hash01(k * 57 + wx, wy + 94) > 0.82f) {
+                        rect(x + 1.4f + wx * 3.4f, top + 1.6f + wy * 3.4f, 1.3f, 1.6f, if (hash01(wx, k + wy) > 0.5f) 0xFFFFC880.toInt() else 0xFF80C8FF.toInt())
+                    }
+                }
+                x += bw + 0.4f
+                k++
+            }
+        }
+    }
+
+    /**
+     * The shaft of light under the street lamp: warm and brightest at the lamp, fading down and
+     * out to the sides (alpha only, laid additively; its strength is baked in, so it stays subtle).
+     */
+    val lampCone: Texture by lazy {
+        val w = 16
+        val h = 32
+        val px = IntArray(w * h)
+        for (y in 0 until h) for (x in 0 until w) {
+            val v = (y + 0.5f) / h
+            val u = abs((x + 0.5f) / w * 2f - 1f)
+            val across = (1f - u * u).coerceIn(0f, 1f)
+            val a = (1f - v) * (1f - v) * across * across * CONE_ALPHA
+            px[y * w + x] = ((a * 255f).toInt().coerceIn(0, 255) shl 24) or 0xFFFFFF
+        }
+        Texture(w, h, px)
+    }
+
+    /**
+     * Drifting ground mist: thicker towards the bottom of the quad it covers, with soft
+     * uneven clumps that tile sideways (draw with a wrapping region and scroll its u).
+     */
+    val mist: Texture by lazy {
+        val w = 128
+        val h = 32
+        val px = IntArray(w * h)
+        val tau = (2.0 * PI).toFloat()
+        for (y in 0 until h) for (x in 0 until w) {
+            val u = x / w.toFloat()
+            val v = (y + 0.5f) / h
+            // Whole numbers of waves across the width, so the left and right edges meet.
+            val n = 0.55f + 0.20f * sin(tau * 2f * u + 1.3f) + 0.15f * sin(tau * 5f * u + 0.4f) + 0.10f * sin(tau * 9f * u + 2.2f)
+            // Densest just above the ground, thinning at its very foot (no hard seam where it meets it).
+            val foot = ((1f - v) / 0.14f).coerceIn(0f, 1f)
+            val rise = (v * v * (0.25f + 0.75f * foot)).coerceIn(0f, 1f)
+            val a = (n * rise * 255f).toInt().coerceIn(0, 255)
+            px[y * w + x] = (a shl 24) or 0xFFFFFF
+        }
+        Texture(w, h, px).also { it.repeat = true }
+    }
+
+    /** Wisps of cloud for the night sky: they tile sideways and thin out top and bottom. */
+    val clouds: Texture by lazy {
+        val w = 128
+        val h = 32
+        val px = IntArray(w * h)
+        val tau = (2.0 * PI).toFloat()
+        for (y in 0 until h) for (x in 0 until w) {
+            val u = x / w.toFloat()
+            val v = (y + 0.5f) / h
+            val n = 0.5f + 0.28f * sin(tau * 3f * u + 0.8f + v * 2.4f) + 0.2f * sin(tau * 7f * u + 2.1f - v * 3.1f) + 0.12f * sin(tau * 12f * u + 4.2f)
+            val band = sin(v * PI.toFloat()).coerceIn(0f, 1f)
+            val a = (((n - 0.42f) * 2.2f).coerceIn(0f, 1f) * band * band * 255f).toInt().coerceIn(0, 255)
+            px[y * w + x] = (a shl 24) or 0xFFFFFF
+        }
+        Texture(w, h, px).also { it.repeat = true }
+    }
+
+    /** A dark gradient, black at the top fading to nothing (alpha; ambient darkening under a ledge). */
+    val shadeDown: Texture by lazy {
+        val h = 16
+        val px = IntArray(4 * h)
+        for (y in 0 until h) for (x in 0 until 4) {
+            val v = (y + 0.5f) / h
+            val a = ((1f - v) * (1f - v) * 0.55f * 255f).toInt().coerceIn(0, 255)
+            px[y * 4 + x] = a shl 24
+        }
+        Texture(4, h, px)
+    }
+
+    /** A soft-edged ring, for shock waves (white, alpha; brightest at 70% of the radius). */
+    val shock: Texture by lazy {
+        val n = 64
+        val px = IntArray(n * n)
+        for (y in 0 until n) for (x in 0 until n) {
+            val dx = (x + 0.5f - n / 2f) / (n / 2f)
+            val dy = (y + 0.5f - n / 2f) / (n / 2f)
+            val d = kotlin.math.sqrt(dx * dx + dy * dy)
+            val e = (d - 0.7f) / 0.14f
+            val a = (kotlin.math.exp(-e * e) * 255f).toInt().coerceIn(0, 255)
+            px[y * n + x] = (a shl 24) or 0xFFFFFF
+        }
+        Texture(n, n, px)
+    }
+
+    /**
+     * A brass shell casing: a six-sided prism 2.5 world units long, standing along y (it tumbles
+     * when drawn, so its rest orientation doesn't matter). Eight polygons: several are alive at
+     * once during rapid fire, so it is kept cheap.
+     */
+    val shell: Model by lazy {
+        val brass = paint(0xFFC99A3A.toInt())
+        ModelBuilder()
+            .cylinder(0f, 0f, -1.25f, 1.25f, 0.75f, 6, brass, top = paint(0xFFE8C060.toInt()), bottom = brass, gloss = 0.8f)
+            .build()
+    }
+
     // ------------------------------------------------------------------ effects
 
     /** A bullet hole: a dark pit with a cracked, lighter rim (alpha). */
@@ -477,7 +607,7 @@ internal object ShooterArt {
     }
 
     /** Forces every model (and its textures) to be built up front. */
-    fun warm(): Array<Model> = arrayOf(goon, civilian, drone, goldDrone, bossHull, core, shutter, pistol)
+    fun warm(): Array<Model> = arrayOf(goon, civilian, drone, goldDrone, bossHull, core, shutter, pistol, shell)
 
     // ------------------------------------------------------------------ helpers for the scene
 
