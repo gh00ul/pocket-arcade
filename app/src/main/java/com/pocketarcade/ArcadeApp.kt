@@ -474,8 +474,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         // built, the hall until it is built and on the GPU.
         LoadingScreen(
             active = !gate.bootDone || (screen == Screen.HUB && !gate.hallReady),
-            progress = gate.progress,
-            label = gate.label,
+            progress = { gate.progress },
+            label = { gate.label },
             reduceMotion = settings.reduceMotion,
         )
 

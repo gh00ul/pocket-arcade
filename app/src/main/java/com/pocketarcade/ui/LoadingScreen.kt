@@ -97,13 +97,15 @@ private fun systemAnimationsOff(): Boolean {
  * covers everything (and takes the touches) while [active]; when the load is done it fills the
  * bar, then fades away over [LoadingLook.FADE_OUT] and takes no space or time afterwards.
  *
- * It keeps moving on its own clock while the loader works a slice a frame on the same thread.
+ * [progress] and [label] are read where they are used (the frame loop, the drawing), so a bar
+ * that moves every frame doesn't recompose the app. It keeps moving on its own clock while the
+ * loader works a slice a frame on the same thread.
  * With [reduceMotion] (or the system's animations off) nothing loops: the token faces front, the
  * stars hold still, no shimmer runs along the bar, the tip stays put and the bar moves in short
  * steps to where the progress is.
  */
 @Composable
-fun LoadingScreen(active: Boolean, progress: Float, label: String, reduceMotion: Boolean, modifier: Modifier = Modifier) {
+fun LoadingScreen(active: Boolean, progress: () -> Float, label: () -> String, reduceMotion: Boolean, modifier: Modifier = Modifier) {
     val motion = !reduceMotion && !systemAnimationsOff()
     val latest by rememberUpdatedState(progress)
     val motionNow by rememberUpdatedState(motion)
@@ -127,7 +129,7 @@ fun LoadingScreen(active: Boolean, progress: Float, label: String, reduceMotion:
                 val dt = if (last == 0L) 0f else ((now - last) / 1_000_000_000f).coerceIn(0f, 0.1f)
                 last = now
                 if (motionNow) time += dt
-                val target = if (activeNow) latest else 1f
+                val target = if (activeNow) latest() else 1f
                 shown = LoadingLook.ease(shown, target, dt, if (motionNow) LoadingLook.CHASE else LoadingLook.CHASE_CALM)
                 if (!activeNow) alpha = (alpha - dt / LoadingLook.FADE_OUT).coerceAtLeast(0f)
             }
@@ -149,7 +151,7 @@ fun LoadingScreen(active: Boolean, progress: Float, label: String, reduceMotion:
             }
             .semantics { contentDescription = "Loading Pocket Arcade" },
     ) {
-        drawLoading(paint, time, shown, label, motion)
+        drawLoading(paint, time, shown, label(), motion)
     }
 }
 
