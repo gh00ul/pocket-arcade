@@ -127,6 +127,10 @@ class Flash(private val decayPerSec: Float = 4f) {
         value = maxOf(value, amount)
     }
 
+    fun reset() {
+        value = 0f
+    }
+
     fun update(dt: Float) {
         value = (value - decayPerSec * dt).coerceAtLeast(0f)
     }

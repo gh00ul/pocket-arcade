@@ -76,6 +76,9 @@ class CurrencyFx {
     /** Centre of the HUD's token icon in the layer's pixels, set by the counter; unspecified until it is on screen. */
     var tokenAnchor: Offset = Offset.Unspecified
 
+    /** Centre of a ticket counter's icon in the layer's pixels (the results pill), set by the counter. */
+    var ticketAnchor: Offset = Offset.Unspecified
+
     /** Size of the layer in pixels and of one dp, set by [CurrencyFxLayer]. */
     var viewW = 0f
     var viewH = 0f

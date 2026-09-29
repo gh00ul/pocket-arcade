@@ -2,6 +2,7 @@ package com.pocketarcade.ui
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.RepeatMode
@@ -33,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -40,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
@@ -55,6 +58,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -65,6 +69,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Pal
+import com.pocketarcade.engine.clamp01
+import com.pocketarcade.engine.easeOutBack
+import com.pocketarcade.engine.easeOutCubic
+import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.min
@@ -557,4 +565,90 @@ fun ArcadeBanner(text: String?, modifier: Modifier = Modifier) {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------- entrances
+
+/** How far through the slot [from]..[to] a progress [p] is, 0..1: one step of a staggered sequence. */
+fun stageOf(p: Float, from: Float, to: Float): Float = clamp01((p - from) / (to - from).coerceAtLeast(1e-4f))
+
+/**
+ * A 0..1 progress that runs once, linearly over [millis], when first composed (at once with reduce
+ * motion). Give it to [enterStage] for each piece of a card that should arrive in turn.
+ */
+@Composable
+fun rememberEntrance(millis: Int = 700): State<Float> {
+    val progress = remember { Animatable(if (UiMotion.enabled) 0f else 1f) }
+    LaunchedEffect(Unit) {
+        if (UiMotion.enabled) progress.animateTo(1f, tween(millis, easing = LinearEasing)) else progress.snapTo(1f)
+    }
+    return progress.asState()
+}
+
+/**
+ * Brings a piece of a card in during [from]..[to] of an [entrance]: it fades in and rises [rise]
+ * into place, or with [pop] scales up from 70% with a little overshoot. Reduce motion only fades.
+ * Reads the progress while drawing, so it costs no recomposition.
+ */
+fun Modifier.enterStage(entrance: State<Float>, from: Float, to: Float, rise: Dp = 16.dp, pop: Boolean = false): Modifier =
+    graphicsLayer {
+        val e = stageOf(entrance.value, from, to)
+        alpha = clamp01(e * 2.2f)
+        if (UiMotion.enabled) {
+            val k = if (pop) easeOutBack(e) else easeOutCubic(e)
+            translationY = (1f - k) * rise.toPx()
+            if (pop) {
+                val s = 0.7f + 0.3f * k
+                scaleX = s
+                scaleY = s
+            }
+        }
+    }
+
+/** The entrance progress of the panel or card this is inside, if it has one; see [staggerIn]. */
+val LocalEntrance = compositionLocalOf<State<Float>?> { null }
+
+/**
+ * Brings a piece of a panel in after the pieces before it: item [index] of a list starts
+ * [index] steps after the first, sliding up and fading in. Does nothing outside a panel that
+ * provides [LocalEntrance] ([ArcadePanel] does).
+ */
+@Composable
+fun Modifier.staggerIn(index: Int, rise: Dp = 14.dp): Modifier {
+    val entrance = LocalEntrance.current ?: return this
+    val start = (0.18f + 0.055f * index).coerceAtMost(0.7f)
+    return enterStage(entrance, start, (start + 0.3f).coerceAtMost(1f), rise)
+}
+
+/**
+ * Pops the composable in after [delayMillis]: fades up from 70% scale with a springy overshoot.
+ * The animation restarts whenever [key] changes (give it `visible` to pop things in as they
+ * become available). Reduce motion shows it at once.
+ */
+fun Modifier.popIn(delayMillis: Int = 0, key: Any? = Unit): Modifier = composed {
+    val progress = remember(key) { Animatable(if (UiMotion.enabled) 0f else 1f) }
+    LaunchedEffect(key) {
+        if (UiMotion.enabled) {
+            delay(delayMillis.toLong())
+            progress.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 300f))
+        } else {
+            progress.snapTo(1f)
+        }
+    }
+    graphicsLayer {
+        val v = progress.value
+        alpha = clamp01(v * 1.8f)
+        if (UiMotion.enabled) {
+            val s = 0.7f + 0.3f * v
+            scaleX = s
+            scaleY = s
+            translationY = (1f - v.coerceAtMost(1f)) * 18.dp.toPx()
+        }
+    }
+}
+
+/** Takes up its space in the layout but draws and takes touches only while [show]: buttons that arrive later must not move what is above them. */
+fun Modifier.reserveSpace(show: Boolean): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    layout(placeable.width, placeable.height) { if (show) placeable.place(0, 0) }
 }
