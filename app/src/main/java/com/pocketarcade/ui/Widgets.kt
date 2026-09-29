@@ -191,6 +191,10 @@ enum class UiIcon {
     EYE,
     /** The overhead camera following you round the hall. */
     CAMERA,
+    /** The quick-travel map of the hall. */
+    MAP,
+    /** The settings screen. */
+    GEAR,
 }
 
 /** Simple white glyphs for round buttons, fitting a box [s] across centred on [c]. */
@@ -231,6 +235,8 @@ fun DrawScope.drawUiIcon(icon: UiIcon, c: Offset, s: Float, color: Color) {
             drawCircle(color, s * 0.15f, Offset(c.x, top + bh / 2f))
             drawCircle(color, s * 0.045f, Offset(c.x + bw * 0.32f, top + s * 0.12f))
         }
+        UiIcon.MAP -> drawMapIcon(c, s, color)
+        UiIcon.GEAR -> drawGearIcon(c, s, color)
         UiIcon.TROPHY -> {
             val cup = Path().apply {
                 moveTo(c.x - s * 0.3f, c.y - s * 0.38f)
