@@ -286,6 +286,7 @@ internal class GlThread : Thread("ArcadeGL") {
         val pb = EGL14.eglCreatePbufferSurface(display, config, intArrayOf(EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE), 0)
         EGL14.eglMakeCurrent(display, pb, pb, context)
         renderer.init()
+        GfxQuality.glParticles = renderer.particlesOk
         EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
         EGL14.eglDestroySurface(display, pb)
     }

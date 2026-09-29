@@ -77,7 +77,7 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 
 `engine/r3d` records scenes and `engine/gl` draws them with OpenGL ES 3:
 
-- **Threads.** Each screen records a frame of textured polygons and model instances on the UI thread. A dedicated GL thread draws it into a `TextureView` under the Compose UI.
+- **Threads.** Each screen records a frame of textured polygons and model instances on the UI thread. A dedicated GL thread draws it into a `TextureView` under the Compose UI. If that thread fails or the GL context is lost, it starts over with a fresh context (at most three times a minute); past that, or on a device with no OpenGL ES 3.0, the app shows a notice instead of a blank screen.
 - **Geometry.** Static models live on the GPU as vertex buffers and draw as instances. Polygons are sorted into opaque, alpha-blended and additive passes, so glass, glows, neon and sparks all work.
 - **Lighting.**
   - Per-pixel: ambient, one directional light and up to 64 coloured point lights. A light grid across the floor keeps the many lights cheap.
@@ -90,6 +90,8 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
   - Textures use premultiplied alpha, so cut-outs and glows have no dark fringes.
   - The multisampled buffers are discarded after the resolve, which saves memory bandwidth on tile-based phone GPUs.
   - The render resolution eases down if frames run long and recovers after a hitch; on fast GPUs with timer queries it can go above the usual 0.8.
+  - **Quality ladder.** Still slow at the lowest render scale, the renderer gives up effects a rung at a time (mirror reflections to streaks, an octave of bloom and half the lights; then 4× to 2× multisampling; then reflections off, less glow, and finally no multisampling) and climbs back after several seconds of smooth frames, waiting longer for a rung that was just too slow. `GfxQuality.tier` (`AUTO`, `BATTERY`, `QUALITY`) sets how far it may go and where `AUTO` starts from the device. `GfxQuality.frameCap` (auto/60 or 30) caps the rendering rate: on a 120 Hz display the UI thread skips recording frames the GPU would not draw, and the 120 Hz simulation step is untouched. Neither is saved or shown in the interface yet.
+  - **Particles.** Sparks, hit bursts and confetti are recorded with the picture and drawn inside it as screen-space quads before the bloom, so bright ones glow; the plain 2D drawing is the fallback where there is no GPU picture.
 - **Textures.** They are painted with Android's `Canvas` (gradients, real fonts, glows and grain). A texture can be stored at a finer resolution than the texel size the code maps it in. Live textures such as cabinet screens reuse their upload buffers instead of allocating a copy every frame.
 - **Culling.** The hall culls cabinets, fixtures, kids and lights against the camera's view frustum and a draw distance hidden by fog, so the same scene works looking straight down or level at eye height. Each pass sets its own near plane.
 - **Stage3D.** Gives each game a 3D view that maps touches onto world planes and world points back to the screen.
@@ -121,7 +123,7 @@ To jump straight into a machine (it still costs a token), pass its id:
 adb shell am start -n com.pocketarcade/.MainActivity --es play racer
 ```
 
-The ids are `claw`, `whack`, `skeeball`, `hoops`, `pusher`, `airhockey`, `racer`, `stacker`, `shooter`, `pinball` and `fishing`. To log frame times once a second, run `adb shell setprop log.tag.PocketArcade3D DEBUG` and restart the app. Each line shows the UI-thread record time, the GL draw time, the swap interval, GPU time where the driver supports timer queries, and the render scale. To compare builds like for like, also run `adb shell setprop log.tag.PocketArcade3DPin DEBUG`, which holds the render scale at 0.8.
+The ids are `claw`, `whack`, `skeeball`, `hoops`, `pusher`, `airhockey`, `racer`, `stacker`, `shooter`, `pinball` and `fishing`. To log frame times once a second, run `adb shell setprop log.tag.PocketArcade3D DEBUG` and restart the app. Each line shows the UI-thread record time, the GL draw time, the swap interval, GPU time where the driver supports timer queries, the render scale and the quality rung. To compare builds like for like, also run `adb shell setprop log.tag.PocketArcade3DPin DEBUG`, which holds the render scale at 0.8.
 
 The unit tests play every machine headlessly with seeded bots of different skill, check that every round finishes and pays out within the target bands, and print average tickets per round. They also check the hall floor plan (no overlaps, every cabinet reachable on the same walk grid the kids use, a clear main aisle from the doors to the prize counter, no bank hiding another's players from the hall camera):
 

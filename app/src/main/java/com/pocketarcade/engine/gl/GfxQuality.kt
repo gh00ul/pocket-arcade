@@ -85,6 +85,12 @@ object GfxQuality {
     @Volatile internal var lowRamDevice = false
 
     /**
+     * Whether the GL thread can draw particles inside the picture (see
+     * [com.pocketarcade.engine.Particles.recordGl]); if not, they are painted in 2D as before.
+     */
+    @Volatile internal var glParticles = true
+
+    /**
      * The light budget of the rung the GL thread is on, read by the recorder when it packs the
      * lights (so a cheaper rung also saves the UI thread's work).
      */

@@ -53,6 +53,11 @@ internal class GlRenderer {
     private var downProg = 0
     private var upProg = 0
     private var compProg = 0
+    private var particleProg = 0
+
+    /** Whether particles can be drawn into the picture (their shader built). */
+    var particlesOk = false
+        private set
 
     /** A linked program with its uniform locations looked up once each. */
     private class Prog(val id: Int) {
@@ -65,10 +70,13 @@ internal class GlRenderer {
     private var down = Prog(0)
     private var up = Prog(0)
     private var comp = Prog(0)
+    private var particle = Prog(0)
     private var streamVbo = 0
     private var streamVao = 0
     private var bgVbo = 0
     private var bgVao = 0
+    private var partVbo = 0
+    private var partVao = 0
     private var quadVbo = 0
     private var quadVao = 0
     private var gridTex = 0
@@ -189,12 +197,22 @@ internal class GlRenderer {
         downProg = program(GlShaders.POST_VS, GlShaders.DOWN_FS)
         upProg = program(GlShaders.POST_VS, GlShaders.UP_FS)
         compProg = program(GlShaders.POST_VS, GlShaders.COMPOSITE_FS)
+        // Particles are a nicety: a driver that rejects their shader must not take the scene down
+        // with it, so they fall back to being painted in 2D.
+        particleProg = try {
+            program(GlShaders.PARTICLE_VS, GlShaders.PARTICLE_FS)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Particle shader unavailable; particles stay 2D", e)
+            0
+        }
+        particlesOk = particleProg != 0
         scene = Prog(sceneProg)
         bg = Prog(bgProg)
         bright = Prog(brightProg)
         down = Prog(downProg)
         up = Prog(upProg)
         comp = Prog(compProg)
+        particle = Prog(particleProg)
 
         GLES30.glGetIntegerv(GLES30.GL_MAX_SAMPLES, tmp, 0)
         maxSamples = minOf(4, tmp[0])
@@ -224,6 +242,18 @@ internal class GlRenderer {
         GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 20, 0)
         GLES30.glEnableVertexAttribArray(1)
         GLES30.glVertexAttribPointer(1, 3, GLES30.GL_FLOAT, false, 20, 8)
+
+        GLES30.glGenBuffers(1, tmp, 0); partVbo = tmp[0]
+        GLES30.glGenVertexArrays(1, tmp, 0); partVao = tmp[0]
+        GLES30.glBindVertexArray(partVao)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, partVbo)
+        val partStride = RenderPass.PARTICLE_STRIDE * 4
+        GLES30.glEnableVertexAttribArray(0)
+        GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, partStride, 0)
+        GLES30.glEnableVertexAttribArray(1)
+        GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, partStride, 8)
+        GLES30.glEnableVertexAttribArray(2)
+        GLES30.glVertexAttribPointer(2, 4, GLES30.GL_FLOAT, false, partStride, 16)
 
         GLES30.glGenBuffers(1, tmp, 0); quadVbo = tmp[0]
         GLES30.glGenVertexArrays(1, tmp, 0); quadVao = tmp[0]
@@ -775,6 +805,7 @@ internal class GlRenderer {
 
         drawBackground(p)
         drawScene(p)
+        drawParticles(p)
         if (reflReady) {
             // Let go of the reflection source before the bloom chain draws into it.
             GLES30.glActiveTexture(GLES30.GL_TEXTURE3)
@@ -876,6 +907,42 @@ internal class GlRenderer {
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
+        GLES30.glBindVertexArray(0)
+    }
+
+    /**
+     * Draws the pass's screen-space particles into the scene image, before it is resolved and
+     * the bloom is taken from it, so bright sparks and confetti glow like neon. Soft additive
+     * glows go first, then the particles alpha-blended, as the 2D fallback paints them.
+     */
+    private fun drawParticles(p: RenderPass) {
+        val n = p.particleVertCount
+        if (n == 0 || !particlesOk) return
+        val floats = n * RenderPass.PARTICLE_STRIDE
+        val fb = floatBuffer(floats)
+        fb.put(p.particleVerts, 0, floats).position(0)
+        GLES30.glUseProgram(particleProg)
+        GLES30.glBindVertexArray(partVao)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, partVbo)
+        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, floats * 4, fb, GLES30.GL_STREAM_DRAW)
+        GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDepthMask(false)
+        GLES30.glDisable(GLES30.GL_CULL_FACE)
+        GLES30.glEnable(GLES30.GL_BLEND)
+        val uSoft = particle.loc("uSoft")
+        val halo = p.particleHaloCount.coerceIn(0, n)
+        if (halo > 0) {
+            GLES30.glUniform1f(uSoft, 1f)
+            GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE)
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, halo)
+        }
+        if (n > halo) {
+            GLES30.glUniform1f(uSoft, 0f)
+            GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLES, halo, n - halo)
+        }
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glDepthMask(true)
         GLES30.glBindVertexArray(0)
     }
 

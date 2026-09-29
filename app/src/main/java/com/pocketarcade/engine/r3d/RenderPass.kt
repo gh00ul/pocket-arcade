@@ -20,6 +20,9 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
 
         /** The near clipping distance every pass used before it became configurable. */
         const val DEFAULT_NEAR = 8f
+
+        /** Floats per particle vertex: position in clip space 2, quad-local coordinates 2, colour 4. */
+        const val PARTICLE_STRIDE = 8
     }
 
     // Where on the window to draw (pixels, top-left origin) and an optional clip rectangle.
@@ -98,6 +101,16 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
     /** How many draw-list entries glow. */
     var glowDraws = 0
 
+    /**
+     * Screen-space particle quads (see [com.pocketarcade.engine.Particles.recordGl]), drawn over
+     * the 3D picture but before the bloom, so bright ones glow. Triangles, [PARTICLE_STRIDE]
+     * floats a vertex; the first [particleHaloCount] vertices are soft additive glows, the rest
+     * are the particles themselves.
+     */
+    var particleVerts = FloatArray(0)
+    var particleVertCount = 0
+    var particleHaloCount = 0
+
     // Model instances: model, which blend layer, 4×4 matrix, tint RGBA, emissive boost.
     val models = ArrayList<Model>()
     var instances = FloatArray(64 * 22)
@@ -128,6 +141,8 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
         floorMirror = false
         recordNs = 0L
         statsTaken = false
+        particleVertCount = 0
+        particleHaloCount = 0
         gridW = 0
         gridH = 0
         vertCount = 0
@@ -141,6 +156,35 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
     /** Hands the pass back to its recorder once the GL thread is done with it. */
     fun recycle() {
         pool.offer(this)
+    }
+
+    /**
+     * Adds one particle quad (two triangles) centred on clip-space ([cx], [cy]) with half sizes
+     * ([hx], [hy]); the corners carry local coordinates -1..1 for the soft glow shape.
+     */
+    fun addParticleQuad(cx: Float, cy: Float, hx: Float, hy: Float, r: Float, g: Float, b: Float, a: Float) {
+        val need = (particleVertCount + 6) * PARTICLE_STRIDE
+        if (need > particleVerts.size) particleVerts = particleVerts.copyOf(maxOf(need, particleVerts.size * 2, 64 * 6 * PARTICLE_STRIDE))
+        val v = particleVerts
+        var o = particleVertCount * PARTICLE_STRIDE
+        // Corners in order (-1,-1) (1,-1) (1,1) (-1,1); triangles 0-1-2 and 0-2-3.
+        for (k in 0 until 6) {
+            val corner = when (k) {
+                0 -> 0
+                1 -> 1
+                2 -> 2
+                3 -> 0
+                4 -> 2
+                else -> 3
+            }
+            val ux = if (corner == 1 || corner == 2) 1f else -1f
+            val uy = if (corner >= 2) 1f else -1f
+            v[o] = cx + ux * hx; v[o + 1] = cy + uy * hy
+            v[o + 2] = ux; v[o + 3] = uy
+            v[o + 4] = r; v[o + 5] = g; v[o + 6] = b; v[o + 7] = a
+            o += PARTICLE_STRIDE
+        }
+        particleVertCount += 6
     }
 
     internal fun ensureVerts(extra: Int) {
