@@ -97,7 +97,13 @@ class HallStage(private val world: HubWorld) {
     private fun sync(s: HallScene) {
         if (s.map === world.map) return
         Startup.begin("decor purchase -> hall updated")
-        val built = s.adopt(world.map)
+        val built = try {
+            s.adopt(world.map)
+        } catch (e: Exception) {
+            // A scene left half-adjusted can't be trusted: start it afresh (from the floor plan) instead.
+            Log.e(TAG, "Adopting the new floor plan failed", e)
+            null
+        }
         if (built == null) {
             // Something besides the decorations changed (a machine was added, say): a fresh scene it is.
             Log.w(TAG, "The floor plan changed beyond its decorations: rebuilding the hall scene")

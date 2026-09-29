@@ -229,9 +229,10 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             Screen.TITLE -> 0.5f
         }
     }
-    // Daily refill: checked on launch and whenever the app comes back to the foreground.
-    LaunchedEffect(save.loaded, signals.paused) {
-        if (save.loaded && !signals.paused) {
+    // Daily refill: checked on launch (once the title is showing, so its banner isn't spent behind the
+    // loading screen) and whenever the app comes back to the foreground.
+    LaunchedEffect(save.loaded, signals.paused, gate.bootDone) {
+        if (save.loaded && !signals.paused && gate.bootDone) {
             val granted = services.repo.applyDailyRefill()
             if (granted > 0) {
                 banner = "DAILY BONUS: +$granted TOKENS!"
