@@ -15,6 +15,8 @@ data class SaveState(
     /** Wall-clock millis after which a free spare token can be claimed while broke. */
     val spareTokenAt: Long = 0L,
     val totalPlays: Int = 0,
+    /** Whether the hall is walked in first person rather than seen from above. */
+    val firstPerson: Boolean = false,
 ) {
     fun highScore(gameId: String): Int = highScores[gameId] ?: 0
     fun owns(itemId: String): Boolean = itemId in owned

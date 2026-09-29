@@ -29,6 +29,8 @@ class HubRenderer {
         /** Neon, screens and marquees mirrored in the glossy tiles; a faint haze on the carpet. */
         private const val FLOOR_REFLECT = 1.3f
         private const val FLOOR_REFLECT_MATTE = 0.18f
+        private const val WALK_HINT = "DRAG ANYWHERE TO WALK"
+        private val FP_HINT = "${ArcadeFont.LEFT} DRAG TO WALK      DRAG TO LOOK ${ArcadeFont.RIGHT}"
     }
 
     private val r = Renderer3D(1, 1)
@@ -55,9 +57,16 @@ class HubRenderer {
 
         val px = 2f * scope.density
         drawPrompt(scope, world, save)
-        if (!world.hasWalked) {
-            val a = 0.55f + 0.45f * sin(world.time * 4f)
-            ArcadeFont.drawCentered(scope, "DRAG ANYWHERE TO WALK", sw / 2f, sh * 0.8f, px * 1.2f, Color.White, a, tiny = true)
+        val fp = world.camera.fpAmount
+        val a = 0.55f + 0.45f * sin(world.time * 4f)
+        if (world.camera.dive > 0.01f) {
+            // Diving into (or out of) a machine: no hints over the screen.
+        } else if (fp > 0.5f) {
+            if (!world.hasWalked || !world.hasLooked) {
+                ArcadeFont.drawCentered(scope, FP_HINT, sw / 2f, sh * 0.8f, px * 1.2f, Color.White, a, tiny = true)
+            }
+        } else if (!world.hasWalked) {
+            ArcadeFont.drawCentered(scope, WALK_HINT, sw / 2f, sh * 0.8f, px * 1.2f, Color.White, a, tiny = true)
         }
         val js = world.joystick
         if (js.active) {
@@ -73,7 +82,12 @@ class HubRenderer {
 
     private fun drawPrompt(scope: DrawScope, world: HubWorld, save: SaveState) {
         val spot = world.activeSpot
-        if (spot == null || world.camera.dive > 0.01f || !r.camera.project(spot.anchorX, spot.anchorHeight, spot.anchorZ, proj)) {
+        val fp = world.camera.fpAmount
+        // In first person the bubble floats at about eye level in front of the machine instead of
+        // over its top, which is above the view when you stand right at it.
+        val anchorY = spot?.let { it.anchorHeight + (minOf(it.anchorHeight, HubCamera.EYE_HEIGHT + 8f) - it.anchorHeight) * fp } ?: 0f
+        val projected = spot != null && r.camera.project(spot.anchorX, anchorY, spot.anchorZ, proj)
+        if (spot == null || world.camera.dive > 0.01f || (!projected && fp < 0.5f)) {
             world.bubbleLeft = 0f
             world.bubbleRight = 0f
             return
@@ -119,8 +133,14 @@ class HubRenderer {
         val bh = pad * 2f + ArcadeFont.height(tu, true) + u * 4f + ArcadeFont.height(u * 1.3f) + u * 4f + ArcadeFont.height(tu, true)
         val tip = u * 5f
         val bob = sin(t * 4f) * u * 0.8f
-        val ax = proj[0]
-        val ay = proj[1] + bob
+        // Keep the whole bubble on screen, clear of the HUD along the top: up close in first
+        // person the anchor can be off the top or side, or (looking away) behind the eye.
+        val sw = scope.size.width
+        val sh = scope.size.height
+        val edge = u * 4f
+        val topLimit = maxOf(world.hudBottom, 84f * scope.density) + u * 3f + bh + tip
+        val ax = (if (projected) proj[0] else sw / 2f).coerceIn(minOf(edge + bw / 2f, sw / 2f), maxOf(sw - edge - bw / 2f, sw / 2f))
+        val ay = (if (projected) proj[1] else sh * 0.42f).coerceIn(minOf(topLimit, sh * 0.7f), sh * 0.7f) + bob
         val left = ax - bw / 2f
         val top = ay - bh - tip
         val pop = easeOutBack(clamp01(world.promptT / 0.22f))

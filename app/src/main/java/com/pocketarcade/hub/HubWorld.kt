@@ -6,6 +6,8 @@ import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.range
 import com.pocketarcade.games.MiniGame
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.random.Random
 
 /**
@@ -13,6 +15,13 @@ import kotlin.random.Random
  * standing at. Lives as long as the app so returning from a game puts you back where you were.
  */
 class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
+    companion object {
+        /** First-person look speed: degrees turned per dp dragged. */
+        const val LOOK_DEG_PER_DP = 0.3f
+        /** A look-side touch that moves less than this (dp) is a tap, not a turn. */
+        const val TAP_SLOP_DP = 10f
+    }
+
     var map: HubMap = HubLayout.build(games, emptySet())
         private set
     val player = Player()
@@ -46,6 +55,30 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
     /** Becomes true once the player has walked, which retires the "drag to walk" hint. */
     var hasWalked = false
         private set
+    /** Becomes true once the player has looked around in first person, which retires its hint. */
+    var hasLooked = false
+        private set
+
+    /** Screen pixels per dp, for the look speed and the tap slop. */
+    var density = 1f
+
+    /** Pixels down from the top of the screen that the HUD's buttons cover (the prompt stays below). */
+    var hudBottom = 0f
+
+    /** The finger dragging the first-person view (the right half of the screen), or -1. */
+    var lookPointer = -1L
+        private set
+    private var lookStartX = 0f
+    private var lookStartY = 0f
+    private var lookLastX = 0f
+    private var lookLastY = 0f
+    /** Whether the look finger has moved past the tap slop (only then does the view turn). */
+    var lookDragging = false
+        private set
+    private val move = FloatArray(2)
+
+    /** Whether first person is on (the camera may still be easing there). */
+    val firstPerson: Boolean get() = camera.firstPerson
 
     private var ownedDecor: Set<DecorStyle> = emptySet()
     private val rng = Random(42)
@@ -99,12 +132,19 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
 
     fun update(dt: Float) {
         time += dt
-        player.update(dt, joystick.outX, joystick.outY, map.solids)
+        if (camera.firstPerson) {
+            // Up on the stick walks where you look; sideways strafes.
+            HubCamera.moveRelative(joystick.outX, joystick.outY, camera.yaw, move)
+            player.update(dt, move[0], move[1], map.solids, faceYaw = camera.yaw)
+            camera.setEyeRoom(eyeRoom())
+        } else {
+            player.update(dt, joystick.outX, joystick.outY, map.solids)
+        }
         if (player.moving) hasWalked = true
         if (player.stepped) audio?.play(Sfx.STEP, 0.5f, rng.range(0.8f, 1.2f))
         for (n in npcs) n.update(dt, this)
         cafe.update(dt, this)
-        camera.follow(player.x, player.y, player.vx, player.vy, dt)
+        camera.update(player.x, player.y, player.vx, player.vy, player.moving, player.phase, dt)
 
         val spot = map.spots.firstOrNull { it.area.contains(player.x, player.y) }
         if (spot !== activeSpot) {
@@ -115,6 +155,25 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         } else {
             promptT += dt
         }
+    }
+
+    /** How far behind the player the first-person eye can sit without ending up inside something. */
+    private fun eyeRoom(): Float {
+        val fx = sin(camera.yaw)
+        val fz = cos(camera.yaw)
+        var back = HubCamera.EYE_BACK
+        while (back > 0f && insideSolid(player.x - fx * back, player.y - fz * back)) back -= 2.5f
+        return back.coerceAtLeast(0f)
+    }
+
+    private fun insideSolid(x: Float, z: Float): Boolean {
+        val solids = map.solids
+        val m = 2f
+        for (i in solids.indices) {
+            val b = solids[i]
+            if (x > b.left - m && x < b.right + m && z > b.top - m && z < b.bottom + m) return true
+        }
+        return false
     }
 
     /** The prompt spot of machine [index]'s cabinet nearest the player, or null if it has none. */
@@ -132,7 +191,11 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         return best
     }
 
-    /** Points the camera's dive at a machine's screen (used for the enter/exit transition). */
+    /**
+     * Points the camera's dive at a machine's screen (used for the enter/exit transition). While
+     * fully inside, the first-person view turns to face that machine, so coming back out lands
+     * looking at it.
+     */
     fun setDive(spot: Spot?, amount: Float) {
         if (spot == null || amount <= 0f) {
             camera.dive = 0f
@@ -142,6 +205,28 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         camera.diveY = spot.focusY
         camera.diveZ = spot.focusZ
         camera.dive = amount
+        if (amount >= 0.999f) faceSpot(spot)
+    }
+
+    /** Turns the player (and the first-person view) toward a spot's machine or counter. */
+    fun faceSpot(spot: Spot) {
+        camera.face(player.x, player.y, spot.focusX, spot.focusY, spot.focusZ)
+        player.yaw = camera.yaw
+    }
+
+    /**
+     * Switches between the overhead camera and first person; [animate] eases the camera between
+     * the two, otherwise it cuts. Entering first person looks the way the kid is facing.
+     */
+    fun setFirstPerson(on: Boolean, animate: Boolean) {
+        if (on == camera.firstPerson) {
+            if (!animate) camera.setFirstPerson(on, false)
+            return
+        }
+        if (on) camera.setLook(player.yaw, HubCamera.REST_PITCH_DEG * (Math.PI.toFloat() / 180f))
+        // A finger mid-look or mid-walk belongs to the old controls.
+        cancelInput()
+        camera.setFirstPerson(on, animate)
     }
 
     /** Whether no other kid (and not the player) is using hangout [index]. */
@@ -199,20 +284,56 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         return x >= bubbleLeft - pad && x <= bubbleRight + pad && y >= bubbleTop - pad && y <= bubbleBottom + pad
     }
 
+    /**
+     * A finger went down. The prompt bubble takes it first. Overhead, anywhere else starts the
+     * floating joystick; in first person the left half does, and the right half drags the view.
+     */
     fun pointerDown(id: Long, x: Float, y: Float) {
         if (inBubble(x, y) && bubblePressed < 0) {
             bubblePressed = id
+            return
+        }
+        if (camera.firstPerson && x >= screenW / 2f) {
+            if (lookPointer < 0L) {
+                lookPointer = id
+                lookStartX = x
+                lookStartY = y
+                lookLastX = x
+                lookLastY = y
+                lookDragging = false
+            }
             return
         }
         joystick.down(id, x, y)
     }
 
     fun pointerMove(id: Long, x: Float, y: Float) {
+        if (id == lookPointer) {
+            val slop = TAP_SLOP_DP * density
+            if (!lookDragging) {
+                val dx = x - lookStartX
+                val dy = y - lookStartY
+                if (dx * dx + dy * dy > slop * slop) lookDragging = true
+            }
+            if (lookDragging) {
+                // Drag right to turn right, up to look up; the same angle per dp on any screen.
+                val k = LOOK_DEG_PER_DP * (Math.PI.toFloat() / 180f) / density.coerceAtLeast(0.1f)
+                camera.look(-(x - lookLastX) * k, -(y - lookLastY) * k)
+                lookLastX = x
+                lookLastY = y
+                hasLooked = true
+            }
+            return
+        }
         joystick.move(id, x, y)
     }
 
     /** Returns the spot whose prompt was tapped, if this release completes a tap on it. */
     fun pointerUp(id: Long, x: Float, y: Float): Spot? {
+        if (id == lookPointer) {
+            lookPointer = -1L
+            lookDragging = false
+        }
         joystick.up(id)
         if (id == bubblePressed) {
             bubblePressed = -1L
@@ -221,8 +342,11 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         return null
     }
 
+    /** Lets go of every finger: the hall lost focus (a pause, a machine, a dialog). */
     fun cancelInput() {
         joystick.release()
         bubblePressed = -1L
+        lookPointer = -1L
+        lookDragging = false
     }
 }

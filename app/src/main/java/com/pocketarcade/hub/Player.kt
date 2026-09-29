@@ -37,7 +37,11 @@ class Player {
         look = newLook
     }
 
-    fun update(dt: Float, inputX: Float, inputY: Float, solids: List<Box>) {
+    /**
+     * Walks by the analog input ([inputX], [inputY] in world x and z, length ≤ 1). The kid turns
+     * toward where they walk, or, given a [faceYaw] (first person), faces that way instead.
+     */
+    fun update(dt: Float, inputX: Float, inputY: Float, solids: List<Box>, faceYaw: Float = Float.NaN) {
         stepped = false
         val mag = len(inputX, inputY).coerceAtMost(1f)
         if (mag > 0.01f) {
@@ -49,12 +53,16 @@ class Player {
             x = out[0]
             y = out[1]
             moving = moved
-            // Turn smoothly towards where the stick points.
-            val target = atan2(inputX, inputY)
-            var d = (target - yaw) % (2f * PI.toFloat())
-            if (d > PI) d -= 2f * PI.toFloat()
-            if (d < -PI) d += 2f * PI.toFloat()
-            yaw += d.coerceIn(-dt * 12f, dt * 12f)
+            if (!faceYaw.isNaN()) {
+                yaw = faceYaw
+            } else {
+                // Turn smoothly towards where the stick points.
+                val target = atan2(inputX, inputY)
+                var d = (target - yaw) % (2f * PI.toFloat())
+                if (d > PI) d -= 2f * PI.toFloat()
+                if (d < -PI) d += 2f * PI.toFloat()
+                yaw += d.coerceIn(-dt * 12f, dt * 12f)
+            }
             if (moved) {
                 val before = (phase / PI.toFloat()).toInt()
                 phase += dt * (6f + 6f * mag)
@@ -64,6 +72,7 @@ class Player {
             vx = 0f
             vy = 0f
             moving = false
+            if (!faceYaw.isNaN()) yaw = faceYaw
         }
         pose = if (moving) Pose.WALK else Pose.STAND
     }

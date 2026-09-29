@@ -85,10 +85,24 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     val fade = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val audio = services.audio
+    // The hall's camera: taken from the save once, then driven by the HUD button (and saved).
+    var firstPerson by remember { mutableStateOf(false) }
+    var viewRestored by remember { mutableStateOf(false) }
 
     LaunchedEffect(save.hat, save.outfit) { world.setPlayerLook(save.playerLook()) }
     LaunchedEffect(save.owned) { world.setDecor(save.ownedDecor) }
     LaunchedEffect(save.muted) { audio.muted = save.muted }
+    LaunchedEffect(save.loaded) {
+        if (save.loaded && !viewRestored) {
+            viewRestored = true
+            firstPerson = save.firstPerson
+            world.setFirstPerson(save.firstPerson, animate = false)
+        }
+    }
+    // Going to the background lets go of every finger on the hall.
+    LaunchedEffect(signals.paused) {
+        if (signals.paused) world.cancelInput()
+    }
     LaunchedEffect(screen) {
         audio.ambientTarget = when (screen) {
             Screen.HUB -> 1f
@@ -229,6 +243,14 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                         },
                         onToggleMute = {
                             scope.launch { services.repo.setMuted(!save.muted) }
+                        },
+                        firstPerson = firstPerson,
+                        onToggleView = {
+                            val on = !firstPerson
+                            firstPerson = on
+                            world.setFirstPerson(on, animate = true)
+                            audio.play(Sfx.WHOOSH, 0.35f, if (on) 1.3f else 0.9f)
+                            scope.launch { services.repo.setFirstPerson(on) }
                         },
                     )
                 }

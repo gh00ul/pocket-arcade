@@ -43,6 +43,7 @@ class ArcadeRepository(context: Context) {
         private val MUTED = booleanPreferencesKey("muted")
         private val SPARE_AT = longPreferencesKey("spare_token_at")
         private val TOTAL_PLAYS = intPreferencesKey("total_plays")
+        private val FIRST_PERSON = booleanPreferencesKey("first_person")
         private const val HIGH_SCORE_PREFIX = "hs_"
 
         private fun highScoreKey(gameId: String) = intPreferencesKey(HIGH_SCORE_PREFIX + gameId)
@@ -59,6 +60,33 @@ class ArcadeRepository(context: Context) {
                 part.substring(0, idx) to count
             }.toMap()
         }
+
+        /** Stores the hall's camera choice: first person (true) or overhead. */
+        fun writeFirstPerson(p: MutablePreferences, on: Boolean) {
+            p[FIRST_PERSON] = on
+        }
+
+        /** Everything saved, as the app sees it. */
+        fun read(p: Preferences): SaveState {
+            val highScores = p.asMap().entries
+                .filter { it.key.name.startsWith(HIGH_SCORE_PREFIX) }
+                .associate { it.key.name.removePrefix(HIGH_SCORE_PREFIX) to ((it.value as? Int) ?: 0) }
+            return SaveState(
+                loaded = true,
+                tokens = p[TOKENS] ?: STARTING_TOKENS,
+                tickets = p[TICKETS] ?: 0,
+                lastRefillDay = p[LAST_REFILL_DAY] ?: 0L,
+                owned = (p[OWNED] ?: emptySet()) + Catalog.DEFAULT_OUTFIT,
+                hat = p[HAT] ?: "",
+                outfit = p[OUTFIT] ?: Catalog.DEFAULT_OUTFIT,
+                collection = decodeCollection(p[COLLECTION]),
+                highScores = highScores,
+                muted = p[MUTED] ?: false,
+                spareTokenAt = p[SPARE_AT] ?: 0L,
+                totalPlays = p[TOTAL_PLAYS] ?: 0,
+                firstPerson = p[FIRST_PERSON] ?: false,
+            )
+        }
     }
 
     private val store = context.applicationContext.arcadeStore
@@ -66,26 +94,6 @@ class ArcadeRepository(context: Context) {
     val state: Flow<SaveState> = store.data
         .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
         .map { p -> read(p) }
-
-    private fun read(p: Preferences): SaveState {
-        val highScores = p.asMap().entries
-            .filter { it.key.name.startsWith(HIGH_SCORE_PREFIX) }
-            .associate { it.key.name.removePrefix(HIGH_SCORE_PREFIX) to ((it.value as? Int) ?: 0) }
-        return SaveState(
-            loaded = true,
-            tokens = p[TOKENS] ?: STARTING_TOKENS,
-            tickets = p[TICKETS] ?: 0,
-            lastRefillDay = p[LAST_REFILL_DAY] ?: 0L,
-            owned = (p[OWNED] ?: emptySet()) + Catalog.DEFAULT_OUTFIT,
-            hat = p[HAT] ?: "",
-            outfit = p[OUTFIT] ?: Catalog.DEFAULT_OUTFIT,
-            collection = decodeCollection(p[COLLECTION]),
-            highScores = highScores,
-            muted = p[MUTED] ?: false,
-            spareTokenAt = p[SPARE_AT] ?: 0L,
-            totalPlays = p[TOTAL_PLAYS] ?: 0,
-        )
-    }
 
     private fun MutablePreferences.tokens() = this[TOKENS] ?: STARTING_TOKENS
     private fun MutablePreferences.tickets() = this[TICKETS] ?: 0
@@ -224,5 +232,10 @@ class ArcadeRepository(context: Context) {
 
     suspend fun setMuted(muted: Boolean) {
         store.edit { p -> p[MUTED] = muted }
+    }
+
+    /** Remembers whether the hall is walked in first person. */
+    suspend fun setFirstPerson(on: Boolean) {
+        store.edit { p -> writeFirstPerson(p, on) }
     }
 }

@@ -1,19 +1,94 @@
 package com.pocketarcade.hub
 
+import com.pocketarcade.engine.approach
 import com.pocketarcade.engine.damp
 import com.pocketarcade.engine.lerp
 import com.pocketarcade.engine.r3d.Camera3D
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.atan
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.math.tan
 
 /**
- * The hall's 3D camera: it looks north and down across the floor from behind the player, far
- * enough back that a whole bank of machines fits across the screen whatever its aspect, trails
- * the player smoothly with a little look-ahead, stays over the hall, and can dive into a machine
- * for the enter/exit transition.
+ * The hall's 3D camera. Overhead (the default) it looks north and down across the floor from
+ * behind the player, far enough back that a whole bank of machines fits across the screen
+ * whatever its aspect, trailing the player smoothly with a little look-ahead. In first person
+ * it is the player's eyes: a kid's eye height, free yaw, clamped pitch and a slight head-bob
+ * while walking. Switching eases between the two poses, and either can dive into a machine for
+ * the enter/exit transition.
  */
 class HubCamera {
+    companion object {
+        /** First-person eye height: a little above the kids' heads, so marquees and screens read. */
+        const val EYE_HEIGHT = 54f
+        /**
+         * How far behind the feet the eye sits (when there's room), so a cabinet you walk right up
+         * to is still a screen in front of you rather than a control panel under your nose.
+         */
+        const val EYE_BACK = 18f
+        /** First-person vertical field of view on screens about as wide as they are tall, degrees. */
+        const val FP_FOV_DEG = 70f
+        /** On tall portrait screens the vertical view widens (up to this) to keep a sensible width. */
+        const val FP_MAX_FOV_DEG = 90f
+        /** The narrowest horizontal view first person aims for, degrees. */
+        const val FP_MIN_HFOV_DEG = 50f
+        /** How far first person can look up or down, degrees. */
+        const val PITCH_LIMIT_DEG = 40f
+        /** First person's resting pitch: a touch down, so the floor ahead and the screens show. */
+        const val REST_PITCH_DEG = -6f
+        /** Seconds to ease between overhead and first person. */
+        const val BLEND_TIME = 0.5f
+        /** Head-bob while walking: up and down, and side to side, in world units. */
+        const val BOB_HEIGHT = 1.2f
+        const val BOB_SWAY = 0.5f
+        /** Near clipping distances: first person stands right against cabinets. */
+        const val OVERHEAD_NEAR = 8f
+        const val FP_NEAR = 1.5f
+
+        private const val DEG = PI.toFloat() / 180f
+
+        /**
+         * First person's vertical field of view (radians) for a screen [aspect] (width / height):
+         * [FP_FOV_DEG], widened on narrow screens so the view is at least [FP_MIN_HFOV_DEG]
+         * across, but never past [FP_MAX_FOV_DEG].
+         */
+        fun fpFovY(aspect: Float): Float {
+            val base = FP_FOV_DEG * DEG
+            val a = aspect.coerceAtLeast(0.1f)
+            val needed = 2f * atan(tan(FP_MIN_HFOV_DEG * DEG / 2f) / a)
+            return maxOf(base, needed).coerceAtMost(FP_MAX_FOV_DEG * DEG)
+        }
+
+        /**
+         * Turns a joystick deflection ([jx] right, [jy] down the screen) into a world-space walk
+         * direction relative to a first-person [yaw]: up is forward, sideways strafes. Writes
+         * (x, z) into [out]; the length is the stick's.
+         */
+        fun moveRelative(jx: Float, jy: Float, yaw: Float, out: FloatArray) {
+            val fx = sin(yaw)
+            val fz = cos(yaw)
+            // Right of the view: forward × up.
+            val rx = -fz
+            val rz = fx
+            out[0] = rx * jx - fx * jy
+            out[1] = rz * jx - fz * jy
+        }
+
+        /** Wraps an angle into (-π, π]. */
+        fun wrap(a: Float): Float {
+            val pi = PI.toFloat()
+            val tau = 2f * pi
+            var r = a % tau
+            if (r > pi) r -= tau
+            if (r <= -pi) r += tau
+            return r
+        }
+    }
+
     var targetX = 304f
         private set
     var targetZ = 600f
@@ -26,7 +101,7 @@ class HubCamera {
     var coverWidth = 370f
     var coverHeight = 420f
     var minX = 150f
-    var maxX = 458f
+    var maxX = HubLayout.WIDTH - 150f
     /** Clamp for the target so the view stays over the hall (and the pavement out front). */
     var minZ = 190f
     var maxZ = HubLayout.FRONT_WALL - 204f
@@ -43,9 +118,66 @@ class HubCamera {
     /** The player sits a little below the middle of the screen, where there's less perspective squeeze. */
     private val below = 30f
 
+    // ------------------------------------------------------------------ first person
+
+    /** Whether first person is on (what the blend is heading for). */
+    var firstPerson = false
+        private set
+
+    /** Progress from overhead (0) to first person (1), linear in time; see [fpAmount]. */
+    var fpBlend = 0f
+        private set
+
+    /** The eased blend between the two poses (0 overhead … 1 first person). */
+    val fpAmount: Float
+        get() {
+            val t = fpBlend.coerceIn(0f, 1f)
+            return t * t * (3f - 2f * t)
+        }
+
+    /** First-person heading like [Player.yaw]: 0 faces the entrance (+z), π the back wall. */
+    var yaw = PI.toFloat()
+        private set
+
+    /** First-person pitch, radians, up positive; clamped to ±[PITCH_LIMIT_DEG]. */
+    var pitch = REST_PITCH_DEG * DEG
+        private set
+
+    /** Where the player stands (feet), for the eye. */
+    private var playerX = 304f
+    private var playerZ = 600f
+    private var walkPhase = 0f
+    /** How much of the head-bob is on: eases to 1 while walking and to exactly 0 at rest. */
+    var bobWeight = 0f
+        private set
+
+    /** How far behind the feet the eye is now (pulled in when a wall or cabinet is behind). */
+    var eyeBack = EYE_BACK
+        private set
+    private var eyeRoom = EYE_BACK
+
+    /** The first-person eye as of the last [update], world units. */
+    val eyeX: Float get() = playerX - sin(yaw) * eyeBack + sway() * -cos(yaw)
+    val eyeY: Float get() = EYE_HEIGHT + bobLift()
+    val eyeZ: Float get() = playerZ - cos(yaw) * eyeBack + sway() * sin(yaw)
+
+    /**
+     * How much room there is behind the player for the eye (at most [EYE_BACK]); the eye pulls
+     * in at once when it shrinks and eases back out when it grows.
+     */
+    fun setEyeRoom(room: Float) {
+        eyeRoom = room.coerceIn(0f, EYE_BACK)
+        if (eyeRoom < eyeBack) eyeBack = eyeRoom
+    }
+
+    private fun bobLift(): Float = if (bobWeight <= 0f) 0f else BOB_HEIGHT * bobWeight * (abs(sin(walkPhase)) - 0.35f)
+    private fun sway(): Float = if (bobWeight <= 0f) 0f else BOB_SWAY * bobWeight * cos(walkPhase)
+
     fun snapTo(px: Float, pz: Float) {
         targetX = px.coerceIn(minX, maxX)
         targetZ = (pz - below).coerceIn(minZ, maxZ)
+        playerX = px
+        playerZ = pz
     }
 
     fun follow(px: Float, pz: Float, vx: Float, vz: Float, dt: Float) {
@@ -53,6 +185,48 @@ class HubCamera {
         leadZ = damp(leadZ, vz * 0.45f, 3f, dt)
         targetX = damp(targetX, (px + leadX).coerceIn(minX, maxX), 4f, dt)
         targetZ = damp(targetZ, (pz + leadZ - below).coerceIn(minZ, maxZ), 4f, dt)
+    }
+
+    /**
+     * One simulation step: trails the player overhead, tracks the eye, runs the head-bob off the
+     * walk cycle ([phase], [moving]) and eases the overhead/first-person blend.
+     */
+    fun update(px: Float, pz: Float, vx: Float, vz: Float, moving: Boolean, phase: Float, dt: Float) {
+        follow(px, pz, vx, vz, dt)
+        playerX = px
+        playerZ = pz
+        walkPhase = phase
+        bobWeight = approach(bobWeight, if (moving) 1f else 0f, dt * 5f)
+        eyeBack = approach(eyeBack, eyeRoom, dt * 30f)
+        fpBlend = approach(fpBlend, if (firstPerson) 1f else 0f, dt / BLEND_TIME)
+    }
+
+    /** Switches view; [animate] eases there over [BLEND_TIME], otherwise it cuts. */
+    fun setFirstPerson(on: Boolean, animate: Boolean) {
+        if (on != firstPerson) firstPerson = on
+        if (!animate) fpBlend = if (on) 1f else 0f
+    }
+
+    /** Sets the first-person heading and pitch (pitch clamped). */
+    fun setLook(yaw: Float, pitch: Float) {
+        this.yaw = wrap(yaw)
+        this.pitch = pitch.coerceIn(-PITCH_LIMIT_DEG * DEG, PITCH_LIMIT_DEG * DEG)
+    }
+
+    /** Turns the first-person view by [dYaw] (positive turns left) and tilts it by [dPitch] (up). */
+    fun look(dYaw: Float, dPitch: Float) = setLook(yaw + dYaw, pitch + dPitch)
+
+    /**
+     * Points the first-person view from the eye above ([fromX], [fromZ]) at a world point, with
+     * the pitch kept gentle ([-25°, 10°]) so the machine fills the view rather than the floor.
+     */
+    fun face(fromX: Float, fromZ: Float, x: Float, y: Float, z: Float) {
+        val dx = x - fromX
+        val dz = z - fromZ
+        val flat = sqrt(dx * dx + dz * dz)
+        if (flat < 1e-3f) return
+        val p = atan2(y - EYE_HEIGHT, flat).coerceIn(-25f * DEG, 10f * DEG)
+        setLook(atan2(dx, dz), p)
     }
 
     fun apply(cam: Camera3D, width: Int, height: Int) {
@@ -70,17 +244,38 @@ class HubCamera {
         var gy = 10f
         var gz = targetZ
         var fov = fovY
+        val s = fpAmount
+        if (s > 0f) {
+            // The eye, and a point straight ahead of it, so the gaze swings evenly while the eye
+            // swoops down (or back up).
+            val fx = eyeX
+            val fy = eyeY
+            val fz = eyeZ
+            val cp = cos(pitch)
+            val reach = 120f
+            val lx = fx + sin(yaw) * cp * reach
+            val ly = fy + sin(pitch) * reach
+            val lz = fz + cos(yaw) * cp * reach
+            ex = lerp(ex, fx, s)
+            ey = lerp(ey, fy, s)
+            ez = lerp(ez, fz, s)
+            gx = lerp(gx, lx, s)
+            gy = lerp(gy, ly, s)
+            gz = lerp(gz, lz, s)
+            fov = lerp(fov, fpFovY(aspect), s)
+        }
         if (dive > 0f) {
             val t = dive.coerceIn(0f, 1f)
-            val s = t * t * (3f - 2f * t)
-            ex = lerp(ex, diveX, s)
-            ey = lerp(ey, diveY + 2f, s)
-            ez = lerp(ez, diveZ + 22f, s)
-            gx = lerp(gx, diveX, s)
-            gy = lerp(gy, diveY, s)
-            gz = lerp(gz, diveZ, s)
-            fov = lerp(fov, Math.toRadians(50.0).toFloat(), s)
+            val d = t * t * (3f - 2f * t)
+            ex = lerp(ex, diveX, d)
+            ey = lerp(ey, diveY + 2f, d)
+            ez = lerp(ez, diveZ + 22f, d)
+            gx = lerp(gx, diveX, d)
+            gy = lerp(gy, diveY, d)
+            gz = lerp(gz, diveZ, d)
+            fov = lerp(fov, Math.toRadians(50.0).toFloat(), d)
         }
+        cam.near = lerp(OVERHEAD_NEAR, FP_NEAR, s)
         cam.lookAt(ex, ey, ez, gx, gy, gz, fov, width, height)
     }
 }

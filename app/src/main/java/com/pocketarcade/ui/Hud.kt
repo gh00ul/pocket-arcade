@@ -35,9 +35,19 @@ fun SaveState.playerLook(): CharacterLook {
     return Looks.player(outfit.shirt, outfit.pants, Catalog.hat(hat)?.hat)
 }
 
-/** Token and ticket counters (ticking up when they change) plus collection and sound buttons. */
+/**
+ * Token and ticket counters (ticking up when they change) plus collection and sound buttons, and
+ * (given [onToggleView]) the camera button switching the hall between overhead and first person.
+ */
 @Composable
-fun Hud(save: SaveState, onProfile: () -> Unit, onToggleMute: () -> Unit, modifier: Modifier = Modifier) {
+fun Hud(
+    save: SaveState,
+    onProfile: () -> Unit,
+    onToggleMute: () -> Unit,
+    modifier: Modifier = Modifier,
+    firstPerson: Boolean = false,
+    onToggleView: (() -> Unit)? = null,
+) {
     val tokens by animateIntAsState(save.tokens, tween(500), label = "tokens")
     val tickets by animateIntAsState(save.tickets, tween(900), label = "tickets")
     val pill = RoundedCornerShape(50)
@@ -59,6 +69,10 @@ fun Hud(save: SaveState, onProfile: () -> Unit, onToggleMute: () -> Unit, modifi
             CurrencyRow(tokens, tickets, unit = 2.6.dp)
         }
         Spacer(Modifier.weight(1f))
+        if (onToggleView != null) {
+            RoundButton(if (firstPerson) UiIcon.EYE else UiIcon.CAMERA, onToggleView, Color(Pal.BLUE))
+            Spacer(Modifier.width(8.dp))
+        }
         RoundButton(UiIcon.TROPHY, onProfile, Color(Pal.PURPLE))
         Spacer(Modifier.width(8.dp))
         RoundButton(if (save.muted) UiIcon.MUTED else UiIcon.SOUND, onToggleMute, Color(Pal.TEAL))
