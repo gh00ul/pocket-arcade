@@ -74,7 +74,7 @@ private enum class Overlay { NONE, PRIZES, TOKENS, PROFILE }
 fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     val save by services.repo.state.collectAsState(initial = SaveState())
     val games = remember { GameRegistry.createAll() }
-    val world = remember { HubWorld(games, services.audio) }
+    val world = remember { HubWorld(games, services.audio, services.haptics) }
     var screen by remember { mutableStateOf(Screen.TITLE) }
     var overlay by remember { mutableStateOf(Overlay.NONE) }
     var activeGame by remember { mutableIntStateOf(-1) }

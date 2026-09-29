@@ -349,7 +349,7 @@ class PinballGame : BaseMiniGame() {
                 flipNudged[side] = false
                 if (!tilted) {
                     play(Sfx.FLIPPER, 0.9f, if (side == 0) 0.96f else 1.04f)
-                    fx.haptics.tick()
+                    fx.haptics.bump()
                     changeLanes(side)
                 }
             }

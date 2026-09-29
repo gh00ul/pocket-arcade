@@ -2,6 +2,7 @@ package com.pocketarcade.hub
 
 import com.pocketarcade.data.DecorStyle
 import com.pocketarcade.engine.AudioSynth
+import com.pocketarcade.engine.Haptics
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.damp
 import com.pocketarcade.engine.len
@@ -19,7 +20,7 @@ import kotlin.random.Random
  * The walkable arcade hall: map, player, wandering kids, camera and the prompt the player is
  * standing at. Lives as long as the app so returning from a game puts you back where you were.
  */
-class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
+class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, private val haptics: Haptics? = null) {
     companion object {
         /** First-person look speed: degrees turned per dp dragged sideways... */
         const val LOOK_DEG_PER_DP = 0.3f
@@ -53,6 +54,14 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         const val STAND_DEPTH = Body.RADIUS + Body.FRONT_GAP + 1f
         /** Tap-to-walk ignores floor taps further away than this. */
         const val TAP_REACH = 700f
+        /**
+         * A wall bump is the player, still pushing the stick, falling from [WALL_FROM] of the walking
+         * speed or more to under [WALL_TO] within two steps (the last step into a wall is shortened,
+         * so one step alone can miss it). Only a near head-on stop does that: sliding along a wall
+         * keeps most of the speed, and braking (even a full reversal) is far too gradual.
+         */
+        const val WALL_FROM = 0.5f
+        const val WALL_TO = 0.2f
 
         private const val DEG = PI.toFloat() / 180f
 
@@ -137,6 +146,12 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
     /** The spot the view last turned to face (so it only does it once a visit). */
     private var assistedSpot: Spot? = null
 
+    /** For the bumps: the walking speed one and two steps ago, whether the player was stopped, and whether a kid overlapped them. */
+    private var speed1 = 0f
+    private var speed2 = 0f
+    private var wasStopped = true
+    private var kidTouching = false
+
     /** Footsteps played so far, and the last one's pitch. */
     var steps = 0
         private set
@@ -208,6 +223,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         }
         if (player.moving) hasWalked = true
         if (player.stepped) footstep(fp)
+        feelWalls()
         for (i in npcs.indices) npcs[i].update(dt, this)
         cafe.update(dt, this)
         val gait = if (fp) player.speedFrac else if (player.moving) 1f else 0f
@@ -226,12 +242,26 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
             activeSpot = spot
             promptT = 0f
             bubblePressed = -1L
-            if (spot != null) audio?.play(Sfx.BLIP, 0.35f, 1.4f)
+            if (spot != null) {
+                audio?.play(Sfx.BLIP, 0.35f, 1.4f)
+                haptics?.soft()
+            }
             if (spot == null) assistedSpot = null
         } else {
             promptT += dt
         }
         if (fp) assist(dt)
+    }
+
+    /** Walking into a wall or a cabinet gives a bump: brought to a sudden stop while still pushing on (see [WALL_FROM]). */
+    private fun feelWalls() {
+        val speed = player.speedFrac
+        val stopped = speed < WALL_TO
+        val pushed = joystick.outX * joystick.outX + joystick.outY * joystick.outY > 0.25f
+        if (pushed && stopped && !wasStopped && maxOf(speed1, speed2) >= WALL_FROM) haptics?.bump()
+        wasStopped = stopped
+        speed2 = speed1
+        speed1 = speed
     }
 
     /** A footstep: overhead as ever; in first person quieter, and brisker steps sound a touch higher. */
@@ -325,12 +355,14 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         val minD = Body.RADIUS + KID_RADIUS
         var px = player.x
         var py = player.y
+        var touching = false
         for (i in npcs.indices) {
             val n = npcs[i]
             val dx = px - n.x
             val dy = py - n.y
             val d2 = dx * dx + dy * dy
             if (d2 >= minD * minD) continue
+            touching = true
             val d = sqrt(d2)
             val push = (minD - d) * KID_PUSH
             if (d > 1e-3f) {
@@ -340,6 +372,9 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
                 py += push
             }
         }
+        // A bump as you walk into a kid (once per meeting, not while they stay overlapped).
+        if (touching && !kidTouching && player.moving) haptics?.bump()
+        kidTouching = touching
         if (px == player.x && py == player.y) return
         Body.pushOut(bodySolids, px, py, Body.RADIUS, tmp)
         if (Body.clear(bodySolids, tmp[0], tmp[1])) player.place(tmp[0], tmp[1])
