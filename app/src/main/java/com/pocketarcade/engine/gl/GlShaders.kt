@@ -183,7 +183,12 @@ void main() {
             } else {
                 rc = texture(uRefl, ruv).rgb;
             }
-            refl += rc * (gloss * (0.3 + 0.7 * fr * fr * fr) * uReflInfo.z + uReflInfo.w);
+            // A light floor's own glow is in that buffer too; left alone it would feed on itself
+            // frame after frame until pale tiles burn white. A bright floor washes out a
+            // reflection anyway, so fade the reflection out on light paint and cap what it adds.
+            float lum = dot(base, vec3(0.3, 0.59, 0.11));
+            float dark = 1.0 - clamp((lum - 0.25) * 2.0, 0.0, 1.0);
+            refl += min(rc, vec3(1.2)) * (dark * (gloss * (0.3 + 0.7 * fr * fr * fr) * uReflInfo.z + uReflInfo.w));
         }
         // Rim light: a Fresnel sheen tinted by the lights nearby, so figures and cabinets
         // stand out from the dark room.

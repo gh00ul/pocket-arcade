@@ -235,9 +235,9 @@ internal class HallRig(private val map: HubMap, private val games: List<MiniGame
             if (ax < minX - 40f || ax > maxX + 40f || az < minZ - 40f || az > maxZ + 40f) continue
             // A slow shimmer, as if dust drifts through the light.
             val shimmer = 0.85f + 0.15f * sin(t * 1.3f + i * 1.7f)
-            r.beam(lensX[i], lensY[i], lensZ[i], ax, 0f, az, 46f, beam, Blend.ADD, emissive = 1f, alpha = 0.8f * shimmer, tint = spotColor[i])
+            r.beam(lensX[i], lensY[i], lensZ[i], ax, 0f, az, 46f, beam, Blend.ADD, emissive = 1f, alpha = 0.3f * shimmer, tint = spotColor[i])
             r.flat(ax, az, 0.25f, 58f, 40f, halo, blend = Blend.ADD, emissive = 1f, alpha = 0.32f * shimmer, tint = spotColor[i])
-            r.flat(ax, az, 0.3f, 22f, 16f, halo, blend = Blend.ADD, emissive = 1f, alpha = 0.22f, tint = -1)
+            r.flat(ax, az, 0.3f, 22f, 16f, halo, blend = Blend.ADD, emissive = 1f, alpha = 0.12f, tint = -1)
             r.sprite(lensX[i], lensY[i], lensZ[i], 10f, 10f, halo, blend = Blend.ADD, emissive = 1f, alpha = 0.75f, tint = spotColor[i])
         }
         if (hasRace && RACE_SIGN_Z > minZ - 200f && RACE_SIGN_Z < maxZ + 200f) {
