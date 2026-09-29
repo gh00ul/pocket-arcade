@@ -1,6 +1,5 @@
 package com.pocketarcade.startup
 
-import android.os.SystemClock
 import com.pocketarcade.engine.gl.Warmup
 
 /**
@@ -11,13 +10,14 @@ import com.pocketarcade.engine.gl.Warmup
  * reports done, and the hall uploads as it draws, as it did before there was a warm-up.
  *
  * [send] hands job number `i` to the GPU and returns its ticket; [now] is the clock the stall is
- * timed on (milliseconds). Main thread only.
+ * timed on (milliseconds; by default [Startup.frameClockMs], which stands still while the app is in
+ * the background, when the GPU can't answer). Main thread only.
  */
 class WarmRun(
     private val count: Int,
     private val send: (Int) -> Warmup.Ticket,
     private val stallMs: Long = 3000L,
-    private val now: () -> Long = { SystemClock.uptimeMillis() },
+    private val now: () -> Long = { Startup.frameClockMs },
     private val onStall: () -> Unit = {},
 ) {
     private var next = 0

@@ -367,10 +367,10 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                 if (!busy) {
                     scope.launch {
                         busy = true
+                        Startup.awaitHallFrame("title tap -> first hall frame")
                         audio.play(Sfx.COIN)
                         audio.play(Sfx.WHOOSH, 0.5f)
                         fade.animateTo(1f, tween(300))
-                        Startup.awaitHallFrame("title tap -> first hall frame")
                         screen = Screen.HUB
                         fade.animateTo(0f, tween(500))
                         busy = false

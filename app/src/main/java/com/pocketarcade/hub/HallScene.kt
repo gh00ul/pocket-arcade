@@ -145,6 +145,7 @@ class HallScene internal constructor(kit: HallKit) {
             fixtureProps.removeAt(i)
             fixtureModels.removeAt(i)
             fixtureLights.removeAt(i)
+            fixtureLevel = fixtureLevel.without(i)
             decorShades.removeAll { DecorDiff.sameProp(it.prop, gone) }
         }
         for (p in diff.added) {
@@ -153,17 +154,25 @@ class HallScene internal constructor(kit: HallKit) {
             fixtureProps += p
             fixtureModels += m
             fixtureLights += ls
+            fixtureLevel = fixtureLevel.copyOf(fixtureLevel.size + 1)
             lights += ls
             built += m
             if (p.decor != DecorStyle.DISCO_BALL) decorShades += DecorShade.build(p)
         }
-        // A fixture's highlight starts over; the arrays only ever change size here, never in a frame.
-        fixtureLevel = FloatArray(fixtureProps.size)
+        // The highlight levels of the fixtures that stay carry on (the counter is lit while its owner shops); the
+        // boosts are worked out afresh every frame. The arrays only ever change size here, never in a frame.
         fixtureBoost = FloatArray(fixtureProps.size) { 1f }
         baseIntensity = FloatArray(lights.size) { lights[it].intensity }
         hasDisco = newMap.props.any { it.decor == DecorStyle.DISCO_BALL }
         map = newMap
         return built
+    }
+
+    private fun FloatArray.without(i: Int): FloatArray {
+        val out = FloatArray(size - 1)
+        System.arraycopy(this, 0, out, 0, i)
+        System.arraycopy(this, i + 1, out, i, size - i - 1)
+        return out
     }
 
     /** Makes the figure for [look] now (a kid's new hat or outfit), rather than in the frame that first draws it. */

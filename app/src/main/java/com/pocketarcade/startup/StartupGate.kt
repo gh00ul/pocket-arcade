@@ -1,5 +1,6 @@
 package com.pocketarcade.startup
 
+import android.util.Log
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -7,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import com.pocketarcade.engine.gl.GfxQuality
+import kotlinx.coroutines.CancellationException
 
 /**
  * How much of a frame loading may take. A loading screen draws next to nothing, so most of the
@@ -80,22 +82,33 @@ class StartupGate(
      * whether the hall is wanted now (the player has left the title): read every frame.
      */
     suspend fun run(urgent: () -> Boolean) {
-        runPlan("boot", bootPlan) { true }
-        bootDone = true
-        Startup.mark("boot plan done: the title can show")
+        try {
+            runPlan("boot", bootPlan) { true }
+            bootDone = true
+            Startup.mark("boot plan done: the title can show")
 
-        // Let the title's first moments play undisturbed.
-        var quiet = 0L
-        var last = 0L
-        while (quiet < TITLE_QUIET_NS && !urgent()) {
-            withFrameNanos { now ->
-                if (last != 0L) quiet += (now - last).coerceAtMost(100_000_000L)
-                last = now
+            // Let the title's first moments play undisturbed.
+            var quiet = 0L
+            var last = 0L
+            while (quiet < TITLE_QUIET_NS && !urgent()) {
+                withFrameNanos { now ->
+                    Startup.tickFrame(now)
+                    if (last != 0L) quiet += (now - last).coerceAtMost(100_000_000L)
+                    last = now
+                }
             }
+            runPlan("hall", hallPlan(), urgent)
+            hallReady = true
+            Startup.mark("hall plan done: the hall can show")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // A plan that can't even be made: let the screens go ahead and build what they need
+            // themselves, as they did before there was a plan, rather than stay on a loading screen for good.
+            Log.e(Startup.TAG, "Loading plan failed; the screens will build what they need themselves", e)
+            bootDone = true
+            hallReady = true
         }
-        runPlan("hall", hallPlan(), urgent)
-        hallReady = true
-        Startup.mark("hall plan done: the hall can show")
     }
 
     private suspend fun runPlan(name: String, plan: LoadPlan, urgent: () -> Boolean) {
@@ -106,6 +119,7 @@ class StartupGate(
         try {
             while (!driver.finished) {
                 withFrameNanos { now ->
+                    Startup.tickFrame(now)
                     val frameNs = if (last == 0L) 0L else now - last
                     last = now
                     val slice = LoadBudget.sliceNs(urgent(), frameNs, vsyncNs())

@@ -66,6 +66,21 @@ object Startup {
     @Volatile
     private var hallSpan: String? = null
 
+    /**
+     * Time that only runs while frames do, in milliseconds, at most 100 a frame: for timeouts that
+     * must not fire because the app sat in the background (no frames come then). Fed by [tickFrame].
+     */
+    @Volatile
+    var frameClockMs = 0L
+        private set
+    private var lastFrameNs = 0L
+
+    /** Called once a frame by whatever drives loading, with the frame's time in nanoseconds. */
+    fun tickFrame(frameTimeNs: Long) {
+        if (lastFrameNs != 0L) frameClockMs += ((frameTimeNs - lastFrameNs) / 1_000_000L).coerceIn(0L, 100L)
+        lastFrameNs = frameTimeNs
+    }
+
     fun mark(stage: String) = clock.mark(stage)
 
     fun begin(span: String) = clock.begin(span)
