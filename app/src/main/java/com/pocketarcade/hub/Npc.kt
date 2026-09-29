@@ -3,6 +3,7 @@ package com.pocketarcade.hub
 import com.pocketarcade.engine.dist
 import com.pocketarcade.engine.range
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -37,6 +38,8 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
         /** A kid playing a machine looks at a point this far in front of them, at screen height. */
         const val MACHINE_DIST = 14f
         const val MACHINE_GAZE_Y = 44f
+        /** A kid only waves at a player within this angle (radians) of straight ahead. */
+        const val WAVE_CONE = 1.1f
     }
 
     var yaw = rng.range(0f, 6.28f)
@@ -63,6 +66,7 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
 
     /** How long this kid has had the player close by, and how long it takes them to notice (seconds). */
     private var noticeT = 0f
+    private val emotes = Emotes((seed * 1000f).toInt())
     private val reaction = 0.25f + 0.45f * AnimMath.unit((seed * 1000f).toInt(), 0, 9)
 
     private var timer = rng.range(0.5f, 3f)
@@ -91,7 +95,27 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
     fun update(dt: Float, world: HubWorld) {
         step(dt, world)
         aimGaze(dt, world)
+        gesture(dt, world)
         anim.update(dt, x, y, yaw, pose, yawGoal = targetYaw)
+    }
+
+    /**
+     * Sets this kid cheering or clapping (a clap when seated) after [delay] seconds, for someone's
+     * good news. Only the pose they show changes: where they go and what they do next doesn't.
+     */
+    fun celebrate(delay: Float) = emotes.celebrate(delay, seated = state == State.SIT)
+
+    /**
+     * Now and then, a kid who has noticed the player in front of them waves; and a celebration
+     * (see [celebrate]) shows as a cheer. Swaps the pose shown, nothing else.
+     */
+    private fun gesture(dt: Float, world: HubWorld) {
+        val p = world.player
+        val rel = AnimMath.wrap(atan2(p.x - x, p.y - y) - anim.yaw)
+        val close = noticeT > reaction && abs(rel) < WAVE_CONE
+        val standing = !holding && (state == State.IDLE || (state == State.QUEUE && !ordering))
+        val shown = emotes.update(dt, close, standing, state == State.SIT, state == State.WALK)
+        if (shown != null) pose = shown
     }
 
     /**

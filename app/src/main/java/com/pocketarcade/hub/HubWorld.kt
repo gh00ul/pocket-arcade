@@ -69,6 +69,9 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
         const val WALL_TO = 0.2f
         /** The prize clerk turns their head to anyone within this distance of them (world units). */
         const val CLERK_NOTICE = 110f
+        /** Kids within this distance of the prize counter (world units) join in when someone buys a prize, the nearest first. */
+        const val PRIZE_CHEER_RADIUS = 220f
+        const val PRIZE_CHEER_DELAY = 0.004f
 
         private const val DEG = PI.toFloat() / 180f
 
@@ -193,6 +196,12 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
     /** Whether first person is on (the camera may still be easing there). */
     val firstPerson: Boolean get() = camera.firstPerson
 
+    /** How many things the save owned when last told (-1 before then) and whether a purchase is waiting to be cheered. */
+    private var ownedSeen = -1
+    private var cheerPending = false
+    /** Seconds the clerk has left of clapping. */
+    private var clerkCheerT = 0f
+
     private var ownedDecor: Set<DecorStyle> = emptySet()
     private val rng = Random(42)
 
@@ -245,6 +254,8 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
         camera.fovScale = v.fovDeg / HubCamera.FP_FOV_DEG
         camera.bobScale = if (v.reduceMotion) 0f else 1f
         camera.kickScale = if (v.reduceMotion) 0f else 1f
+        // Kids and staff keep moving but drop the bounce, the overshoot and the crouch before a cheer.
+        FigureAnim.reduceMotion = v.reduceMotion
     }
 
     fun setViewport(widthPx: Float, heightPx: Float) {
@@ -264,7 +275,8 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
         for (i in npcs.indices) npcs[i].update(dt, this)
         cafe.update(dt, this)
         lookAround()
-        clerk.update(dt, map.clerkX, map.clerkY, sin(time * 0.4f) * 0.4f, Pose.STAND)
+        if (clerkCheerT > 0f) clerkCheerT -= dt
+        clerk.update(dt, map.clerkX, map.clerkY, sin(time * 0.4f) * 0.4f, if (clerkCheerT > 0f) Pose.CLAP else Pose.STAND)
         val gait = if (fp) player.speedFrac else if (player.moving) 1f else 0f
         val run = if (fp) (player.speedFrac - 1f) / (Player.RUN_SCALE - 1f) else 0f
         camera.update(player.x, player.y, player.vx, player.vy, player.moving, player.phase, dt, gait, run)
@@ -290,6 +302,35 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
             promptT += dt
         }
         if (fp) assist(dt)
+    }
+
+    /**
+     * Tells the hall how many things the player owns now. A purchase (the count going up while
+     * standing at the prize counter) sets the crowd cheering as soon as the shop closes, see [hallResumed].
+     */
+    fun noteOwned(count: Int) {
+        if (ownedSeen >= 0 && count > ownedSeen && activeSpot?.type == SpotType.PRIZES) cheerPending = true
+        ownedSeen = count
+    }
+
+    /** The hall has the player's attention again (a shop or a game closed): a purchase made meanwhile gets its cheer. */
+    fun hallResumed() {
+        if (!cheerPending) return
+        cheerPending = false
+        celebratePurchase()
+    }
+
+    /**
+     * Someone bought a prize: the clerk claps, and every kid near the prize counter cheers or
+     * claps, the nearest first and each with a beat of their own. Only what they show changes.
+     */
+    fun celebratePurchase() {
+        clerkCheerT = Emotes.CELEBRATE_TIME + 0.4f
+        for (i in npcs.indices) {
+            val n = npcs[i]
+            val d = dist(n.x, n.y, map.clerkX, map.clerkY)
+            if (d < PRIZE_CHEER_RADIUS) n.celebrate(d * PRIZE_CHEER_DELAY)
+        }
     }
 
     /**

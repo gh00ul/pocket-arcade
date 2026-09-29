@@ -236,6 +236,15 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         private const val CHEER_ARM_BACK = 0.55f
         private const val CHEER_LEAN = 0.14f
 
+        /** A wave: how far the hand swings from side to side (radians) and how fast (radians a second). */
+        private const val WAVE_SWING = 0.32f
+        private const val WAVE_RATE = 11f
+
+        /** A clap: the arms roll in by [CLAP_MID] plus or minus [CLAP_SWING] (radians), hands meeting at the most, at [CLAP_RATE] radians a second. */
+        private const val CLAP_MID = 0.30f
+        private const val CLAP_SWING = 0.26f
+        private const val CLAP_RATE = 12f
+
         private const val FIDGET_NONE = 0
         private const val FIDGET_GLANCE = 1
         private const val FIDGET_SHIFT = 2
@@ -910,9 +919,21 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
                 accHeadPitch += wi * -0.12f * lift
                 accItem += wi
             }
-            // Emotes: arms as standing until their own poses arrive (see below).
-            Pose.WAVE, Pose.CLAP -> {
-                accArmR[0] += wi * -0.1f; accArmR[1] += wi * 0.1f
+            Pose.WAVE -> {
+                // The right arm goes up and the hand swings from side to side; the other hangs as when standing.
+                accArmP[1] += wi * (-2.75f + 0.05f * sin(waveAge * 3f)); accArmR[1] += wi * (0.15f + WAVE_SWING * sin(waveAge * WAVE_RATE))
+                accArmP[0] += wi * sin(t * 1.3f - 1f) * 0.05f; accArmR[0] += wi * -0.1f
+                accSwing[0] += wi
+                accHeadPitch += wi * -0.05f
+                accHeadRoll += wi * 0.07f
+            }
+            Pose.CLAP -> {
+                // Both hands out in front, coming together and apart (inward roll is negative on the right, positive on the left).
+                val shut = CLAP_MID + CLAP_SWING * sin(clapAge * CLAP_RATE)
+                accArmP[0] += wi * -1.35f; accArmR[0] += wi * shut
+                accArmP[1] += wi * -1.35f; accArmR[1] += wi * -shut
+                accHeadPitch += wi * -0.1f
+                if (!reduceMotion) accRoot += wi * 0.5f * abs(sin(clapAge * CLAP_RATE * 0.5f))
             }
         }
     }
