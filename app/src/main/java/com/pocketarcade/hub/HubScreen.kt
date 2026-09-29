@@ -40,7 +40,7 @@ fun HubScreen(
     val tapped by rememberUpdatedState(onSpotTapped)
     val enabled by rememberUpdatedState(inputEnabled)
     val currentSave by rememberUpdatedState(save)
-    val renderer = remember { HubRenderer() }
+    val renderer = remember(world) { world.stage.renderer }
     val frame = rememberGameLoop(world) { dt -> world.update(dt) }
 
     DisposableEffect(world) {

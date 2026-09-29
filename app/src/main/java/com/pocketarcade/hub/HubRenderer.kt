@@ -16,6 +16,7 @@ import com.pocketarcade.engine.clamp01
 import com.pocketarcade.engine.easeOutBack
 import com.pocketarcade.engine.gl.Gfx
 import com.pocketarcade.engine.r3d.Renderer3D
+import com.pocketarcade.startup.Startup
 import kotlin.math.sin
 
 /**
@@ -39,7 +40,6 @@ class HubRenderer {
     }
 
     private val r = Renderer3D(1, 1)
-    private var scene: HallScene? = null
     private val proj = FloatArray(3)
 
     fun draw(scope: DrawScope, world: HubWorld, save: SaveState) {
@@ -48,7 +48,8 @@ class HubRenderer {
         if (sw < 2f || sh < 2f) return
         val w = sw.toInt()
         val h = sh.toInt()
-        val sc = scene?.takeIf { it.map === world.map } ?: HallScene(world.map, world.games).also { scene = it }
+        // The scene outlives this renderer's screen: it is built by the loading plan, not here.
+        val sc = world.stage.current()
 
         r.startFrame()
         r.resize(w, h)
@@ -60,6 +61,7 @@ class HubRenderer {
         world.camera.apply(r.camera, w, h)
         sc.render(r, world, save)
         Gfx.submit(SLOT, r.finishFrame(0, 0, w, h))
+        Startup.hallFrameDrawn()
 
         val px = 2f * scope.density
         drawPrompt(scope, world, save)

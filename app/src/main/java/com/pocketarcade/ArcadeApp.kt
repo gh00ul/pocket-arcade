@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -53,11 +54,16 @@ import com.pocketarcade.hub.SpotType
 import com.pocketarcade.ui.ArcadeBanner
 import com.pocketarcade.ui.CurrencyFx
 import com.pocketarcade.ui.CurrencyFxLayer
+import com.pocketarcade.hub.TitleUnits
+import com.pocketarcade.startup.LoadPlan
+import com.pocketarcade.startup.Startup
+import com.pocketarcade.startup.StartupGate
 import com.pocketarcade.ui.GameHostScreen
 import com.pocketarcade.ui.Hud
 import com.pocketarcade.ui.HudFade
 import com.pocketarcade.ui.HudExtras
 import com.pocketarcade.ui.HudExtrasReach
+import com.pocketarcade.ui.LoadingScreen
 import com.pocketarcade.ui.ArcadeText
 import com.pocketarcade.ui.DailyBonusReveal
 import com.pocketarcade.ui.GlassBox
@@ -79,6 +85,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -109,6 +117,9 @@ class AppSignals {
     var launchGame by mutableStateOf<String?>(null)
 }
 
+/** How long the title's push waits, in the dark, for the hall to finish loading before it gives up waiting. */
+private const val HALL_WAIT_MS = 20_000L
+
 private enum class Screen { TITLE, HUB, GAME }
 private enum class Overlay {
     NONE,
@@ -136,9 +147,19 @@ private enum class Overlay {
 fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     val context = LocalContext.current
     val save by services.repo.state.collectAsState(initial = SaveState())
-    val games = remember { GameRegistry.createAll() }
-    val world = remember { HubWorld(games, services.audio, services.haptics) }
+    val games = remember {
+        Startup.mark("ArcadeApp first composition")
+        GameRegistry.createAll().also { Startup.mark("games created") }
+    }
+    val world = remember { HubWorld(games, services.audio, services.haptics).also { Startup.mark("hub world created") } }
     var screen by remember { mutableStateOf(Screen.TITLE) }
+    // The loading gate: what the title needs, then the hall, built a few milliseconds a frame.
+    val gate = remember {
+        StartupGate(
+            bootPlan = LoadPlan(TitleUnits.plan(games).steps + TitleUnits.gpuStep(games)),
+            hallPlan = { world.stage.plan() },
+        )
+    }
     var overlay by remember { mutableStateOf(Overlay.NONE) }
     var activeGame by remember { mutableIntStateOf(-1) }
     var busy by remember { mutableStateOf(false) }
@@ -204,6 +225,15 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         settings = settingsStore.settings.first()
         applySettings(settings)
     }
+    // The hall is wanted now once the player has tapped the title (busy) or is already in it.
+    LaunchedEffect(gate) { gate.run(urgent = { screen == Screen.HUB || (screen == Screen.TITLE && busy) }) }
+    LaunchedEffect(gate.bootDone) {
+        if (gate.bootDone) {
+            withFrameNanos { }
+            withFrameNanos { }
+            Startup.mark("title on screen")
+        }
+    }
 
     LaunchedEffect(save.hat, save.outfit) { world.setPlayerLook(save.playerLook()) }
     LaunchedEffect(save.owned) { world.setDecor(save.ownedDecor) }
@@ -235,9 +265,10 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             Screen.TITLE -> 0.5f
         }
     }
-    // Daily refill: checked on launch and whenever the app comes back to the foreground.
-    LaunchedEffect(save.loaded, signals.paused) {
-        if (save.loaded && !signals.paused) {
+    // Daily refill: checked on launch (once the title is showing, so its banner isn't spent behind the
+    // loading screen) and whenever the app comes back to the foreground.
+    LaunchedEffect(save.loaded, signals.paused, gate.bootDone) {
+        if (save.loaded && !signals.paused && gate.bootDone) {
             val granted = services.repo.applyDailyRefill()
             if (granted > 0) dailyGrant = granted
         }
@@ -306,6 +337,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             if (refund) services.repo.refundToken()
             audio.play(Sfx.WHOOSH, 0.6f, 0.8f)
             fade.animateTo(1f, tween(250))
+            Startup.awaitHallFrame("machine exit -> first hall frame")
             screen = Screen.HUB
             activeGame = -1
             dive.snapTo(1f)
@@ -374,15 +406,20 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         // Every 3D picture is drawn by the GPU on this surface, under the interface.
         GlSurface(Modifier.fillMaxSize())
         when (screen) {
-            Screen.TITLE -> TitleScreen(save, games, reduceMotion = settings.reduceMotion, exit = { handoff.exit.value }) {
+            Screen.TITLE -> if (gate.bootDone) TitleScreen(save, games, reduceMotion = settings.reduceMotion, exit = { handoff.exit.value }) {
                 if (!busy) {
                     scope.launch {
                         busy = true
+                        Startup.awaitHallFrame("title tap -> first hall frame")
                         audio.play(Sfx.COIN)
                         audio.play(Sfx.WHOOSH, 0.5f)
-                        // Title push -> (a loading step can go in `gate`) -> the hall easing in.
+                        // Title push -> wait, in the dark, for the hall to be built and on the GPU
+                        // -> the hall easing in. Waiting here (not after the switch) means the
+                        // arrival is seen, not played out behind the loading screen; the timeout
+                        // only guards a plan that never finishes (the hub branch still shows loading).
                         handoff.run(
                             calm = settings.reduceMotion,
+                            gate = { withTimeoutOrNull(HALL_WAIT_MS) { snapshotFlow { gate.hallReady }.first { it } } },
                             enterHall = { screen = Screen.HUB },
                             onCamera = { world.camera.entrance = it },
                         )
@@ -392,7 +429,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                     }
                 }
             }
-            Screen.HUB -> {
+            Screen.HUB -> if (gate.hallReady) {
                 HubScreen(
                     world = world,
                     save = save,
@@ -522,6 +559,16 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         )
 
         HandoffWash(handoff, settings.reduceMotion)
+
+        // Loading covers whatever the screen isn't ready to show: the title until its showroom is
+        // built, the hall until it is built and on the GPU.
+        LoadingScreen(
+            // Also while the title's push waits, dark, for the hall (`busy` on the title is that tap).
+            active = !gate.bootDone || ((screen == Screen.HUB || (screen == Screen.TITLE && busy)) && !gate.hallReady),
+            progress = { gate.progress },
+            label = { gate.label },
+            reduceMotion = settings.reduceMotion,
+        )
 
         if (fade.value > 0.001f) {
             Canvas(Modifier.fillMaxSize()) {

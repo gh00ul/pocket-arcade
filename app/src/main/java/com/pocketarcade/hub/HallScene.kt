@@ -1,18 +1,16 @@
 package com.pocketarcade.hub
 
 import com.pocketarcade.data.DecorStyle
+import com.pocketarcade.data.HatStyle
 import com.pocketarcade.data.SaveState
+import com.pocketarcade.engine.gl.Warmup
 import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.r3d.Blend
-import com.pocketarcade.engine.r3d.BoxFaces
 import com.pocketarcade.engine.r3d.Frustum
 import com.pocketarcade.engine.r3d.Model
-import com.pocketarcade.engine.r3d.ModelBuilder
 import com.pocketarcade.engine.r3d.PointLight
 import com.pocketarcade.engine.r3d.Renderer3D
-import com.pocketarcade.engine.r3d.TexPaint
 import com.pocketarcade.engine.r3d.Texture
-import com.pocketarcade.games.CabinetShape
 import com.pocketarcade.games.MiniGame
 import kotlin.math.cos
 import kotlin.math.sin
@@ -22,8 +20,19 @@ import kotlin.math.sqrt
  * Draws the whole arcade: the floor and walls, every cabinet and fixture, the crowd, the
  * lighting rig and all the glass, neon and chase lights, for whatever part of the hall the
  * camera can see.
+ *
+ * Building one takes seconds (hundreds of painted textures and models), so the game builds it
+ * once, a few milliseconds a frame behind a loading screen ([HallKit.plan]), keeps it for as long
+ * as the app runs, and only [adopt]s the small changes a purchase makes.
  */
-class HallScene(val map: HubMap, private val games: List<MiniGame>) {
+class HallScene internal constructor(kit: HallKit) {
+    /**
+     * Builds the whole scene now, on the calling thread. The game builds it a few milliseconds a
+     * frame behind a loading screen instead; this is for anything that just needs a scene, and for
+     * a hall that was never preloaded.
+     */
+    constructor(map: HubMap, games: List<MiniGame>) : this(HallKit(map, games).also { it.buildAll() })
+
     private companion object {
         /** The renderer's point-light budget. */
         const val MAX_LIGHTS = 64
@@ -40,31 +49,44 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         const val FP_DRAW_DISTANCE = 900f
         const val FP_FOG_NEAR = 260f
         val DISCO_COLORS = intArrayOf(0xFFFF4FA8.toInt(), 0xFF39E6F2.toInt(), 0xFFFFD84D.toInt(), 0xFF9B6BFF.toInt())
+
+        /** A warm-up picture is packed with about this many polygons of models, so the GL thread's turn stays short. */
+        const val WARM_POLYS = 2200
+        /** Times an attract loop is sampled at, to draw the things that only move part of the time (a ball rolling up a lane). */
+        val ATTRACT_TIMES = floatArrayOf(0f, 0.4f, 0.8f, 1.2f, 1.6f, 2.4f, 3.2f, 4.4f, 5.2f)
     }
 
-    private val arts = games.map { MachineArt(it) }
+    /**
+     * The floor plan this scene shows. It changes when decorations are bought ([adopt]), never
+     * because a cabinet or fixture moved: the scene is built once and kept.
+     */
+    var map: HubMap = kit.map
+        private set
+    private val games = kit.games
     /** Every cabinet, back to front: the order the see-through pass needs, fixed for the map's life. */
-    private val units = map.props.filter { it.kind == PropKind.MACHINE }
-        .map { MachineUnit(it, games[it.machine], arts[it.machine]) }
-        .sortedBy { it.prop.z0 }
-    private val fixtureProps = ArrayList<Prop>()
-    private val fixtureModels = ArrayList<Model>()
+    private val units = kit.units
+    private val fixtureProps = kit.fixtureProps
+    private val fixtureModels = kit.fixtureModels
+    /** The lights each fixture gives off (so a decoration taken away takes its lights with it). */
+    private val fixtureLights = kit.fixtureLights
     /** The token kiosk and prize counter light up like a cabinet: each fixture's fade level and this frame's emissive boost. */
-    private val fixtureLevel: FloatArray
-    private val fixtureBoost: FloatArray
+    private var fixtureLevel = FloatArray(fixtureProps.size)
+    private var fixtureBoost = FloatArray(fixtureProps.size) { 1f }
     /** Hall time at the last frame, for the highlight fades (the world only hands over its clock). */
     private var lastTime = 0f
     private val lights = ArrayList<PointLight>()
     /** Each light's steady intensity (the per-frame flicker scales it). */
-    private val baseIntensity: FloatArray
-    private val structure: Model
+    private var baseIntensity: FloatArray
+    private val structure: Model = kit.structure
     /** Trusses and spotlights, the racers' hung sign, the upper-wall murals, the entrance chase lights. */
-    private val rig = HallRig(map, games)
-    private val floorShade: Texture
+    private val rig: HallRig = kit.rig
+    private val floorShade: Texture = kit.floorShade
+    /** The floor under each bought decoration: each has its own patch, so buying one repaints nothing big. */
+    private val decorShades = kit.decorShades
     /** The plushies on the prize wall: won ones in colour, the rest dark silhouettes. */
-    private val prizeWall = map.props.firstOrNull { it.kind == PropKind.PRIZE_WALL }?.let { PrizeWallDisplay(it) }
-    private val hasDisco = map.props.any { it.decor == DecorStyle.DISCO_BALL }
-    private val figures = HashMap<CharacterLook, Figure>()
+    private val prizeWall = kit.prizeWall
+    private var hasDisco = kit.map.props.any { it.decor == DecorStyle.DISCO_BALL }
+    private val figures = kit.figures
     private val corners = FloatArray(2)
     /** The camera's view out to the draw distance; everything below is culled against it. */
     private val view = Frustum()
@@ -74,7 +96,7 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
     /** Kids' shadows: a contact blob and their silhouette cast away from the lamps. */
     private val shadows = FigureShadow(HallArt.shadow.full)
     // Café: the barista, slushie tanks and steam are drawn by CafeScene.kt.
-    private val cafe = CafeScene()
+    private val cafe = kit.cafe
 
     // The part of the floor under anything in view this frame (plus margins), the same for the
     // lighting rig overhead, and the lights picked for it.
@@ -93,185 +115,124 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
     private val pickKey = FloatArray(MAX_LIGHTS)
 
     init {
-        for (p in map.props) if (p.kind != PropKind.MACHINE) {
-            fixtureProps += p
-            fixtureModels += Props.build(p, lights)
-        }
-        fixtureLevel = FloatArray(fixtureProps.size)
-        fixtureBoost = FloatArray(fixtureProps.size) { 1f }
+        // The order the scene has always had them in: the fixtures', the cabinets', the ceiling
+        // downlights and wall neon, then the street lamps.
+        for (ls in fixtureLights) lights += ls
         for (u in units) lights += u.lights
-        // Ceiling downlights in a grid.
-        var z = 90f
-        while (z < HubLayout.FRONT_WALL) {
-            var x = 76f
-            while (x < HubLayout.WIDTH) {
-                lights += PointLight(x, 150f, z, 1f, 0.9f, 0.78f, 175f, 0.55f)
-                x += 120f
-            }
-            z += 120f
-        }
-        // Neon along the walls.
-        lights += PointLight(92f, 110f, 40f, 0.3f, 0.9f, 1f, 130f, 0.7f)
-        lights += PointLight(534f, 110f, 40f, 0.7f, 0.4f, 1f, 130f, 0.7f)
-        // The structure adds the street lamps, so read the steady intensities after it.
-        structure = buildStructure()
-        floorShade = buildFloorShade()
+        lights += kit.hallLights
+        lights += kit.structureLights
         baseIntensity = FloatArray(lights.size) { lights[it].intensity }
     }
 
-    // ------------------------------------------------------------------ static structure
+    // ------------------------------------------------------------------ changes to the hall
 
-    private fun buildStructure(): Model {
-        val b = ModelBuilder()
-        val w = HubLayout.WIDTH.toFloat()
-        val wl = HubLayout.WALL
-        val back = HubLayout.BACK_WALL
-        val front = HubLayout.FRONT_WALL
-        val hgt = HubLayout.WALL_HEIGHT
-        val carpet = HallArt.carpet.region(wrap = true)
-        val tiles = HallArt.tiles.region(wrap = true)
-        val cTpu = 7f
-        val tTpu = 6f
-        fun floor(x0: Float, z0: Float, x1: Float, z1: Float, tex: com.pocketarcade.engine.r3d.Region, tpu: Float, gloss: Float) {
-            b.quad(x0, 0f, z0, x1, 0f, z0, x1, 0f, z1, x0, 0f, z1, tex, 0f, 1f, 0f, u0 = x0 * tpu, v0 = z0 * tpu, u1 = x1 * tpu, v1 = z1 * tpu, gloss = gloss)
+    /**
+     * Brings the scene up to date with [newMap], which differs from [map] only in which
+     * decorations are bought: the new ones are built (a model, a floor patch, their lights) and
+     * the ones no longer there dropped, and everything else, the hundreds of textures and models
+     * of the hall, stays as it is. Returns the models built, so the caller can have the GPU take
+     * them before they are first drawn, or null if something other than a decoration changed and
+     * the scene can't be adjusted (build a new one).
+     */
+    internal fun adopt(newMap: HubMap): List<Model>? {
+        if (newMap === map) return emptyList()
+        val diff = DecorDiff.between(map, newMap) ?: return null
+        val built = ArrayList<Model>()
+        for (gone in diff.removed) {
+            val i = fixtureProps.indexOfFirst { DecorDiff.sameProp(it, gone) }
+            if (i < 0) continue
+            lights.removeAll(fixtureLights[i].toSet())
+            fixtureProps.removeAt(i)
+            fixtureModels.removeAt(i)
+            fixtureLights.removeAt(i)
+            fixtureLevel = fixtureLevel.without(i)
+            decorShades.removeAll { DecorDiff.sameProp(it.prop, gone) }
         }
-        // Tiles by the prize counter and at the entrance; carpet everywhere else.
-        floor(180f, back, 428f, 128f, tiles, tTpu, 0.6f)
-        floor(wl, front - 80f, w - wl, front, tiles, tTpu, 0.6f)
-        floor(wl, back, 180f, 128f, carpet, cTpu, 0f)
-        floor(428f, back, w - wl, 128f, carpet, cTpu, 0f)
-        floor(wl, 128f, w - wl, front - 80f, carpet, cTpu, 0f)
-        // Outside: the sidewalk, a kerb and the parking lot, seen through the cut-away front.
-        val out = front + 8f
-        b.quad(-60f, 0f, out, w + 60f, 0f, out, w + 60f, 0f, out + 84f, -60f, 0f, out + 84f, HallArt.concrete.region(wrap = true), 0f, 1f, 0f, u0 = -60f * 6f, v0 = 0f, u1 = (w + 60f) * 6f, v1 = 84f * 6f, gloss = 0.1f)
-        val kerb = HallArt.solid(0xFF6A6870.toInt()).full
-        b.box(-60f, -3f, out + 84f, w + 60f, 0f, out + 88f, BoxFaces(top = kerb, back = kerb))
-        b.quad(-60f, -3f, out + 88f, w + 60f, -3f, out + 88f, w + 60f, -3f, out + 480f, -60f, -3f, out + 480f, HallArt.asphalt.region(wrap = true), 0f, 1f, 0f, u0 = 0f, v0 = 0f, u1 = (w + 120f) * 3f, v1 = 392f * 3f, gloss = 0.15f)
-        val paint = HallArt.solid(0xFFE8E4D8.toInt()).full
-        var lx = 40f
-        while (lx < w) {
-            b.quad(lx, -2.9f, out + 104f, lx + 2f, -2.9f, out + 104f, lx + 2f, -2.9f, out + 220f, lx, -2.9f, out + 220f, paint, 0f, 1f, 0f)
-            lx += 64f
+        for (p in diff.added) {
+            val ls = ArrayList<PointLight>()
+            val m = Props.build(p, ls)
+            fixtureProps += p
+            fixtureModels += m
+            fixtureLights += ls
+            fixtureLevel = fixtureLevel.copyOf(fixtureLevel.size + 1)
+            lights += ls
+            built += m
+            if (p.decor != DecorStyle.DISCO_BALL) decorShades += DecorShade.build(p)
         }
-        // Planters either side of the entrance.
-        val planter = HallArt.darkMetal.full
-        val hedge = HallArt.paint(0xFF2F6A34.toInt(), 0.25f, 0.6f).full
-        for (px in floatArrayOf(HubLayout.DOOR_X0 - 44f, HubLayout.DOOR_X1 + 14f)) {
-            b.box(px, 0f, out + 10f, px + 30f, 10f, out + 26f, BoxFaces.all(planter, 0.5f))
-            b.box(px + 2f, 10f, out + 12f, px + 28f, 15f, out + 24f, BoxFaces.all(hedge, 0.1f))
-        }
-        // Street lamps along the kerb.
-        val pole = HallArt.darkMetal.full
-        for (sx in floatArrayOf(104f, w - 104f)) {
-            b.cylinder(sx, out + 76f, 0f, 120f, 1.6f, 10, pole, top = pole, gloss = 0.6f)
-            b.box(sx - 1.2f, 116f, out + 60f, sx + 1.2f, 119f, out + 78f, BoxFaces.all(pole, 0.6f))
-            b.box(sx - 5f, 112f, out + 56f, sx + 5f, 116f, out + 66f, BoxFaces.all(pole, 0.6f))
-            b.quad(sx - 4.5f, 111.9f, out + 56.5f, sx + 4.5f, 111.9f, out + 56.5f, sx + 4.5f, 111.9f, out + 65.5f, sx - 4.5f, 111.9f, out + 65.5f, HallArt.solid(0xFFFFE6B8.toInt()).full, 0f, -1f, 0f, emissive = 1.8f, cull = false)
-            lights += PointLight(sx, 100f, out + 62f, 1f, 0.82f, 0.6f, 150f, 0.9f)
-        }
-        b.quad(270f, 0.1f, front - 52f, 338f, 0.1f, front - 52f, 338f, 0.1f, front - 6f, 270f, 0.1f, front - 6f, HallArt.mat.full, 0f, 1f, 0f)
-
-        // Walls with a baseboard, a neon strip along the top and posters.
-        val wall = HallArt.wall.region(wrap = true)
-        val wTpu = 1.2f
-        b.quad(wl, hgt, back, w - wl, hgt, back, w - wl, 0f, back, wl, 0f, back, wall, 0f, 0f, 1f, u0 = wl * wTpu, u1 = (w - wl) * wTpu, v1 = 256f)
-        b.quad(wl, hgt, front, wl, hgt, back, wl, 0f, back, wl, 0f, front, wall, 1f, 0f, 0f, u0 = front * wTpu, u1 = back * wTpu, v1 = 256f)
-        b.quad(w - wl, hgt, back, w - wl, hgt, front, w - wl, 0f, front, w - wl, 0f, back, wall, -1f, 0f, 0f, u0 = back * wTpu, u1 = front * wTpu, v1 = 256f)
-        // Above the lower walls they carry on up into the dark: acoustic panels, a ledge, a
-        // backlit mural over the prize counter and coloured uplights washing up the walls.
-        val top = HubLayout.CEILING
-        val upper = HallArt.upperWall.region(wrap = true)
-        b.quad(wl, top, back, w - wl, top, back, w - wl, hgt, back, wl, hgt, back, upper, 0f, 0f, 1f, u0 = wl, u1 = w - wl, v1 = top - hgt)
-        b.quad(wl, top, front + 8f, wl, top, back, wl, hgt, back, wl, hgt, front + 8f, upper, 1f, 0f, 0f, u0 = front, u1 = back, v1 = top - hgt)
-        b.quad(w - wl, top, back, w - wl, top, front + 8f, w - wl, hgt, front + 8f, w - wl, hgt, back, upper, -1f, 0f, 0f, u0 = back, u1 = front, v1 = top - hgt)
-        val ledge = HallArt.darkMetal.full
-        b.box(wl, hgt, back, w - wl, hgt + 3f, back + 4f, BoxFaces(front = ledge, top = ledge, gloss = 0.5f))
-        b.box(wl, hgt, back, wl + 4f, hgt + 3f, front, BoxFaces(right = ledge, top = ledge, gloss = 0.5f))
-        b.box(w - wl - 4f, hgt, back, w - wl, hgt + 3f, front, BoxFaces(left = ledge, top = ledge, gloss = 0.5f))
-        b.box(200f, hgt + 22f, back, 408f, hgt + 128f, back + 2f, BoxFaces(front = ledge, top = ledge, left = ledge, right = ledge))
-        b.quad(204f, hgt + 124f, back + 2.1f, 404f, hgt + 124f, back + 2.1f, 404f, hgt + 26f, back + 2.1f, 204f, hgt + 26f, back + 2.1f, HallArt.mural.full, 0f, 0f, 1f, emissive = 0.9f)
-        val washColors = intArrayOf(0xFFFF4FA8.toInt(), 0xFF39E6F2.toInt(), 0xFF9B6BFF.toInt())
-        var wz = 200f
-        var k = 0
-        while (wz < front - 60f) {
-            val c = washColors[k % washColors.size]
-            b.quad(wl + 0.8f, hgt + 190f, wz - 34f, wl + 0.8f, hgt + 190f, wz + 34f, wl + 0.8f, hgt + 4f, wz + 34f, wl + 0.8f, hgt + 4f, wz - 34f, HallArt.washer.full, 1f, 0f, 0f, blend = Blend.ADD, emissive = 1f, cull = false, tint = c)
-            val c2 = washColors[(k + 1) % washColors.size]
-            b.quad(w - wl - 0.8f, hgt + 190f, wz + 34f, w - wl - 0.8f, hgt + 190f, wz - 34f, w - wl - 0.8f, hgt + 4f, wz - 34f, w - wl - 0.8f, hgt + 4f, wz + 34f, HallArt.washer.full, -1f, 0f, 0f, blend = Blend.ADD, emissive = 1f, cull = false, tint = c2)
-            wz += 140f
-            k++
-        }
-        for ((i, wx) in floatArrayOf(96f, 512f).withIndex()) {
-            b.quad(wx - 40f, hgt + 190f, back + 0.8f, wx + 40f, hgt + 190f, back + 0.8f, wx + 40f, hgt + 4f, back + 0.8f, wx - 40f, hgt + 4f, back + 0.8f, HallArt.washer.full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1f, cull = false, tint = washColors[i + 1])
-        }
-
-        // The front wall is cut away to a knee wall so the camera can always see in.
-        val stub = 14f
-        val cap = HallArt.brushedMetal.full
-        val face = HallArt.paint(0xFF2A2140.toInt(), 0.1f, 0.6f).full
-        for ((xa, xb) in listOf(wl to HubLayout.DOOR_X0, HubLayout.DOOR_X1 to w - wl)) {
-            b.box(xa, 0f, front, xb, stub, front + 8f, BoxFaces(front = face, back = face, left = face, right = face))
-            b.box(xa - 0.5f, stub, front - 0.5f, xb + 0.5f, stub + 1.5f, front + 8.5f, BoxFaces.all(cap, 0.8f))
-        }
-        // The side walls end in a pillar at the front corners.
-        b.box(0f, 0f, front, wl, HubLayout.CEILING, front + 8f, BoxFaces(front = face, top = cap, left = face, right = face))
-        b.box(w - wl, 0f, front, w, HubLayout.CEILING, front + 8f, BoxFaces(front = face, top = cap, left = face, right = face))
-        val neonCyan = HallArt.solid(0xFF39E6F2.toInt()).full
-        val neonPink = HallArt.solid(0xFFFF4FA8.toInt()).full
-        b.quad(wl, hgt - 8f, back + 0.3f, w - wl, hgt - 8f, back + 0.3f, w - wl, hgt - 10f, back + 0.3f, wl, hgt - 10f, back + 0.3f, neonPink, 0f, 0f, 1f, emissive = 1.8f)
-        b.quad(wl + 0.3f, hgt - 8f, front, wl + 0.3f, hgt - 8f, back, wl + 0.3f, hgt - 10f, back, wl + 0.3f, hgt - 10f, front, neonCyan, 1f, 0f, 0f, emissive = 1.8f)
-        b.quad(w - wl - 0.3f, hgt - 8f, back, w - wl - 0.3f, hgt - 8f, front, w - wl - 0.3f, hgt - 10f, front, w - wl - 0.3f, hgt - 10f, back, neonCyan, -1f, 0f, 0f, emissive = 1.8f)
-        // Posters on the side walls, clear of the zone signs and the tall banks against them.
-        // Wall art runs its first corner to its second left to right as seen from the hall.
-        for ((k, pz) in HubLayout.leftPosters.withIndex()) {
-            val tex = HallArt.poster(k).full
-            b.quad(wl + 0.4f, 100f, pz + 12f, wl + 0.4f, 100f, pz - 12f, wl + 0.4f, 64f, pz - 12f, wl + 0.4f, 64f, pz + 12f, tex, 1f, 0f, 0f, gloss = 0.5f)
-        }
-        for ((k, pz) in HubLayout.rightPosters.withIndex()) {
-            val tex = HallArt.poster(k + 1).full
-            b.quad(w - wl - 0.4f, 100f, pz - 12f, w - wl - 0.4f, 100f, pz + 12f, w - wl - 0.4f, 64f, pz + 12f, w - wl - 0.4f, 64f, pz - 12f, tex, -1f, 0f, 0f, gloss = 0.5f)
-        }
-        // Big neon signs on the back wall.
-        b.quad(22f, 132f, back + 0.5f, 164f, 132f, back + 0.5f, 164f, 96f, back + 0.5f, 22f, 96f, back + 0.5f, HallArt.neon("POCKET ARCADE", 0xFF39E6F2.toInt(), 768, 160, 96f).full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1.7f, cull = false)
-        b.quad(470f, 132f, back + 0.5f, 590f, 132f, back + 0.5f, 590f, 100f, back + 0.5f, 470f, 100f, back + 0.5f, HallArt.neon("HIGH SCORE", 0xFFB080FF.toInt(), 640, 160, 96f).full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1.7f, cull = false)
-        // Zone signs on the side walls, from the floor plan: each over its bank and the cross
-        // aisle in front of it. A machine's sign is only up while that machine is on the floor.
-        for (sg in HubLayout.wallSigns) {
-            if (sg.shape != null && games.none { it.look.shape == sg.shape }) continue
-            val tex = HallArt.neon(sg.text, sg.color, sg.texW, 160, sg.size).full
-            if (sg.right) {
-                val x = w - wl - 0.6f
-                b.quad(x, sg.y1, sg.z0, x, sg.y1, sg.z1, x, sg.y0, sg.z1, x, sg.y0, sg.z0, tex, -1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
-            } else {
-                val x = wl + 0.6f
-                b.quad(x, sg.y1, sg.z1, x, sg.y1, sg.z0, x, sg.y0, sg.z0, x, sg.y0, sg.z1, tex, 1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
-            }
-        }
-        // Baseboards.
-        val base = HallArt.darkMetal.full
-        b.box(wl, 0f, back, w - wl, 4f, back + 1f, BoxFaces(front = base, top = base))
-        b.box(wl, 0f, back, wl + 1f, 4f, front, BoxFaces(right = base, top = base))
-        b.box(w - wl - 1f, 0f, back, w - wl, 4f, front, BoxFaces(left = base, top = base))
-        return b.build()
+        // The highlight levels of the fixtures that stay carry on (the counter is lit while its owner shops); the
+        // boosts are worked out afresh every frame. The arrays only ever change size here, never in a frame.
+        fixtureBoost = FloatArray(fixtureProps.size) { 1f }
+        baseIntensity = FloatArray(lights.size) { lights[it].intensity }
+        hasDisco = newMap.props.any { it.decor == DecorStyle.DISCO_BALL }
+        map = newMap
+        return built
     }
 
-    /** Soft darkening of the floor under and around everything that stands on it. */
-    private fun buildFloorShade(): Texture {
-        val s = 0.5f
-        val w = (HubLayout.WIDTH * s).toInt()
-        val h = (HubLayout.DEPTH * s).toInt()
-        val tp = TexPaint(w, h)
-        tp.clear(0)
-        tp.glow(10f, alpha(0xFF000000.toInt(), 0.55f)) {
-            for (p in map.props) {
-                if (p.decor == DecorStyle.DISCO_BALL || p.kind == PropKind.DOORS) continue
-                rect(p.x0 * s, p.z0 * s, (p.x1 - p.x0) * s, (p.z1 - p.z0) * s, -1)
+    private fun FloatArray.without(i: Int): FloatArray {
+        val out = FloatArray(size - 1)
+        System.arraycopy(this, 0, out, 0, i)
+        System.arraycopy(this, i + 1, out, i, size - i - 1)
+        return out
+    }
+
+    /** Makes the figure for [look] now (a kid's new hat or outfit), rather than in the frame that first draws it. */
+    internal fun prepareLook(look: CharacterLook): Figure = figureFor(look)
+
+    /**
+     * What a warm-up should draw, as pictures for [Warmup.submit]: between them every model and
+     * texture the hall draws (the whole hall, seen or not), a small share each so the GL thread
+     * isn't held up for long by any one.
+     */
+    internal fun warmJobs(): List<(Renderer3D) -> Unit> {
+        val jobs = ArrayList<(Renderer3D) -> Unit>()
+        jobs += { r ->
+            structure.draw(r)
+            for (t in listOf(floorShade, HallArt.floorLogo, HallArt.mat, HallArt.shaft, HallArt.beam, HallArt.glow, HallArt.shadow, HallArt.solid(-1))) {
+                Warmup.touch(r, t.full)
             }
-            rect(0f, 0f, w.toFloat(), HubLayout.BACK_WALL * s + 4f, -1)
-            rect(0f, 0f, HubLayout.WALL * s + 4f, h.toFloat(), -1)
-            rect(w - HubLayout.WALL * s - 4f, 0f, HubLayout.WALL * s + 4f, h.toFloat(), -1)
+            for (d in decorShades) Warmup.touch(r, d.tex.full)
         }
-        return tp.toTexture().also { tp.recycle() }
+        jobs += { r -> rig.warm(r) }
+        jobs += batches(fixtureModels.toList(), { it.polys.size }) { r, m -> m.draw(r) }
+        jobs += batches(units.toList(), { it.model.polys.size }) { r, u ->
+            u.drawOpaque(r, 0f)
+            u.drawTransparent(r)
+        }
+        // The attract loops' moving parts (claw, moles, puck, balls) are shared by every copy of
+        // a cabinet: one copy per game, drawn at several moments, gets them all.
+        val firstOfGame = units.distinctBy { it.game }
+        jobs += batches(firstOfGame, { 300 }) { r, u -> for (t in ATTRACT_TIMES) u.drawOpaque(r, t) }
+        jobs += batches(figures.values.toList(), { 500 }) { r, f -> f.draw(r, 0f, 0f, 0f, 0f, Pose.STAND, 0f, 0f) }
+        jobs += { r ->
+            for (h in HatStyle.entries) Figure.hat(h).draw(r)
+            for (seed in 0 until 4) Figure.itemModel(Figure.ITEM_CUP, seed)?.draw(r)
+            Figure.itemModel(Figure.ITEM_CONE, 0)?.draw(r)
+            cafe.warm(r)
+        }
+        prizeWall?.let { wall -> jobs += { r -> wall.draw(r, emptyMap()) } }
+        return jobs
+    }
+
+    /** Groups [items] into jobs of about [WARM_POLYS] polygons each (by [cost]), each drawing its items with [draw]. */
+    private fun <T> batches(items: List<T>, cost: (T) -> Int, draw: (Renderer3D, T) -> Unit): List<(Renderer3D) -> Unit> {
+        val out = ArrayList<(Renderer3D) -> Unit>()
+        var batch = ArrayList<T>()
+        var total = 0
+        for (item in items) {
+            batch += item
+            total += cost(item)
+            if (total >= WARM_POLYS) {
+                val b = batch
+                out += { r -> for (x in b) draw(r, x) }
+                batch = ArrayList()
+                total = 0
+            }
+        }
+        if (batch.isNotEmpty()) {
+            val b = batch
+            out += { r -> for (x in b) draw(r, x) }
+        }
+        return out
     }
 
     // ------------------------------------------------------------------ per frame
@@ -444,6 +405,10 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         val logoZ = HubLayout.FRONT_WALL - 234f
         r.decal(304f - 62f, logoZ, 304f + 62f, logoZ + 124f, 0.05f, HallArt.floorLogo.full, blend = Blend.ALPHA)
         r.decal(0f, 0f, HubLayout.WIDTH.toFloat(), HubLayout.DEPTH.toFloat(), 0.08f, floorShade.full, blend = Blend.ALPHA)
+        for (i in decorShades.indices) {
+            val d = decorShades[i]
+            if (visible(d.x0, d.z0, d.x1, d.z1, 1f)) r.decal(d.x0, d.z0, d.x1, d.z1, 0.08f, d.tex.full, blend = Blend.ALPHA)
+        }
         for (i in units.indices) {
             val u = units[i]
             val p = u.prop

@@ -122,6 +122,12 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 - **Culling.** The hall culls cabinets, fixtures, kids and lights against the camera's view frustum and a draw distance hidden by fog, so the same scene works looking straight down or level at eye height. Each pass sets its own near plane.
 - **Stage3D.** Gives each game a 3D view that maps touches onto world planes and world points back to the screen.
 - **GL context loss.** GPU resources are tagged with a process-wide generation, so models and textures cached for the whole app are re-uploaded after the activity is recreated.
+- **Startup and loading.** The title's showroom and the whole hall are built, and handed to the GPU, behind a loading screen rather than in the frames that first draw them (a machine's own in-game art is still painted the first time you go in).
+  - *Plans.* The work is a `LoadPlan` (`startup/`): named steps with weights (a step of weight 4 is expected to take about four times as long as one of weight 1). A `LoadDriver` runs it a slice a frame from inside `withFrameNanos`, on the UI thread (the painting code shares mutable fonts, paints and caches, so it is not moved to another thread). A slice starts a step only while its expected cost fits the frame's budget (learned from the steps already run on that phone), always runs at least one, keeps progress from ever going down, and lets a wait for the GPU time out. `StartupGate` runs two plans: the *boot* plan (each game's cabinet art and the title's showroom, then the GPU taking them) behind the loading screen at launch, then the *hall* plan (`HallKit.plan`: carpet, walls, neon, the shell and rig, every cabinet with its first screen picture, fixtures, the crowd and their hats, the prize wall). The hall plan starts quietly behind the title, after its first moments, in the slack of each frame (and skips a frame after a slow one), and runs flat out behind the loading screen once the player has tapped.
+  - *Loading screen.* `ui/LoadingScreen.kt`: the night sky and neon sign, a spinning token, a glowing bar that names what is being made ("LAYING THE CARPET") and a tip. It fades out once the hall is ready. With reduce motion (or the phone's animations off) nothing loops: the token faces front, the stars hold still, no shimmer runs along the bar and the tip stays put.
+  - *GPU warm-up.* `engine/gl/Warmup`: the hall's models, textures and shaders reach the GPU as part of loading, by drawing them once in a tiny off-screen picture (`Gfx.snapshot`) a share at a time, so the GL thread gets a normal frame between two uploads. A GPU that stops answering is given up on after three seconds and the hall then uploads as it draws, as it used to.
+  - *One scene, kept.* `HubWorld.stage` (`HallStage`) owns the built `HallScene` and its renderer for as long as the app runs, so coming back from a machine rebuilds nothing. A bought decoration is *adopted*: its model, lights and a small floor patch are added to the scene in place (`HallScene.adopt`, `DecorDiff`), and a new hat or outfit gets its figure made before the frame that draws it. Both are handed to the GPU at once.
+  - *Shared art.* Signs, posters, wood and light boxes are painted once per look (`HallArt`), and the title and the hall share one `MachineArt` per game.
 
 ## Install the APK on your phone
 
@@ -150,6 +156,8 @@ adb shell am start -n com.pocketarcade/.MainActivity --es play racer
 ```
 
 The ids are `claw`, `whack`, `skeeball`, `hoops`, `pusher`, `airhockey`, `racer`, `stacker`, `shooter`, `pinball` and `fishing`. To log frame times once a second, run `adb shell setprop log.tag.PocketArcade3D DEBUG` and restart the app. Each line shows the UI-thread record time, the GL draw time, the swap interval, GPU time where the driver supports timer queries, the render scale, the quality rung and the picture in use (`LDR`, `HDR16F` or `HDR16F+MSAA`); the `PocketArcadeGL` tag logs why when HDR is not available. To compare builds like for like, also run `adb shell setprop log.tag.PocketArcade3DPin DEBUG`, which holds the render scale at 0.8.
+
+Startup timings are always logged under their own tag: `adb logcat -s PocketArcadeStartup` shows the cold start to the first composition and to the title, every loading step that took 4 ms or more (a step much over 16 ms drops a frame while it runs, so those are the ones to split), the GPU stage, and how long the title tap, leaving a machine and buying a decoration each take to reach a hall frame.
 
 `CabinetModelsTest` builds every cabinet model on the JVM (a pixel-less stand-in for `Bitmap` in the test sources lets the painted textures build without a device) and checks each stays inside its footprint plus a small overhang, keeps its polygon and texture counts and its glow within budget, and has sane normals. The unit tests play every machine headlessly with seeded bots of different skill, check that every round finishes and pays out within the target bands, and print average tickets per round. They also check the hall floor plan (no overlaps, every cabinet reachable on the same walk grid the kids use, a clear main aisle from the doors to the prize counter, no bank hiding another's players from the hall camera):
 
@@ -227,22 +235,24 @@ The photo booth is the first one built (`ui/PhotoBoothScreen.kt`, with its pure 
 ```
 app/src/main/java/com/pocketarcade/
 ├── MainActivity.kt        single activity: immersive, portrait, audio lifecycle, launch shortcut
-├── ArcadeApp.kt           title → hall ↔ machine flow and the camera dive transitions
+├── ArcadeApp.kt           title → hall ↔ machine flow, the camera dive transitions and the loading gate
 ├── engine/                fixed-step loop, touch/flick tracking, circle physics, audio synth,
 │   │                      particles, shake/springs, haptics, tilt steering, the game's type and icons
 │   ├── r3d/               scene recorder, camera, lighting, models, painted textures, Stage3D
-│   └── gl/                OpenGL ES 3 thread, renderer, shaders and the render surface
+│   └── gl/                OpenGL ES 3 thread, renderer, shaders, the render surface and the GPU warm-up
 ├── hub/                   hall floor plan and banks, scene, cabinets and the CabinetDesign seam,
 │                          fixtures, 3D kids, camera, joystick
 ├── games/                 MiniGame interface, BaseMiniGame, GameRegistry
 │   ├── claw/  skeeball/  whackamole/  coinpusher/  hoops/
 │   ├── airhockey/  racer/  stacker/
 │   └── shooter/  pinball/  fishing/
+├── startup/               LoadPlan and its frame-sliced driver, the loading gate, GPU warm-up queue, startup log
 ├── data/                  DataStore repository, save state, prize catalog, settings store
 ├── share/                 photo strips: layout and painting, keeping the last four, the share sheet
-└── ui/                    HUD, title and its handoff to the hall, tutorial, daily bonus, prize counter,
-                           token machine, profile, map, settings, photo booth, game host, widgets, and
-                           the thumbnail studio
+├── startup/               load plans, the staged loader and the loading gate
+└── ui/                    HUD, title and its handoff to the hall, loading screen, tutorial, daily bonus,
+                           prize counter, token machine, profile, map, settings, photo booth, game host,
+                           widgets, and the thumbnail studio
 ```
 
 Tuning knobs for every game (difficulty and payouts) are grouped at the top of each game file in a `*Tuning` object: `ClawTuning`, `SkeeTuning`, `WhackTuning`, `PusherTuning`, `HoopsTuning`, `HockeyTuning`, `RacerTuning`, `StackerTuning`, `ShooterTuning`, `PinballTuning` and `FishingTuning`.

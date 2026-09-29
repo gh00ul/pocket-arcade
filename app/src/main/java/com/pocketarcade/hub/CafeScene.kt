@@ -40,6 +40,12 @@ class CafeScene {
             .build()
     }
 
+    /** Draws the barista and the slush tanks once wherever the camera is, for a warm-up to hand to the GPU. */
+    fun warm(r: Renderer3D) {
+        barista.draw(r, 0f, 0f, 0f, 0f, Pose.STAND, 0f, 0f, 1.1f)
+        for (m in slush) m.draw(r, Blend.OPAQUE)
+    }
+
     fun draw(r: Renderer3D, world: HubWorld, t: Float, minX: Float, maxX: Float, minZ: Float, maxZ: Float) {
         if (CafeLayout.BAR_X1 < minX || CafeLayout.BAR_X0 > maxX || CafeLayout.COUNTER_Z1 < minZ || CafeLayout.BAR_Z0 > maxZ) return
         val b = world.cafe.barista
