@@ -420,7 +420,7 @@ fun GameHostScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(8.dp),
         ) {
-            RoundButton(UiIcon.CLOSE, { onExitPressed() }, Color(Pal.RED), size = 48.dp)
+            RoundButton(UiIcon.CLOSE, { onExitPressed() }, Color(Pal.RED), size = 48.dp, label = "Close")
         }
     }
 }

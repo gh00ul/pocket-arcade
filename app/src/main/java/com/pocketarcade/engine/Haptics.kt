@@ -15,7 +15,7 @@ import kotlin.math.roundToInt
  * A null [vibrator] (no hardware, or headless tests) turns every call into a no-op.
  *
  * On phones with a haptic engine (API 30+ that supports the primitives) the patterns are built from
- * `VibrationEffect.Composition` primitives (click, tick, thud...), which feel crisp; everything
+ * `VibrationEffect.Composition` primitives (click, tick, thud, low tick...), which feel crisp; everything
  * else falls back to plain one-shots and waveforms. From API 33 every effect is played with the
  * touch usage, so the system's touch-feedback setting is honoured.
  *
@@ -99,15 +99,39 @@ open class Haptics(private val vibrator: Vibrator?) {
     } catch (_: Exception) {
         false
     }
-    private val primitives = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && supported(CLICK, TICK, THUD, QUICK_RISE)
-    private val lowTick = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && supported(LOW_TICK)
+    /** Click, tick and quick rise (API 30), the thud (API 31, a click stands in before that) and the low tick (API 31). */
+    private val primitives = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && supportsBasics()
+    private val thud = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && supportsThud()
+    private val lowTick = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && supportsLowTick()
 
     @RequiresApi(Build.VERSION_CODES.R)
-    private fun supported(vararg ids: Int): Boolean = try {
-        vibrator?.areAllPrimitivesSupported(*ids) == true
+    private fun supportsBasics(): Boolean = try {
+        // The real constants here (the numbers above are the same ones): lint checks these by name.
+        vibrator?.areAllPrimitivesSupported(
+            VibrationEffect.Composition.PRIMITIVE_CLICK,
+            VibrationEffect.Composition.PRIMITIVE_TICK,
+            VibrationEffect.Composition.PRIMITIVE_QUICK_RISE,
+        ) == true
     } catch (_: Exception) {
         false
     }
+
+    @RequiresApi(Build.VERSION_CODES.S)
+    private fun supportsThud(): Boolean = try {
+        vibrator?.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_THUD) == true
+    } catch (_: Exception) {
+        false
+    }
+
+    @RequiresApi(Build.VERSION_CODES.S)
+    private fun supportsLowTick(): Boolean = try {
+        vibrator?.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_LOW_TICK) == true
+    } catch (_: Exception) {
+        false
+    }
+
+    /** The primitive to play for [id]: a thud where the phone has one, a click in its place otherwise. */
+    private fun playable(id: Int): Int = if (id == THUD && !thud) CLICK else id
 
     /** A light tick: a tap on something, a step in a count. */
     open fun tick() = single(35, TICK, 0.6f, 10, 70)
@@ -168,7 +192,7 @@ open class Haptics(private val vibrator: Vibrator?) {
         val v = ready(minGapMs, ambient) ?: return
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && (if (primitive == LOW_TICK) lowTick else primitives)) {
-                start(v, VibrationEffect.startComposition().addPrimitive(primitive, (scale * strength).coerceIn(0f, 1f)).compose())
+                start(v, VibrationEffect.startComposition().addPrimitive(playable(primitive), (scale * strength).coerceIn(0f, 1f)).compose())
             } else {
                 oneShot(v, ms, scaleAmplitude(amp, strength))
             }
@@ -182,7 +206,7 @@ open class Haptics(private val vibrator: Vibrator?) {
         try {
             val effect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && primitives) {
                 val c = VibrationEffect.startComposition()
-                for (i in prims.indices) c.addPrimitive(prims[i], (scales[i] * strength).coerceIn(0f, 1f), delays[i])
+                for (i in prims.indices) c.addPrimitive(playable(prims[i]), (scales[i] * strength).coerceIn(0f, 1f), delays[i])
                 c.compose()
             } else if (amplitudeControl) {
                 val amps = IntArray(waveAmp.size) { if (waveAmp[it] == 0) 0 else scaleAmplitude(waveAmp[it], strength) }

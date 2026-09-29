@@ -42,6 +42,10 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.pocketarcade.engine.ArcadeFont
@@ -66,6 +70,32 @@ object UiColors {
 }
 
 /**
+ * What a screen reader should say for arcade text: the symbols the font draws inline (play, star,
+ * token...) named or dropped, line breaks as spaces and the capitals lowered, so TalkBack reads
+ * words rather than spelling out shouted letters.
+ */
+fun spokenText(text: String): String {
+    val out = StringBuilder(text.length + 8)
+    for (ch in text) {
+        when (ch) {
+            // The play triangle only points at the word beside it, and a note says nothing.
+            ArcadeFont.PLAY, ArcadeFont.NOTE -> out.append(' ')
+            ArcadeFont.STAR -> out.append(" star ")
+            ArcadeFont.HEART -> out.append(" heart ")
+            ArcadeFont.TOKEN -> out.append(" token ")
+            ArcadeFont.TICKET -> out.append(" tickets ")
+            ArcadeFont.LEFT -> out.append(" left ")
+            ArcadeFont.RIGHT -> out.append(" right ")
+            ArcadeFont.UP -> out.append(" up ")
+            ArcadeFont.DOWN -> out.append(" down ")
+            '\n' -> out.append(' ')
+            else -> out.append(ch)
+        }
+    }
+    return out.toString().trim().replace(Regex(" {2,}"), " ").lowercase()
+}
+
+/**
  * Text in the game's type, sized in grid units (capitals are 7 units tall, tiny ones 5), with a
  * soft shadow. Multi-line text splits on '\n'.
  */
@@ -84,6 +114,8 @@ fun ArcadeText(
 ) {
     val density = LocalDensity.current
     val lines = remember(text) { text.split('\n') }
+    // The letters are painted, so give a screen reader the words.
+    val spoken = remember(text) { spokenText(text) }
     var u = with(density) { unit.toPx() }
     if (maxWidth != Dp.Unspecified) {
         // Width is linear in the unit, shadow pad included, so one scale fits it exactly.
@@ -99,7 +131,7 @@ fun ArcadeText(
     val h = lines.size * lineH - gap + pad
     val wDp = with(density) { w.toDp() }
     val hDp = with(density) { h.toDp() }
-    Canvas(modifier.size(wDp, hDp)) {
+    Canvas(modifier.size(wDp, hDp).semantics { contentDescription = spoken }) {
         lines.forEachIndexed { i, line ->
             val x = if (centered) (w - pad - widths[i]) / 2f else 0f
             val y = i * lineH
@@ -127,15 +159,19 @@ fun ArcadeButton(
     val pressed by interaction.collectIsPressedAsState()
     val lip = 5.dp
     val down = pressed && enabled
+    val spoken = remember(text) { spokenText(text) }
     Box(
         modifier
-            .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick)
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = spoken }
             .drawBehind { buttonCap(if (enabled) color else Color(0xFF3A3450), lip.toPx(), down, round = false) },
         contentAlignment = Alignment.Center,
     ) {
         Box(
             Modifier
                 .offset(y = if (down) lip * 0.3f else -lip * 0.5f)
+                // The button says its text once (above); its painted label stays out of the way.
+                .clearAndSetSemantics {}
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
             ArcadeText(text, color = if (enabled) textColor else Color(0xFF8A84A0), unit = unit, tiny = tiny, centered = true)
@@ -143,16 +179,38 @@ fun ArcadeButton(
     }
 }
 
-/** A round glossy button carrying a vector [icon]. */
+/** What a screen reader calls a round button, by its icon (icons not listed here go by their name). */
+private fun iconLabel(icon: UiIcon): String = when (icon) {
+    UiIcon.CLOSE -> "Close"
+    UiIcon.TROPHY -> "Profile"
+    UiIcon.SOUND -> "Sound on"
+    UiIcon.MUTED -> "Sound off"
+    UiIcon.EYE -> "Camera view, first person"
+    UiIcon.CAMERA -> "Camera view, overhead"
+    else -> icon.name.lowercase().replaceFirstChar { it.uppercase() }.replace('_', ' ')
+}
+
+/**
+ * A round glossy button carrying a vector [icon]. Screen readers say [label] (by default what the
+ * icon means: "Close", "Profile", "Sound on"...) and call it a button.
+ */
 @Composable
-fun RoundButton(icon: UiIcon, onClick: () -> Unit, color: Color, modifier: Modifier = Modifier, size: Dp = 50.dp) {
+fun RoundButton(
+    icon: UiIcon,
+    onClick: () -> Unit,
+    color: Color,
+    modifier: Modifier = Modifier,
+    size: Dp = 50.dp,
+    label: String = iconLabel(icon),
+) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val lip = 4.dp
     Canvas(
         modifier
             .size(size, size + lip)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label },
     ) {
         val l = lip.toPx()
         buttonCap(color, l, pressed, round = true)
@@ -367,7 +425,7 @@ fun ArcadePanel(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 ArcadeText(title, color = accent.lift(0.15f), unit = 3.dp)
                 Spacer(Modifier.weight(1f))
-                RoundButton(UiIcon.CLOSE, onClose, Color(Pal.RED), size = 42.dp)
+                RoundButton(UiIcon.CLOSE, onClose, Color(Pal.RED), size = 48.dp, label = "Close")
             }
             Spacer(Modifier.size(12.dp))
             content()
