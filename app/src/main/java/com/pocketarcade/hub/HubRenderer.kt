@@ -50,7 +50,8 @@ class HubRenderer {
         // The blacklight carpet: its neon print fluoresces a little.
         r.floorGlow = FLOOR_GLOW
         r.floorReflect = FLOOR_REFLECT
-        r.floorReflectMatte = FLOOR_REFLECT_MATTE
+        // From a kid's eye the carpet's haze reads as a wet floor, so it all but goes in first person.
+        r.floorReflectMatte = FLOOR_REFLECT_MATTE * (1f - 0.85f * world.camera.fpAmount)
         world.camera.apply(r.camera, w, h)
         sc.render(r, world, save)
         Gfx.submit(SLOT, r.finishFrame(0, 0, w, h))
