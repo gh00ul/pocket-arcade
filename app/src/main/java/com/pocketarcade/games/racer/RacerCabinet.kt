@@ -36,8 +36,25 @@ object RacerCabinet : CabinetDesign {
         val leather = MachineKit.seatLeather.full
         BoxFaces(front = leather, left = leather, right = leather, top = leather, back = leather, gloss = 0.35f)
     }
-    private val seatBack: Model by lazy { ModelBuilder().box(-7f, 0f, -1.8f, 7f, 20f, 1.8f, seat).build() }
-    private val headrest: Model by lazy { ModelBuilder().box(-4f, 0f, -1.5f, 4f, 6f, 1.5f, seat).build() }
+    /**
+     * A high-backed racing bucket seat, one per pod number: leather in front, and on its back a
+     * lit numbered plate under a light bar, tall enough to show over the machines in front of
+     * the racers from the hall camera.
+     */
+    private fun seatBack(n: Int, glow: Int, trim: Int): Model = seatBacks.getOrPut(n * 31 + glow) {
+        val leather = MachineKit.seatLeather.full
+        val bar = HallArt.solid(trim).full
+        val lamp = HallArt.solid(glow).full
+        ModelBuilder()
+            .box(-8f, 0f, -1.8f, 8f, 32f, 1.8f, BoxFaces(back = leather, left = leather, right = leather, top = leather, front = RacerArt.seatPlate(n).full, frontEmissive = 1.05f, gloss = 0.35f))
+            // Side wings round the shoulders.
+            .box(-9.5f, 12f, -3.5f, -8f, 30f, 1.8f, BoxFaces(front = leather, left = leather, right = leather, top = bar, back = leather, topEmissive = 1f, gloss = 0.35f))
+            .box(8f, 12f, -3.5f, 9.5f, 30f, 1.8f, BoxFaces(front = leather, left = leather, right = leather, top = bar, back = leather, topEmissive = 1f, gloss = 0.35f))
+            // The light bar across the top.
+            .box(-9.5f, 32f, -2.2f, 9.5f, 34.2f, 2.2f, BoxFaces(front = lamp, top = lamp, left = lamp, right = lamp, back = lamp, frontEmissive = 1.8f, topEmissive = 1.6f))
+            .build()
+    }
+    private val seatBacks = HashMap<Int, Model>()
 
     override fun build(c: CabinetBuild) {
         val b = c.b
@@ -86,11 +103,11 @@ object RacerCabinet : CabinetDesign {
 
         // Bucket seat with side bolsters, facing the screen.
         b.box(cx - 9f, 1.5f, z1 - 19f, cx + 9f, 10f, z1 - 3f, BoxFaces(front = art.kick.full, left = side, right = side, top = dark, back = dark))
+        c.coinDoor(cx, 2.4f, z1 - 3f, 5.6f)
         b.box(cx - 7f, 10f, z1 - 18f, cx + 7f, 13f, z1 - 4f, seat)
         b.box(cx - 9f, 10f, z1 - 18f, cx - 7f, 16f, z1 - 4f, BoxFaces(front = inner, left = inner, right = inner, top = trim, back = inner, gloss = 0.4f))
         b.box(cx + 7f, 10f, z1 - 18f, cx + 9f, 16f, z1 - 4f, BoxFaces(front = inner, left = inner, right = inner, top = trim, back = inner, gloss = 0.4f))
-        b.add(seatBack, c.xf.set(cx, 12f, z1 - 3.5f, pitch = 0.2f))
-        b.add(headrest, c.xf.set(cx, 32f, z1 + 0.5f, pitch = 0.2f))
+        b.add(seatBack(c.variant + 1, art.glow, art.trim), c.xf.set(cx, 11f, z1 - 4.5f, pitch = 0.12f))
 
         c.light(cx, 38f, cabZ + 9f, art.glow, 52f, 1f)
         c.light(cx, 3f, cabZ + 16f, Pal.CYAN, 34f, 0.7f)
