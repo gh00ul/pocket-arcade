@@ -9,6 +9,8 @@ import kotlin.math.sqrt
 /**
  * One pre-built polygon of a static model. [nx], [ny], [nz] is the face normal; smooth surfaces
  * also carry per-vertex normals in [vnx], [vny], [vnz]. [gloss] (0..1) adds specular highlights.
+ * [shade] is an optional brightness per vertex (1 = as painted, less darkens the paint before it
+ * is lit), for baked ambient occlusion where a surface meets the floor or another one.
  */
 class Poly(
     val region: Region,
@@ -29,6 +31,7 @@ class Poly(
     val vnx: FloatArray? = null,
     val vny: FloatArray? = null,
     val vnz: FloatArray? = null,
+    val shade: FloatArray? = null,
 )
 
 /**
@@ -203,13 +206,13 @@ class ModelBuilder {
         region: Region, nx: Float, ny: Float, nz: Float,
         u0: Float = 0f, v0: Float = 0f, u1: Float = region.w.toFloat(), v1: Float = region.h.toFloat(),
         blend: Blend = Blend.OPAQUE, emissive: Float = 0f, cull: Boolean = true, tint: Int = -1,
-        gloss: Float = 0f,
+        gloss: Float = 0f, shade: FloatArray? = null,
     ): ModelBuilder {
         polys += Poly(
             region, 4,
             floatArrayOf(ax, bx, cx, dx), floatArrayOf(ay, by, cy, dy), floatArrayOf(az, bz, cz, dz),
             floatArrayOf(u0, u1, u1, u0), floatArrayOf(v0, v0, v1, v1),
-            nx, ny, nz, blend, emissive, cull, tint, gloss,
+            nx, ny, nz, blend, emissive, cull, tint, gloss, shade = shade,
         )
         return this
     }
@@ -218,9 +221,9 @@ class ModelBuilder {
     fun poly(
         xs: FloatArray, ys: FloatArray, zs: FloatArray, us: FloatArray, vs: FloatArray, region: Region,
         nx: Float, ny: Float, nz: Float, blend: Blend = Blend.OPAQUE, emissive: Float = 0f,
-        cull: Boolean = true, tint: Int = -1, gloss: Float = 0f,
+        cull: Boolean = true, tint: Int = -1, gloss: Float = 0f, shade: FloatArray? = null,
     ): ModelBuilder {
-        polys += Poly(region, xs.size, xs, ys, zs, us, vs, nx, ny, nz, blend, emissive, cull, tint, gloss)
+        polys += Poly(region, xs.size, xs, ys, zs, us, vs, nx, ny, nz, blend, emissive, cull, tint, gloss, shade = shade)
         return this
     }
 
@@ -512,7 +515,7 @@ class ModelBuilder {
                     vnx[i] = tmp[0]; vny[i] = tmp[1]; vnz[i] = tmp[2]
                 }
             }
-            polys += Poly(p.region, p.n, xs, ys, zs, p.us, p.vs, fx, fy, fz, p.blend, p.emissive, p.cull, p.tint, p.gloss, vnx, vny, vnz)
+            polys += Poly(p.region, p.n, xs, ys, zs, p.us, p.vs, fx, fy, fz, p.blend, p.emissive, p.cull, p.tint, p.gloss, vnx, vny, vnz, p.shade)
         }
         return this
     }
@@ -541,7 +544,7 @@ class ModelBuilder {
                     vnx[i] = tmp[0]; vny[i] = tmp[1]; vnz[i] = tmp[2]
                 }
             }
-            polys += Poly(p.region, p.n, xs, ys, zs, p.us, p.vs, fx, fy, fz, p.blend, p.emissive, p.cull, p.tint, p.gloss, vnx, vny, vnz)
+            polys += Poly(p.region, p.n, xs, ys, zs, p.us, p.vs, fx, fy, fz, p.blend, p.emissive, p.cull, p.tint, p.gloss, vnx, vny, vnz, p.shade)
         }
         return this
     }

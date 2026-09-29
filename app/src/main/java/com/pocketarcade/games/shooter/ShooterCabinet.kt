@@ -13,6 +13,7 @@ import com.pocketarcade.hub.CabinetBox
 import com.pocketarcade.hub.CabinetBuild
 import com.pocketarcade.hub.CabinetDesign
 import com.pocketarcade.hub.HallArt
+import com.pocketarcade.hub.beveledBox
 import kotlin.math.sin
 
 /**
@@ -125,8 +126,8 @@ object ShooterCabinet : CabinetDesign {
         val st = 2f
 
         // Side panels run the full depth up to the deck, and up past the screen into the hood.
-        b.box(x0, 0f, z0, x0 + st, h - 11f, hoodZ, BoxFaces(left = side, right = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
-        b.box(x1 - st, 0f, z0, x1, h - 11f, hoodZ, BoxFaces(right = side, left = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
+        b.beveledBox(x0, 0f, z0, x0 + st, h - 11f, hoodZ, BoxFaces(left = side, right = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
+        b.beveledBox(x1 - st, 0f, z0, x1, h - 11f, hoodZ, BoxFaces(right = side, left = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
         b.box(x0, 0f, hoodZ, x0 + st, DECK_Y + 2f, z1 - 3f, BoxFaces(left = side, right = inner, top = dark, front = trim, frontEmissive = 0.9f))
         b.box(x1 - st, 0f, hoodZ, x1, DECK_Y + 2f, z1 - 3f, BoxFaces(right = side, left = inner, top = dark, front = trim, frontEmissive = 0.9f))
         // Body behind the screen, the bezel around it and the screen itself.
@@ -154,7 +155,7 @@ object ShooterCabinet : CabinetDesign {
         b.quad(ix0 + 1f, h - 14.1f, hoodZ - 1f, ix1 - 1f, h - 14.1f, hoodZ - 1f, ix1 - 1f, h - 14.1f, hoodZ - 3f, ix0 + 1f, h - 14.1f, hoodZ - 3f, TexKit.white.full, 0f, -1f, 0f, emissive = 1.6f, tint = art.glow)
 
         // The gun deck: kick panel with the coin door, a sloped control top, the instruction strip.
-        b.box(ix0, 0f, screenZ, ix1, DECK_Y - 4f, z1 - 4f, BoxFaces(front = art.kick.full, top = dark, gloss = 0.3f))
+        b.beveledBox(ix0, 0f, screenZ, ix1, DECK_Y - 4f, z1 - 4f, BoxFaces(front = art.kick.full, top = dark, gloss = 0.3f), bevel = 0f)
         c.coinDoor(cx, 8f, z1 - 4f, 8f)
         val deckFront = z1 - 3f
         b.quad(ix0, DECK_Y + 2f, screenZ, ix1, DECK_Y + 2f, screenZ, ix1, DECK_Y - 1f, deckFront, ix0, DECK_Y - 1f, deckFront, HallArt.darkMetal.full, 0f, 0.97f, 0.24f, gloss = 0.5f)

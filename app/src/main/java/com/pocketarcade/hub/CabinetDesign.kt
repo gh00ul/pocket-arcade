@@ -109,8 +109,8 @@ class CabinetBuild internal constructor(
         val inner = art.bodyPaint.full
         val dark = art.darkPaint.full
         val trim = art.trimTex.full
-        b.box(x0, 0f, z0, x0 + thick, top, depthFront, BoxFaces(left = side, right = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
-        b.box(x1 - thick, 0f, z0, x1, top, depthFront, BoxFaces(right = side, left = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
+        b.beveledBox(x0, 0f, z0, x0 + thick, top, depthFront, BoxFaces(left = side, right = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
+        b.beveledBox(x1 - thick, 0f, z0, x1, top, depthFront, BoxFaces(right = side, left = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
     }
 
     /**

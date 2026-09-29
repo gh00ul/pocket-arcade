@@ -7,6 +7,7 @@ import com.pocketarcade.hub.CabinetBox
 import com.pocketarcade.hub.CabinetBuild
 import com.pocketarcade.hub.CabinetDesign
 import com.pocketarcade.hub.HallArt
+import com.pocketarcade.hub.beveledBox
 import kotlin.math.sin
 
 /**
@@ -64,7 +65,7 @@ object PinballCabinet : CabinetDesign {
             }
         }
         // The body, then the side walls rising towards the backbox.
-        b.box(x0, BODY_BOTTOM, z0, x1, BODY_TOP, z1, BoxFaces(front = art.kick.full, left = side, right = side, back = dark, top = dark, gloss = 0.3f))
+        b.beveledBox(x0, BODY_BOTTOM, z0, x1, BODY_TOP, z1, BoxFaces(front = art.kick.full, left = side, right = side, back = dark, top = dark, gloss = 0.3f))
         b.quad(x0, BACK_TOP, bz, x0, FRONT_TOP, z1, x0, BODY_TOP, z1, x0, BODY_TOP, bz, side, -1f, 0f, 0f, cull = false, gloss = 0.3f)
         b.quad(x1, FRONT_TOP, z1, x1, BACK_TOP, bz, x1, BODY_TOP, bz, x1, BODY_TOP, z1, side, 1f, 0f, 0f, cull = false, gloss = 0.3f)
         // Chrome side rails along the walls' sloping tops.

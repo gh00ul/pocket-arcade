@@ -10,6 +10,7 @@ import com.pocketarcade.hub.CabinetBuild
 import com.pocketarcade.hub.CabinetDesign
 import com.pocketarcade.hub.HallArt
 import com.pocketarcade.hub.MachineKit
+import com.pocketarcade.hub.beveledBox
 
 /**
  * Turbo Racer's hall cabinet: a sit-down racing pod. A tall monitor housing with a chequered
@@ -77,9 +78,9 @@ object RacerCabinet : CabinetDesign {
         val glow = art.glowTex.full
 
         // Monitor housing: side panels with the printed art, lower body, bezel and the screen.
-        b.box(x0, 0f, z0, x0 + st, h, cabZ + 8f, BoxFaces(left = side, right = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
-        b.box(x1 - st, 0f, z0, x1, h, cabZ + 8f, BoxFaces(right = side, left = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
-        b.box(ix0, 0f, z0, ix1, 26f, cabZ, BoxFaces(front = art.kick.full, top = dark, back = dark))
+        b.beveledBox(x0, 0f, z0, x0 + st, h, cabZ + 8f, BoxFaces(left = side, right = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
+        b.beveledBox(x1 - st, 0f, z0, x1, h, cabZ + 8f, BoxFaces(right = side, left = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
+        b.beveledBox(ix0, 0f, z0, ix1, 26f, cabZ, BoxFaces(front = art.kick.full, top = dark, back = dark), bevel = 0f)
         b.box(ix0, 26f, z0, ix1, h - 10f, cabZ - 2f, BoxFaces(front = art.bezel.full, top = dark, back = dark, gloss = 0.6f))
         val live = c.liveScreen()
         b.quad(ix0 + 1.2f, 50f, cabZ - 1.85f, ix1 - 1.2f, 50f, cabZ - 1.85f, ix1 - 1.2f, 30f, cabZ - 1.85f, ix0 + 1.2f, 30f, cabZ - 1.85f, live.texture.full, 0f, 0f, 1f, emissive = 1.15f)

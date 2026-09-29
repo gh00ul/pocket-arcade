@@ -106,7 +106,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         val screenTop = h - (if (tall) 14f else 11f)
         c.sidePanels(h)
         val dark = art.darkPaint.full
-        b.box(ix0, 0f, z0, ix1, panelY, z1 - 1f, BoxFaces(front = art.kick.full, top = dark, back = dark))
+        b.beveledBox(ix0, 0f, z0, ix1, panelY, z1 - 1f, BoxFaces(front = art.kick.full, top = dark, back = dark), bevel = 0f)
         b.quad(ix0, panelY + 4f, cpBack, ix1, panelY + 4f, cpBack, ix1, panelY, z1 - 1f, ix0, panelY, z1 - 1f, art.panel.full, 0f, 0.91f, 0.41f, gloss = 0.55f)
         b.box(ix0, panelY + 4f, z0, ix1, screenTop, cpBack, BoxFaces(front = art.bezel.full, top = dark, back = dark, gloss = 0.6f))
         val live = c.liveScreen()
@@ -144,7 +144,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         val glassTop = h - 8f
         val side = art.sideArt.full
         val dark = art.darkPaint.full
-        b.box(x0, 0f, z0, x1, baseTop, z1, BoxFaces(front = art.kick.full, left = side, right = side, top = dark, back = dark, gloss = 0.3f))
+        b.beveledBox(x0, 0f, z0, x1, baseTop, z1, BoxFaces(front = art.kick.full, left = side, right = side, top = dark, back = dark, gloss = 0.3f))
         b.box(x0 - 0.3f, baseTop - 1f, z0 - 0.3f, x1 + 0.3f, baseTop, z1 + 0.3f, BoxFaces(front = art.trimTex.full, left = art.trimTex.full, right = art.trimTex.full, frontEmissive = 0.9f))
         c.posts(x0, x1, z0, z1, baseTop, glassTop)
         // A solid back behind the prizes, so the case isn't see-through from behind the bank.
@@ -185,14 +185,14 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         val boardZ = z0 + 4f
         val side = art.sideArt.full
         val dark = art.darkPaint.full
-        b.box(x0, 0f, boardZ, x1, tableY, z1, BoxFaces(front = art.kick.full, left = side, right = side, back = dark, gloss = 0.3f))
+        b.beveledBox(x0, 0f, boardZ, x1, tableY, z1, BoxFaces(front = art.kick.full, left = side, right = side, back = dark, gloss = 0.3f))
         b.quad(x0, tableY, boardZ, x1, tableY, boardZ, x1, tableY, z1, x0, tableY, z1, MachineKit.whackTop(art.body).full, 0f, 1f, 0f, gloss = 0.35f)
         c.coinDoor(cx, 6f, z1, 8f)
         // Padded rim round the table.
         val pad = art.trimTex.full
         b.box(x0 - 0.5f, tableY, z1 - 1.5f, x1 + 0.5f, tableY + 1.2f, z1 + 0.5f, BoxFaces(front = pad, top = pad, left = pad, right = pad, gloss = 0.4f))
         // Backboard with the marquee on top and the score display.
-        b.box(x0, 0f, z0, x1, h - 10f, boardZ, BoxFaces(front = art.sideArt.full, top = dark, left = dark, right = dark, back = dark))
+        b.beveledBox(x0, 0f, z0, x1, h - 10f, boardZ, BoxFaces(front = art.sideArt.full, top = dark, left = dark, right = dark, back = dark))
         c.rearPanel(x0, x1, 1f, h - 10f)
         c.display(cx - 9f, cx + 9f, tableY + 16f, tableY + 21f, boardZ + 0.1f)
         c.marqueeBox(x0 - 1f, x1 + 1f, h - 10f, h, z0, boardZ + 1f)
@@ -210,10 +210,10 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         val dark = art.darkPaint.full
         val railH = 22f
         val boardZ = z0 + 8f
-        b.box(x0, 0f, boardZ, x0 + 2f, railH, z1, BoxFaces(left = side, right = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
-        b.box(x1 - 2f, 0f, boardZ, x1, railH, z1, BoxFaces(right = side, left = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
+        b.beveledBox(x0, 0f, boardZ, x0 + 2f, railH, z1, BoxFaces(left = side, right = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
+        b.beveledBox(x1 - 2f, 0f, boardZ, x1, railH, z1, BoxFaces(right = side, left = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
         // Front console with the ball tray.
-        b.box(x0 + 2f, 0f, z1 - 10f, x1 - 2f, 18f, z1, BoxFaces(front = art.kick.full, top = HallArt.solid(0xFF14121A.toInt()).full, gloss = 0.3f))
+        b.beveledBox(x0 + 2f, 0f, z1 - 10f, x1 - 2f, 18f, z1, BoxFaces(front = art.kick.full, top = HallArt.solid(0xFF14121A.toInt()).full, gloss = 0.3f))
         c.coinDoor(cx, 3f, z1, 7f)
         // The lane rises towards the jump.
         val laneFront = z1 - 10f
@@ -231,7 +231,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
             b.quad(x0 + 2f, 28f, boardZ, x1 - 2f, 28f, boardZ, x1 - 2f, 28f, laneBack - 4f, x0 + 2f, 28f, laneBack - 4f, dark, 0f, 1f, 0f)
         }
         // Backboard, display and marquee.
-        b.box(x0, 0f, z0, x1, h - 12f, boardZ, BoxFaces(front = dark, left = side, right = side, top = dark, back = dark))
+        b.beveledBox(x0, 0f, z0, x1, h - 12f, boardZ, BoxFaces(front = dark, left = side, right = side, top = dark, back = dark))
         c.rearPanel(x0, x1, 1f, h - 12f)
         c.display(cx - 8f, cx + 8f, h - 20f, h - 14f, boardZ + 0.1f)
         c.marqueeBox(x0 - 1f, x1 + 1f, h - 12f, h, z0, boardZ + 1f)
@@ -254,13 +254,13 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         val inner = art.bodyPaint.full
         val dark = art.darkPaint.full
         val wallH = 30f
-        b.box(x0, 0f, z0 + 4f, x0 + 2f, wallH, z1, BoxFaces(left = side, right = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
-        b.box(x1 - 2f, 0f, z0 + 4f, x1, wallH, z1, BoxFaces(right = side, left = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
-        b.box(x0 + 2f, 0f, z1 - 12f, x1 - 2f, 20f, z1, BoxFaces(front = art.kick.full, top = HallArt.solid(0xFF14121A.toInt()).full, gloss = 0.3f))
+        b.beveledBox(x0, 0f, z0 + 4f, x0 + 2f, wallH, z1, BoxFaces(left = side, right = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
+        b.beveledBox(x1 - 2f, 0f, z0 + 4f, x1, wallH, z1, BoxFaces(right = side, left = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
+        b.beveledBox(x0 + 2f, 0f, z1 - 12f, x1 - 2f, 20f, z1, BoxFaces(front = art.kick.full, top = HallArt.solid(0xFF14121A.toInt()).full, gloss = 0.3f))
         c.coinDoor(cx, 4f, z1, 7f)
         b.quad(x0 + 2f, 28f, z0 + 4f, x1 - 2f, 28f, z0 + 4f, x1 - 2f, 20f, z1 - 12f, x0 + 2f, 20f, z1 - 12f, MachineKit.court.full, 0f, 0.99f, 0.1f, gloss = 0.45f)
         // Backboard frame, board, rim and net.
-        b.box(x0, 0f, z0, x1, h - 10f, z0 + 4f, BoxFaces(front = dark, left = dark, right = dark, top = dark, back = dark))
+        b.beveledBox(x0, 0f, z0, x1, h - 10f, z0 + 4f, BoxFaces(front = dark, left = dark, right = dark, top = dark, back = dark))
         c.rearPanel(x0, x1, 1f, h - 10f)
         b.quad(cx - 13f, h - 13f, z0 + 4.2f, cx + 13f, h - 13f, z0 + 4.2f, cx + 13f, h - 31f, z0 + 4.2f, cx - 13f, h - 31f, z0 + 4.2f, MachineKit.hoopBoard.full, 0f, 0f, 1f, gloss = 0.9f, emissive = 0.4f)
         val rimY = h - 29f
@@ -291,7 +291,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         val glassTop = h - 8f
         val side = art.sideArt.full
         val dark = art.darkPaint.full
-        b.box(x0, 0f, z0, x1, baseTop, z1, BoxFaces(front = art.kick.full, left = side, right = side, top = dark, back = dark, gloss = 0.3f))
+        b.beveledBox(x0, 0f, z0, x1, baseTop, z1, BoxFaces(front = art.kick.full, left = side, right = side, top = dark, back = dark, gloss = 0.3f))
         c.posts(x0, x1, z0, z1, baseTop, glassTop)
         c.rearPanel(x0, x1, 1f, glassTop)
         c.coinDoor(cx, 8f, z1, 9f)
@@ -320,7 +320,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         for ((lx, lz) in listOf(x0 + 1f to z0 + 7f, x1 - 3f to z0 + 7f, x0 + 1f to z1 - 3f, x1 - 3f to z1 - 3f)) {
             b.box(lx, 0f, lz, lx + 2f, 9f, lz + 2f, leg)
         }
-        b.box(x0 + 0.5f, 9f, z0 + 6f, x1 - 0.5f, top, z1, BoxFaces(front = art.kick.full, left = side, right = side, back = dark, gloss = 0.3f))
+        b.beveledBox(x0 + 0.5f, 9f, z0 + 6f, x1 - 0.5f, top, z1, BoxFaces(front = art.kick.full, left = side, right = side, back = dark, gloss = 0.3f))
         c.rearPanel(x0 + 0.5f, x1 - 0.5f, 9.5f, top, z0 + 6f)
         c.coinDoor(cx, 10.5f, z1, 7.5f)
         val surface = if (hockey) MachineKit.hockeySurface.full else dark
