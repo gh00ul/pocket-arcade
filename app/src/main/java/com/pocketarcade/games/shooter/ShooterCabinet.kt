@@ -13,14 +13,16 @@ import com.pocketarcade.hub.CabinetBox
 import com.pocketarcade.hub.CabinetBuild
 import com.pocketarcade.hub.CabinetDesign
 import com.pocketarcade.hub.HallArt
+import com.pocketarcade.hub.MachineKit
 import com.pocketarcade.hub.beveledBox
 import kotlin.math.sin
 
 /**
  * The shootout's hall cabinet: a hooded upright with a big screen set back in the shade of the
- * hood, a lit marquee with chase bulbs, speaker grilles either side of the screen, and a gun deck
- * in front with two light-guns (blue 1P, red 2P) resting in holsters, their coiled cables running
- * back into the deck. Coin door on the kick panel and a foot pedal on the floor.
+ * hood under glass in a slim bezel, a lit marquee with chase bulbs, speaker grilles either side of
+ * the screen, and a gun deck in front with two light-guns (blue 1P, red 2P) resting in holsters,
+ * their coiled cables running back into the deck, and a lit start button between them. Coin door
+ * and ticket dispenser on the kick panel and a foot pedal on the floor.
  */
 object ShooterCabinet : CabinetDesign {
     override val width = 44f
@@ -62,19 +64,29 @@ object ShooterCabinet : CabinetDesign {
         }
     }
 
-    /** A light-gun lying in its holster, barrel towards the screen (-z), grip hanging off the deck. */
+    /**
+     * A light-gun lying in its holster, barrel towards the screen (-z), grip hanging off the deck:
+     * a coloured frame with a slide and sights, a chrome barrel ending in an orange safety tip, a
+     * trigger in its guard and a rubber grip cap.
+     */
     private fun gun(color: Int): Model {
         val body = ShooterArt.paint(color)
         val metal = HallArt.darkMetal.full
+        val chrome = HallArt.chrome.full
         val tip = ShooterArt.paint(Pal.ORANGE)
         val b = ModelBuilder()
-        b.box(-1.1f, 0f, -8.5f, 1.1f, 2.2f, 1.5f, BoxFaces.all(body, 0.6f))
-        b.box(-0.8f, 2.2f, -7.5f, 0.8f, 2.6f, 0.5f, BoxFaces.all(metal, 0.6f))
-        b.box(-1.15f, 0.2f, -9.2f, 1.15f, 2f, -8.5f, BoxFaces.all(tip))
-        // Grip, raked back, and the trigger guard.
+        b.box(-1.1f, 0f, -6f, 1.1f, 2.4f, 1.6f, BoxFaces.all(body, 0.6f))
+        b.box(-0.9f, 2.4f, -7f, 0.9f, 2.9f, 0.6f, BoxFaces.all(metal, 0.6f))
+        b.capsule(0f, 1.3f, -9.3f, 0f, 1.3f, -5.8f, 0.7f, chrome, slices = 6, gloss = 0.85f)
+        b.box(-0.8f, 0.4f, -9.9f, 0.8f, 2.2f, -9.3f, BoxFaces.all(tip))
+        b.box(-0.12f, 2.9f, -8.6f, 0.12f, 3.5f, -8.3f, BoxFaces.all(metal))
+        b.box(-0.12f, 2.9f, -0.6f, 0.12f, 3.4f, 0.1f, BoxFaces.all(metal))
+        // Grip, raked back, with a rubber cap, and the trigger guard with its trigger.
         b.box(-0.9f, -4.5f, 0f, 0.9f, 0f, 2.4f, BoxFaces.all(body, 0.3f))
+        b.box(-1f, -4.7f, 0.1f, 1f, -3.3f, 2.5f, BoxFaces.all(metal, 0.4f))
         b.box(-0.25f, -2f, -2.8f, 0.25f, 0f, -2.3f, BoxFaces.all(metal))
         b.box(-0.25f, -2.2f, -2.8f, 0.25f, -1.8f, 0f, BoxFaces.all(metal))
+        b.box(-0.15f, -1.6f, -1.6f, 0.15f, 0f, -1.3f, BoxFaces.all(chrome, 0.8f))
         return b.build()
     }
 
@@ -97,13 +109,13 @@ object ShooterCabinet : CabinetDesign {
         var px = x
         var py = y
         var pz = z
-        val n = 9
+        val n = 6
         for (k in 1..n) {
             val t = k / n.toFloat()
             val nx = x + sin(t * 9.4f) * 0.9f
             val ny = y - 4.5f * sin(t * 3.14f) - t * 1.5f
             val nz = z + (backZ - z) * t
-            b.capsule(px, py, pz, nx, ny, nz, 0.45f, black, slices = 5)
+            b.capsule(px, py, pz, nx, ny, nz, 0.45f, black, slices = 4)
             px = nx; py = ny; pz = nz
         }
     }
@@ -125,11 +137,16 @@ object ShooterCabinet : CabinetDesign {
         val hoodZ = z0 + 31f
         val st = 2f
 
-        // Side panels run the full depth up to the deck, and up past the screen into the hood.
-        b.beveledBox(x0, 0f, z0, x0 + st, h - 11f, hoodZ, BoxFaces(left = side, right = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
-        b.beveledBox(x1 - st, 0f, z0, x1, h - 11f, hoodZ, BoxFaces(right = side, left = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
-        b.box(x0, 0f, hoodZ, x0 + st, DECK_Y + 2f, z1 - 3f, BoxFaces(left = side, right = inner, top = dark, front = trim, frontEmissive = 0.9f))
-        b.box(x1 - st, 0f, hoodZ, x1, DECK_Y + 2f, z1 - 3f, BoxFaces(right = side, left = inner, top = dark, front = trim, frontEmissive = 0.9f))
+        // Side panels run the full depth up to the deck, and up past the screen into the hood; lit
+        // T-moulding edges the front of each part.
+        b.beveledBox(x0, 0f, z0, x0 + st, h - 11f, hoodZ, BoxFaces(left = side, right = inner, top = dark, back = dark, front = dark, gloss = 0.35f))
+        b.beveledBox(x1 - st, 0f, z0, x1, h - 11f, hoodZ, BoxFaces(right = side, left = inner, top = dark, back = dark, front = dark, gloss = 0.35f))
+        b.box(x0, 0f, hoodZ, x0 + st, DECK_Y + 2f, z1 - 3f, BoxFaces(left = side, right = inner, top = dark, front = dark))
+        b.box(x1 - st, 0f, hoodZ, x1, DECK_Y + 2f, z1 - 3f, BoxFaces(right = side, left = inner, top = dark, front = dark))
+        c.tMoulding(x0 - 0.15f, x0 + st + 0.15f, 0f, h - 11f, hoodZ)
+        c.tMoulding(x1 - st - 0.15f, x1 + 0.15f, 0f, h - 11f, hoodZ)
+        c.tMoulding(x0 - 0.15f, x0 + st + 0.15f, 0f, DECK_Y + 2f, z1 - 3f)
+        c.tMoulding(x1 - st - 0.15f, x1 + 0.15f, 0f, DECK_Y + 2f, z1 - 3f)
         // Body behind the screen, the bezel around it and the screen itself.
         val ix0 = x0 + st
         val ix1 = x1 - st
@@ -140,6 +157,8 @@ object ShooterCabinet : CabinetDesign {
         val sy1 = sy0 + 26f
         val live = c.liveScreen()
         b.quad(cx - 16f, sy1, screenZ + 0.15f, cx + 16f, sy1, screenZ + 0.15f, cx + 16f, sy0, screenZ + 0.15f, cx - 16f, sy0, screenZ + 0.15f, live.texture.full, 0f, 0f, 1f, emissive = 1.15f)
+        c.screenBezel(cx - 16f, cx + 16f, sy0, sy1, screenZ + 0.15f, frame = 0.55f, depth = 0.5f)
+        c.screenGlass(cx - 16f, cx + 16f, sy0, sy1, screenZ + 0.23f)
         // Speaker grilles either side of the screen, low on the bezel.
         val g = grille.full
         for (s in intArrayOf(-1, 1)) {
@@ -152,15 +171,19 @@ object ShooterCabinet : CabinetDesign {
         b.quad(ix0, h - 14f, hoodZ, ix1, h - 14f, hoodZ, ix1, h - 14f, screenZ, ix0, h - 14f, screenZ, dark, 0f, -1f, 0f)
         c.marqueeBox(x0, x1, h - 11f, h - 1f, z0 + 12f, hoodZ + 1f)
         // A strip light under the hood washing the screen.
-        b.quad(ix0 + 1f, h - 14.1f, hoodZ - 1f, ix1 - 1f, h - 14.1f, hoodZ - 1f, ix1 - 1f, h - 14.1f, hoodZ - 3f, ix0 + 1f, h - 14.1f, hoodZ - 3f, TexKit.white.full, 0f, -1f, 0f, emissive = 1.6f, tint = art.glow)
+        b.quad(ix0 + 1f, h - 14.1f, hoodZ - 1f, ix1 - 1f, h - 14.1f, hoodZ - 1f, ix1 - 1f, h - 14.1f, hoodZ - 3f, ix0 + 1f, h - 14.1f, hoodZ - 3f, TexKit.white.full, 0f, -1f, 0f, emissive = MachineKit.glowFor(art.glow, 1.6f), tint = art.glow)
 
         // The gun deck: kick panel with the coin door, a sloped control top, the instruction strip.
         b.beveledBox(ix0, 0f, screenZ, ix1, DECK_Y - 4f, z1 - 4f, BoxFaces(front = art.kick.full, top = dark, gloss = 0.3f), bevel = 0f)
-        c.coinDoor(cx, 8f, z1 - 4f, 8f)
+        c.coinDoor(cx - 6f, 8f, z1 - 4f, 8f)
+        c.ticketDispenser(cx + 8.5f, 9f, z1 - 3.5f, 6.5f)
         val deckFront = z1 - 3f
         b.quad(ix0, DECK_Y + 2f, screenZ, ix1, DECK_Y + 2f, screenZ, ix1, DECK_Y - 1f, deckFront, ix0, DECK_Y - 1f, deckFront, HallArt.darkMetal.full, 0f, 0.97f, 0.24f, gloss = 0.5f)
         b.box(ix0, DECK_Y - 4f, deckFront - 1f, ix1, DECK_Y - 1f, deckFront, BoxFaces(front = art.panel.full, top = trim, frontEmissive = 0.7f))
-        b.box(x0, DECK_Y - 5f, deckFront, x1, DECK_Y - 4f, deckFront + 0.6f, BoxFaces(front = trim, top = trim, frontEmissive = 1f))
+        b.box(x0, DECK_Y - 5f, deckFront, x1, DECK_Y - 4f, deckFront + 0.6f, BoxFaces(front = trim, top = trim, frontEmissive = MachineKit.glowFor(art.trim, 1f)))
+        // A lit start button between the guns, on the slope of the deck.
+        val startZ = deckFront - 6f
+        b.add(MachineKit.button(art.glow, 1.4f), c.xf.set(cx, DECK_Y + 2f - 3f * (startZ - screenZ) / (deckFront - screenZ), startZ, pitch = 0.175f))
         // Two guns in their holsters, cables coiling back into the deck.
         val black = HallArt.solid(0xFF101014.toInt()).full
         val slopeY = { z: Float -> DECK_Y + 2f - 3f * (z - screenZ) / (deckFront - screenZ) }

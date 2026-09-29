@@ -93,6 +93,27 @@ class CabinetBuild internal constructor(
     x0: Float, x1: Float, z0: Float, z1: Float, h: Float, variant: Int, seed: Int, art: MachineArt,
 ) : CabinetBox(x0, x1, z0, z1, h, variant, seed, art) {
 
+    /** How lit each part of the shared cabinet furniture is; the numbers only ever multiply a colour that is already painted. */
+    companion object {
+        /** How far T-moulding stands proud of the face it edges, and how far it overlaps a panel on each side. */
+        const val T_MOLD_OUT = 0.35f
+        const val T_MOLD_SIDE = 0.15f
+        /** The marquee sign's own light (just under the bloom threshold on its brightest paint). */
+        const val MARQUEE_GLOW = 1.2f
+        /** The topper on top of the marquee, seen from above. */
+        const val TOPPER_GLOW = 0.9f
+        /** The lit line along the marquee's top cap and down its ends. */
+        const val MARQUEE_TRIM_GLOW = 0.8f
+        /** Strip lights under a marquee, along a bezel, in a glass case. */
+        const val LED_GLOW = 1.2f
+        /** The neon line hugging a screen. */
+        const val BEZEL_GLOW = 1.0f
+        /** Width of that line. */
+        const val BEZEL_LINE = 0.35f
+        /** The coin slots' lit windows. */
+        const val SLOT_GLOW = 1.5f
+    }
+
     /** Adds a coloured point light ([color] is ARGB). Keep to 2 or 3 per cabinet. */
     fun light(x: Float, y: Float, z: Float, color: Int, radius: Float, intensity: Float) {
         unit.lights += PointLight(x, y, z, (color shr 16 and 255) / 255f, (color shr 8 and 255) / 255f, (color and 255) / 255f, radius, intensity)
@@ -103,62 +124,162 @@ class CabinetBuild internal constructor(
         for (k in 0 until count) unit.addBulb(xa + (xb - xa) * (k + 0.5f) / count, y, z)
     }
 
-    /** Side panels with printed art and lit T-molding along their front edges. */
+    /** Emissive of the lit T-moulding along a cabinet's edges (before [MachineKit.glowFor] tones it down for pale trim). */
+    private val tmoldGlow = 0.6f
+
+    /**
+     * Side panels with printed art and lit T-moulding down their front edges: the moulding is a
+     * raised strip in the trim colour, a little wider than the panel and standing [T_MOLD_OUT]
+     * proud of its front, the way the real plastic edging wraps a panel's edge.
+     */
     fun sidePanels(top: Float, depthFront: Float = z1, thick: Float = 1.8f) {
         val side = art.sideArt.full
         val inner = art.bodyPaint.full
         val dark = art.darkPaint.full
-        val trim = art.trimTex.full
-        b.beveledBox(x0, 0f, z0, x0 + thick, top, depthFront, BoxFaces(left = side, right = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
-        b.beveledBox(x1 - thick, 0f, z0, x1, top, depthFront, BoxFaces(right = side, left = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
+        b.beveledBox(x0, 0f, z0, x0 + thick, top, depthFront, BoxFaces(left = side, right = inner, top = dark, back = dark, front = dark, gloss = 0.35f))
+        b.beveledBox(x1 - thick, 0f, z0, x1, top, depthFront, BoxFaces(right = side, left = inner, top = dark, back = dark, front = dark, gloss = 0.35f))
+        tMoulding(x0 - T_MOLD_SIDE, x0 + thick + T_MOLD_SIDE, 0f, top, depthFront)
+        tMoulding(x1 - thick - T_MOLD_SIDE, x1 + T_MOLD_SIDE, 0f, top, depthFront)
+    }
+
+    /**
+     * A vertical strip of lit T-moulding from [xa] to [xb] and [ya] to [yb], its back on the face
+     * at depth [z] and standing [T_MOLD_OUT] proud. Glossy, in the trim colour.
+     */
+    fun tMoulding(xa: Float, xb: Float, ya: Float, yb: Float, z: Float) {
+        val t = art.trimTex.full
+        val e = MachineKit.glowFor(art.trim, tmoldGlow)
+        b.box(xa, ya, z - 0.01f, xb, yb, z + T_MOLD_OUT, BoxFaces(front = t, left = t, right = t, top = t, frontEmissive = e, topEmissive = e, gloss = 0.5f))
     }
 
     /**
      * The lit marquee sign: its face leans back a little so it catches the eye from the hall's
      * high camera while still reading square-on from a kid's eye height in front of it, a backlit
      * topper with the game's emblem and short name covers its top (the part of a cabinet the hall
-     * view sees most of), a lit trim edge runs along the top of the face and a row of chase bulbs
-     * sits on it.
+     * view sees most of). Round the face runs a frame: a dark cap along the top with a lit trim
+     * line and a row of chase bulbs, a dark rail along the bottom with an LED strip under it
+     * washing the screen below, and lit edging down both ends.
      */
     fun marqueeBox(xa: Float, xb: Float, y0: Float, y1: Float, za: Float, zb: Float) {
         val dark = art.darkPaint.full
+        val metal = HallArt.darkMetal.full
         val hgt = y1 - y0
         // A gentle lean: enough to catch the hall camera, still square-on to a kid in front of it.
         val lean = minOf(hgt * 0.22f, (zb - za) * 0.45f)
         val zt = zb - lean
         val len = sqrt(hgt * hgt + lean * lean)
-        b.quad(xa, y1, zt, xb, y1, zt, xb, y0, zb, xa, y0, zb, art.marquee.full, 0f, lean / len, hgt / len, emissive = 1.25f)
-        b.quad(xa, y1, za, xb, y1, za, xb, y1, zt, xa, y1, zt, art.topper.full, 0f, 1f, 0f, emissive = 0.9f, gloss = 0.5f)
+        b.quad(xa, y1, zt, xb, y1, zt, xb, y0, zb, xa, y0, zb, art.marquee.full, 0f, lean / len, hgt / len, emissive = MARQUEE_GLOW)
+        b.quad(xa, y1, za, xb, y1, za, xb, y1, zt, xa, y1, zt, art.topper.full, 0f, 1f, 0f, emissive = TOPPER_GLOW, gloss = 0.5f)
         b.quad(xa, y1, za, xa, y1, zt, xa, y0, zb, xa, y0, za, dark, -1f, 0f, 0f, gloss = 0.35f)
         b.quad(xb, y1, zt, xb, y1, za, xb, y0, za, xb, y0, zb, dark, 1f, 0f, 0f, gloss = 0.35f)
         b.quad(xb, y1, za, xa, y1, za, xa, y0, za, xb, y0, za, dark, 0f, 0f, -1f)
         b.quad(xa, y0, zb, xb, y0, zb, xb, y0, za, xa, y0, za, dark, 0f, -1f, 0f)
-        // A lit trim edge along the top of the face and down its sides.
+        // The frame: a dark cap over the top edge of the face with a lit trim line on its front...
         val trim = art.trimTex.full
-        b.box(xa - 0.25f, y1 - 0.3f, zt - 0.5f, xb + 0.25f, y1 + 0.35f, zt + 0.35f, BoxFaces(front = trim, top = trim, left = trim, right = trim, frontEmissive = 1.1f, topEmissive = 1.1f))
-        b.quad(xa - 0.26f, y1, zt - 0.4f, xa - 0.26f, y1, zt + 0.2f, xa - 0.26f, y0, zb + 0.2f, xa - 0.26f, y0, zb - 0.4f, trim, -1f, 0f, 0f, emissive = 1f)
-        b.quad(xb + 0.26f, y1, zt + 0.2f, xb + 0.26f, y1, zt - 0.4f, xb + 0.26f, y0, zb - 0.4f, xb + 0.26f, y0, zb + 0.2f, trim, 1f, 0f, 0f, emissive = 1f)
-        bulbRow(xa + 1f, xb - 1f, y1 + 0.9f, zt - 0.1f, ((xb - xa) / 3.2f).toInt())
+        val e = MachineKit.glowFor(art.trim, MARQUEE_TRIM_GLOW)
+        b.box(xa - 0.4f, y1 - 0.5f, zt - 0.9f, xb + 0.4f, y1 + 0.5f, zt + 0.6f, BoxFaces(front = metal, top = metal, left = metal, right = metal, gloss = 0.7f))
+        b.quad(xa - 0.3f, y1 + 0.32f, zt + 0.62f, xb + 0.3f, y1 + 0.32f, zt + 0.62f, xb + 0.3f, y1 - 0.18f, zt + 0.62f, xa - 0.3f, y1 - 0.18f, zt + 0.62f, trim, 0f, 0f, 1f, emissive = e)
+        // ...a rail along the bottom edge...
+        b.box(xa - 0.3f, y0 - 0.3f, zb - 0.5f, xb + 0.3f, y0 + 0.7f, zb + 0.5f, BoxFaces(front = metal, top = metal, left = metal, right = metal, gloss = 0.7f))
+        // ...and lit edging down both ends of the face.
+        b.quad(xa - 0.26f, y1, zt - 0.4f, xa - 0.26f, y1, zt + 0.2f, xa - 0.26f, y0, zb + 0.2f, xa - 0.26f, y0, zb - 0.4f, trim, -1f, 0f, 0f, emissive = e)
+        b.quad(xb + 0.26f, y1, zt + 0.2f, xb + 0.26f, y1, zt - 0.4f, xb + 0.26f, y0, zb - 0.4f, xb + 0.26f, y0, zb + 0.2f, trim, 1f, 0f, 0f, emissive = e)
+        // A strip light on the underside, at the front, throwing the sign's colour down the screen.
+        ledStripDown(xa + 0.8f, xb - 0.8f, y0 - 0.02f, zb - 2.2f, zb - 0.9f)
+        bulbRow(xa + 1f, xb - 1f, y1 + 1.0f, zt - 0.1f, ((xb - xa) / 3.2f).toInt())
+    }
+
+    /** A strip of light facing down at height [y] between depths [za] and [zb], in the glow colour, from [xa] to [xb]. */
+    fun ledStripDown(xa: Float, xb: Float, y: Float, za: Float, zb: Float, emissive: Float = LED_GLOW) {
+        b.quad(xa, y, zb, xb, y, zb, xb, y, za, xa, y, za, art.glowTex.full, 0f, -1f, 0f, emissive = MachineKit.glowFor(art.glow, emissive))
+    }
+
+    /** A thin vertical or horizontal strip of light on a face at depth [z] facing +z, in the glow colour. */
+    fun ledStrip(xa: Float, ya: Float, xb: Float, yb: Float, z: Float, emissive: Float = LED_GLOW) {
+        b.quad(xa, yb, z, xb, yb, z, xb, ya, z, xa, ya, z, art.glowTex.full, 0f, 0f, 1f, emissive = MachineKit.glowFor(art.glow, emissive))
+    }
+
+    /**
+     * A screen's bezel: a raised black frame [frame] wide round the screen rectangle on the plane
+     * at depth [z], standing [depth] proud at its outer edge and sloping down to the glass, so it
+     * catches the light, and a thin lit line hugging the screen's edge in the glow colour.
+     */
+    fun screenBezel(xa: Float, xb: Float, ya: Float, yb: Float, z: Float, frame: Float = 1.3f, depth: Float = 0.7f) {
+        val m = art.black.full
+        val zo = z + depth
+        val len = sqrt(depth * depth + frame * frame)
+        val nz = frame / len
+        val nd = depth / len
+        val g = 0.6f
+        // The four slopes, from the outer edge (standing proud) to the inner edge (at the glass).
+        b.quad(xa - frame, yb + frame, zo, xb + frame, yb + frame, zo, xb, yb, z, xa, yb, z, m, 0f, -nd, nz, gloss = g)
+        b.quad(xa, ya, z, xb, ya, z, xb + frame, ya - frame, zo, xa - frame, ya - frame, zo, m, 0f, nd, nz, gloss = g)
+        b.quad(xa - frame, yb + frame, zo, xa, yb, z, xa, ya, z, xa - frame, ya - frame, zo, m, nd, 0f, nz, gloss = g)
+        b.quad(xb, yb, z, xb + frame, yb + frame, zo, xb + frame, ya - frame, zo, xb, ya, z, m, -nd, 0f, nz, gloss = g)
+        // The outer wall, so the frame reads as a solid from the side.
+        val xo0 = xa - frame
+        val xo1 = xb + frame
+        val yo0 = ya - frame
+        val yo1 = yb + frame
+        b.quad(xo0, yo1, z, xo1, yo1, z, xo1, yo1, zo, xo0, yo1, zo, m, 0f, 1f, 0f, gloss = g)
+        b.quad(xo0, yo0, zo, xo1, yo0, zo, xo1, yo0, z, xo0, yo0, z, m, 0f, -1f, 0f, gloss = g)
+        b.quad(xo0, yo1, zo, xo0, yo1, z, xo0, yo0, z, xo0, yo0, zo, m, -1f, 0f, 0f, gloss = g)
+        b.quad(xo1, yo1, z, xo1, yo1, zo, xo1, yo0, zo, xo1, yo0, z, m, 1f, 0f, 0f, gloss = g)
+        // The lit line just inside the frame.
+        val w = BEZEL_LINE
+        val zl = z + 0.04f
+        ledStrip(xa, yb - w, xb, yb, zl, BEZEL_GLOW)
+        ledStrip(xa, ya, xb, ya + w, zl, BEZEL_GLOW)
+        ledStrip(xa, ya + w, xa + w, yb - w, zl, BEZEL_GLOW)
+        ledStrip(xb - w, ya + w, xb, yb - w, zl, BEZEL_GLOW)
+    }
+
+    /**
+     * A pane of glass over a screen: one clear, glossy, alpha-blended quad on the plane at depth
+     * [z] that picks up the room's reflections and the glass texture's faint streaks. It shares
+     * its material with [glassBox], so it costs no extra draw call on a cabinet that has both.
+     */
+    fun screenGlass(xa: Float, xb: Float, ya: Float, yb: Float, z: Float) {
+        b.quad(xa, yb, z, xb, yb, z, xb, ya, z, xa, ya, z, HallArt.glass.full, 0f, 0f, 1f, blend = Blend.ALPHA, cull = false, gloss = 1f)
+    }
+
+    /**
+     * A ticket dispenser [w] wide, its bottom at [y0], its front flush with the face at depth [z]
+     * (it sits in a housing behind that face): a dark plate with a lit slot and a ticket sticking
+     * out of it and curling down.
+     */
+    fun ticketDispenser(x: Float, y0: Float, z: Float, w: Float = 7f) {
+        val h = w * 0.5f
+        val dark = art.darkPaint.full
+        b.box(x - w / 2f, y0, z - 0.9f, x + w / 2f, y0 + h, z, BoxFaces(front = MachineKit.ticketPlate.full, left = dark, right = dark, top = dark, frontEmissive = 0.25f, gloss = 0.4f))
+        // The slot is at 14..21.5 of the plate's 32 texels; the paper leaves it at the middle.
+        val sy = y0 + h * (1f - 17.5f / 32f)
+        val pw = w * 0.17f
+        b.quad(x - pw, sy + 0.2f, z + 0.02f, x + pw, sy + 0.2f, z + 0.02f, x + pw, sy - w * 0.42f, z + 1.4f, x - pw, sy - w * 0.42f, z + 1.4f, MachineKit.ticketPaper.full, 0f, 0.36f, 0.93f, cull = false)
     }
 
     /**
      * A coin door [w] wide, its bottom at [y0], on a face at depth [z] facing +z: a steel door
-     * with a chrome frame and two coin slots that glow red, the way real ones are lit.
+     * with a chrome frame and two coin mechs whose slots glow red, the way real ones are lit, and (with
+     * [cup]) a coin return cup under it.
      */
-    fun coinDoor(x: Float, y0: Float, z: Float, w: Float = 8f) {
+    fun coinDoor(x: Float, y0: Float, z: Float, w: Float = 8f, cup: Boolean = true) {
         val hgt = w * 1.25f
         val chrome = HallArt.chrome.full
+        val metal = HallArt.darkMetal.full
         b.box(x - w / 2f - 0.4f, y0 - 0.4f, z, x + w / 2f + 0.4f, y0 + hgt + 0.4f, z + 0.3f, BoxFaces(front = chrome, top = chrome, left = chrome, right = chrome, gloss = 0.9f))
         b.quad(x - w / 2f, y0 + hgt, z + 0.32f, x + w / 2f, y0 + hgt, z + 0.32f, x + w / 2f, y0, z + 0.32f, x - w / 2f, y0, z + 0.32f, art.coinDoor.full, 0f, 0f, 1f, gloss = 0.7f)
-        // The slots' lit inserts, where the painted door has its dark plates.
-        val slot = HallArt.solid(0xFFFF3B30.toInt()).full
+        // The slots' lit windows, laid over the painted door's slot plates.
+        val slot = MachineKit.coinSlotLit.full
+        val top = y0 + hgt * (1f - MachineKit.SLOT_Y0)
+        val bot = y0 + hgt * (1f - MachineKit.SLOT_Y1)
+        val hw = w * MachineKit.SLOT_HALF_W
         for (k in 0 until 2) {
-            val sx = x - w / 2f + w * (36f + k * 56f) / 128f
-            val sw = w * 12f / 128f
-            val top = y0 + hgt * (1f - 26f / 160f)
-            val bot = y0 + hgt * (1f - 64f / 160f)
-            b.quad(sx - sw, top, z + 0.36f, sx + sw, top, z + 0.36f, sx + sw, bot, z + 0.36f, sx - sw, bot, z + 0.36f, slot, 0f, 0f, 1f, emissive = 1.7f)
+            val sx = x - w / 2f + w * (MachineKit.SLOT_X0 + k * MachineKit.SLOT_DX)
+            b.quad(sx - hw, top, z + 0.36f, sx + hw, top, z + 0.36f, sx + hw, bot, z + 0.36f, sx - hw, bot, z + 0.36f, slot, 0f, 0f, 1f, emissive = SLOT_GLOW)
         }
+        // The coin return cup under the door: a dark tray with a chrome lip.
+        if (cup) b.box(x - w * 0.3f, y0 - 1.8f, z, x + w * 0.3f, y0 - 0.4f, z + 0.8f, BoxFaces(front = metal, top = chrome, left = metal, right = metal, gloss = 0.6f))
     }
 
     /** A thin lit strip (T-molding, a neon edge) from ([xa], [ya]) to ([xb], [yb]) on a face at depth [z]. */
