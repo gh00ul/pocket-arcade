@@ -224,11 +224,15 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             services.haptics.hit()
             diveSpot = spot
             world.cancelInput()
-            launch {
+            val fadeIn = launch {
                 delay(200)
                 fade.animateTo(1f, tween(560, easing = FastOutLinearInEasing))
             }
             dive.animateTo(1f, tween(760, easing = FastOutSlowInEasing))
+            // The fade-in has to finish before the reveal starts. With animations switched off the
+            // dive is instant, and a fade-in landing after the reveal left the screen black over
+            // the running game, or interrupted this coroutine and left `busy` set for good.
+            fadeIn.join()
             activeGame = index
             screen = Screen.GAME
             fade.animateTo(0f, tween(350))

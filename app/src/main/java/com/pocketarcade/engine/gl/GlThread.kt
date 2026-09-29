@@ -157,7 +157,7 @@ internal class GlThread : Thread("ArcadeGL") {
             // A frame the cap is holding back waits only as long as the cap needs; otherwise
             // rest until there is news.
             val restMs = if (wantFrame) (gate.waitNs(SystemClock.elapsedRealtimeNanos(), cap, hz) + 999_999L) / 1_000_000L else 250L
-            if (Gfx.take(current, maxOf(1L, restMs))) wantFrame = true
+            if (Gfx.take(current, maxOf(1L, restMs), canSnapshot = surface != EGL14.EGL_NO_SURFACE)) wantFrame = true
             // The context is built out here, not under the lock: compiling the shaders takes a
             // while, and the UI thread must stay free to resize, attach or release the surface.
             if (context == EGL14.EGL_NO_CONTEXT && hasSurfaceWaiting()) ensureContext()

@@ -89,10 +89,14 @@ object Gfx {
      * GL thread: waits up to [timeoutMs] for news, then merges new passes into [current]
      * (recycling the ones they replace). Returns whether anything changed.
      */
-    internal fun take(current: LinkedHashMap<String, RenderPass>, timeoutMs: Long): Boolean {
+    internal fun take(current: LinkedHashMap<String, RenderPass>, timeoutMs: Long, canSnapshot: Boolean = true): Boolean {
         synchronized(lock) {
-            if (pending.isEmpty() && removed.isEmpty() && snapshots.isEmpty()) lock.wait(timeoutMs)
-            if (pending.isEmpty() && removed.isEmpty()) return snapshots.isNotEmpty()
+            // A queued snapshot only counts as news when there is a surface to draw it with; without
+            // one (the app went to the background while a screen was loading) it would make this
+            // return at once, every time, and spin the GL thread.
+            val snapshotNews = canSnapshot && snapshots.isNotEmpty()
+            if (pending.isEmpty() && removed.isEmpty() && !snapshotNews) lock.wait(timeoutMs)
+            if (pending.isEmpty() && removed.isEmpty()) return canSnapshot && snapshots.isNotEmpty()
             for (s in removed) {
                 val old = current.remove(s)
                 if (old != null) {

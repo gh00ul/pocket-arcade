@@ -26,7 +26,9 @@ class MainActivity : ComponentActivity() {
         hideSystemBars()
         val audio = AudioSynth().also { it.start() }
         services = ArcadeServices(ArcadeRepository(applicationContext), audio, Haptics.from(applicationContext), appScope)
-        signals.launchGame = intent?.getStringExtra(EXTRA_PLAY)
+        // Only a fresh start: a recreated activity gets the same intent again, and would walk
+        // into (and pay for) the machine a second time.
+        if (savedInstanceState == null) signals.launchGame = intent?.getStringExtra(EXTRA_PLAY)
         setContent { ArcadeApp(services, signals) }
     }
 
