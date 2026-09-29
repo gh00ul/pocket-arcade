@@ -67,9 +67,19 @@ class Music internal constructor(private val sampleRate: Int, private val seed: 
         const val INTENSITY_UP_TAU = 0.5f
         const val INTENSITY_DOWN_TAU = 2.5f
 
-        /** While quiet (under the intro card, a pause menu) the music sits at this level, easing over [QUIET_TAU]. */
+        /**
+         * While quiet (under the intro card, a pause menu) the music sits at this level, easing over
+         * [QUIET_TAU], and is filtered down to [QUIET_CUTOFF_HZ] (as if behind glass) rather than only turned down.
+         */
         const val QUIET_LEVEL = 0.4f
         const val QUIET_TAU = 0.35f
+        const val QUIET_CUTOFF_HZ = 1400f
+
+        /** The filter's cutoff when the music is fully forward: above hearing, and the filter is bypassed. */
+        private const val OPEN_CUTOFF_HZ = 16000f
+
+        /** A filter coefficient at or above this is treated as open (no filtering). */
+        private const val OPEN_COEF = 0.999f
 
         /** A duck drops fast and recovers slowly (time constants, seconds). */
         const val DUCK_ATTACK = 0.03f
@@ -89,7 +99,7 @@ class Music internal constructor(private val sampleRate: Int, private val seed: 
         /** Below this a volume counts as off. */
         private const val OFF = 0.0005f
 
-        /** Pending-request block size (frames) limit for the buses. */
+        /** The most frames one [render] may be given (the size of the buses). */
         const val MAX_BLOCK = 2048
     }
 
@@ -128,6 +138,8 @@ class Music internal constructor(private val sampleRate: Int, private val seed: 
     private var duckHold = 0f
     private var duckDepth = 0f
     private var masterGain = 0f
+    private var glassL = 0f
+    private var glassR = 0f
 
     // ------------------------------------------------------------ control
 
@@ -207,6 +219,7 @@ class Music internal constructor(private val sampleRate: Int, private val seed: 
         for (p in stingerPlayers) if (p.active) p.render(busL, busR, sendBus, n, 1f, 1f, 1f)
 
         reverb.process(sendBus, n, busL, busR)
+        behindGlass(n)
 
         val to = LEVEL * volume
         val step = (to - masterGain) / n
@@ -217,6 +230,32 @@ class Music internal constructor(private val sampleRate: Int, private val seed: 
             outR[i] += Dsp.softLimit(busR[i] * g)
         }
         masterGain = to
+    }
+
+    /**
+     * A one-pole low-pass on the music bus that closes as the music sits back ([quietGain] falls), so
+     * a quiet moment is muffled as well as lower. Bypassed (and its state kept in step) when the music
+     * is fully forward.
+     */
+    private fun behindGlass(n: Int) {
+        val open = ((quietGain - QUIET_LEVEL) / (1f - QUIET_LEVEL)).coerceIn(0f, 1f)
+        val hz = QUIET_CUTOFF_HZ + (OPEN_CUTOFF_HZ - QUIET_CUTOFF_HZ) * open * open
+        val c = (2f * PI.toFloat() * hz / sr).coerceAtMost(1f)
+        if (c >= OPEN_COEF) {
+            glassL = busL[n - 1]
+            glassR = busR[n - 1]
+            return
+        }
+        var l = glassL
+        var r = glassR
+        for (i in 0 until n) {
+            l += c * (busL[i] - l)
+            r += c * (busR[i] - r)
+            busL[i] = l
+            busR[i] = r
+        }
+        glassL = l
+        glassR = r
     }
 
     private fun fadeCurve(level: Float): Float = sin(level * (PI.toFloat() / 2f))
@@ -316,6 +355,8 @@ class Music internal constructor(private val sampleRate: Int, private val seed: 
         java.util.Arrays.fill(fadeDir, 0)
         reverb.reset()
         masterGain = 0f
+        glassL = 0f
+        glassR = 0f
         duckGain = 1f
         duckHold = 0f
         wasOn = false

@@ -31,7 +31,7 @@ internal object Patches {
 
     /** A dark, low drone for tense themes. */
     val PAD_DARK = Patch(
-        wave = Wave.SAW, wave2 = Wave.SQUARE, ratio2 = 0.5f, mix2 = 0.5f, spread = 0.3f,
+        wave = Wave.SAW, wave2 = Wave.SQUARE, ratio2 = 0.5f, mix2 = 0.3f, spread = 0.3f,
         attack = 0.8f, decay = 1.5f, sustain = 0.8f, release = 1.6f, cutoffHz = 700f,
         gain = 0.09f, send = 0.3f,
     )
@@ -47,7 +47,7 @@ internal object Patches {
 
     /** A round bass: a triangle and a saw for the harmonics small speakers need, with a soft pluck at the start. */
     val BASS_SUB = Patch(
-        wave = Wave.TRIANGLE, wave2 = Wave.SAW, ratio2 = 1f, mix2 = 0.3f, sub = 0.35f,
+        wave = Wave.TRIANGLE, wave2 = Wave.SAW, ratio2 = 1f, mix2 = 0.3f, sub = 0.25f,
         attack = 0.006f, decay = 0.9f, sustain = 0.6f, release = 0.25f,
         cutoffHz = 600f, cutEnvHz = 700f, cutDecay = 0.1f, gain = 0.26f, send = 0.06f,
     )

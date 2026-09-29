@@ -218,7 +218,7 @@ internal object Tracks {
             chords("Em Em F Em Em Em Bb Em")
             layers(0.3f, 0.65f)
             level(1.1f)
-            pad(PAD_DARK, low = 40)
+            pad(PAD_DARK, low = 47)
             bass(BASS_SQUARE, "r.r.r.r.r.r.r.r.", maxLen = 1)
             drums(TICK, 81, "x.x.x.x.x.x.x.x.", vel = 0.35f)
             drums(KICK_SOFT, KICK_NOTE, "x.....x.........", layer = 1, vel = 0.8f)
@@ -346,7 +346,7 @@ internal object Tracks {
             chords("Dm Dm Bb A Dm Dm Bb A")
             layers(0.3f, 0.65f)
             level(0.9f)
-            pad(PAD_DARK, low = 38)
+            pad(PAD_DARK, low = 46)
             bass(BASS_SQUARE, "rr.rr.r.rr.rr.r.", maxLen = 1)
             drums(KICK, KICK_NOTE, "x.....x.x.......")
             drums(SNARE, SNARE_NOTE, "....x.......x...", fill = "....x...x.x.xxxx", fillEvery = 4)
@@ -410,6 +410,7 @@ internal object Tracks {
         StingerDef(
             track("count", 120f, 1) {
                 once()
+                level(2f)
                 notes(TOM, 0, Triple(0, "A2", 3), vel = 0.8f)
                 notes(TICK, 0, Triple(0, "A6", 1), vel = 0.9f)
             },
@@ -421,6 +422,7 @@ internal object Tracks {
         StingerDef(
             track("go", 125f, 2) {
                 once()
+                level(1.7f)
                 notes(BOOM, 0, Triple(0, "A1", 6))
                 notes(POWER, 0, Triple(0, "A3", 8), Triple(0, "E4", 8), Triple(0, "A4", 8), vel = 0.9f)
                 notes(CRASH, 0, Triple(0, "C4", 16), vel = 0.8f)
@@ -438,6 +440,7 @@ internal object Tracks {
         StingerDef(
             track("timeup", 100f, 2) {
                 once()
+                level(1.7f)
                 notes(SINK, 0, Triple(0, "A3", 3), Triple(3, "E3", 3), Triple(6, "C3", 3), Triple(9, "A2", 8), vel = 0.9f)
                 notes(BOOM, 0, Triple(9, "A1", 6), vel = 0.7f)
             },
@@ -449,6 +452,7 @@ internal object Tracks {
         StingerDef(
             track("results-stinger", 96f, 2) {
                 once()
+                level(1.1f)
                 chords("Fmaj7 Cmaj9")
                 pad(PAD_SOFT, low = 52)
                 arp(MUSICBOX, "0.1.2.3.4.3.2.1.", octave = 5)
@@ -462,6 +466,7 @@ internal object Tracks {
         StingerDef(
             track("highscore", 125f, 4) {
                 once()
+                level(1.4f)
                 chords("C F G C")
                 pad(PAD_WARM, low = 55)
                 stab(STAB, "x.....x.x.......|x.....x.x.......|x...x...x...x...|X...............", low = 60, len = 3)

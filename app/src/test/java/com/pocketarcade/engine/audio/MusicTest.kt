@@ -400,6 +400,33 @@ class MusicTest {
     }
 
     @Test
+    fun quietMufflesTheMusicAsWellAsTurningItDown() {
+        // Two engines playing the very same music, one sat back from the start: the same moment of the same
+        // theme, so any difference is the quiet state's.
+        fun play(quiet: Boolean, quietAtSecond: Float = 0f): FloatArray {
+            val music = Music(rate)
+            music.setScene(MusicScene.Hall)
+            music.setIntensity(1f)
+            return renderMusic(music, 12f) { at -> if (at >= (quietAtSecond * rate).toInt() / block * block) music.setQuiet(quiet) }.first
+        }
+        /** How bright the sound is: the size of its sample-to-sample changes against its own size. */
+        fun brightness(a: FloatArray, from: Int, to: Int): Float {
+            var d = 0.0
+            for (i in from + 1 until to) d += (a[i] - a[i - 1]) * (a[i] - a[i - 1])
+            return sqrt(d / (to - from)).toFloat() / rms(a, from, to)
+        }
+        val forward = play(false)
+        val back = play(true)
+        val from = rate * 6
+        val to = rate * 12
+        assertTrue("quiet should be quieter: ${rms(back, from, to)} vs ${rms(forward, from, to)}", rms(back, from, to) < rms(forward, from, to) * 0.6f)
+        assertTrue(
+            "quiet should be duller: ${brightness(back, from, to)} vs ${brightness(forward, from, to)}",
+            brightness(back, from, to) < brightness(forward, from, to) * 0.92f,
+        )
+    }
+
+    @Test
     fun aStingerPlaysOverTheSceneAndDucksIt() {
         val quietMusic = Music(rate)
         quietMusic.setScene(MusicScene.Hall)
