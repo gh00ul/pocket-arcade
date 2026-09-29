@@ -132,6 +132,7 @@ class WhackAMoleGame : BaseMiniGame() {
         const val CLOUDS = 3
         const val CLOUD_SPEED = 3.2f
         const val CLOUD_ALPHA = 0.9f
+        const val CLOUD_TINT = 0xFFDCE6F4.toInt()
         /** Strength of the coloured light a mole throws while it is up (gold and bomb). */
         const val POP_GLOW = 0.32f
         /** Strength of the light thrown when a bonk lands. */
@@ -539,6 +540,8 @@ class WhackAMoleGame : BaseMiniGame() {
             r.quad(
                 x - 38f, y + 11f, z, x + 38f, y + 11f, z, x + 38f, y - 11f, z, x - 38f, y - 11f, z,
                 cloud, 0f, 0f, 1f, blend = Blend.ALPHA, alpha = CLOUD_ALPHA * edge, cull = false,
+                // A cool off-white: pure white under the lamps would cross the bloom threshold and glow.
+                tint = CLOUD_TINT,
             )
         }
         // The sun (painted into the backboard at 178/210 across, 30/140 down): rays that turn slowly, and a warm bloom.
