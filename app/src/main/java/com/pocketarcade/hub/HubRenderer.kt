@@ -67,6 +67,8 @@ class HubRenderer {
         val a = 0.55f + 0.45f * sin(world.time * 4f)
         if (world.camera.dive > 0.01f) {
             // Diving into (or out of) a machine: no hints over the screen.
+        } else if (world.hintsSuppressed) {
+            // The tutorial's coach marks are talking.
         } else if (fp > 0.5f) {
             if (!world.hasWalked || !world.hasLooked) {
                 // Above where the left thumb and its stick go.

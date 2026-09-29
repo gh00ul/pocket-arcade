@@ -28,10 +28,15 @@ import kotlin.math.sin
 /**
  * The options: how first person feels, comfort, haptics and volume. Every change goes straight
  * to [onChange] (which applies and saves it); the caller sanitises, so the steppers only ever
- * ask for the next step.
+ * ask for the next step. With [onReplayTutorial] a HELP row offers to run the tutorial again.
  */
 @Composable
-fun SettingsScreen(settings: GameSettings, onChange: (GameSettings) -> Unit, onClose: () -> Unit) {
+fun SettingsScreen(
+    settings: GameSettings,
+    onChange: (GameSettings) -> Unit,
+    onReplayTutorial: (() -> Unit)? = null,
+    onClose: () -> Unit,
+) {
     val s = settings
     ArcadePanel("SETTINGS", Color(Pal.CYAN), onClose, fillHeight = true) {
         Column(
@@ -98,6 +103,12 @@ fun SettingsScreen(settings: GameSettings, onChange: (GameSettings) -> Unit, onC
                 ) {
                     val caps = GameSettings.CAPS
                     onChange(s.copy(frameCap = caps[(caps.indexOf(s.frameCap).coerceAtLeast(0) + 1) % caps.size]))
+                }
+            }
+            if (onReplayTutorial != null) {
+                Spacer(Modifier.height(12.dp))
+                Section("HELP", "") {
+                    ChoiceRow("TUTORIAL", "THE GUIDED TOUR OF THE HALL,\nFROM THE START", "REPLAY", Color(Pal.PURPLE)) { onReplayTutorial() }
                 }
             }
             Spacer(Modifier.height(16.dp))

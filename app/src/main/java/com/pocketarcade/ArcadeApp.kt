@@ -65,7 +65,11 @@ import com.pocketarcade.ui.ProfileScreen
 import com.pocketarcade.ui.SettingsScreen
 import com.pocketarcade.ui.TitleHandoff
 import com.pocketarcade.ui.TitleScreen
+import com.pocketarcade.ui.TUTORIAL_DONE
 import com.pocketarcade.ui.TokenMachineScreen
+import com.pocketarcade.ui.Tutorial
+import com.pocketarcade.ui.TutorialOverlay
+import com.pocketarcade.ui.TutorialPolicy
 import com.pocketarcade.ui.playerLook
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -150,6 +154,12 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     var settings by remember { mutableStateOf(GameSettings()) }
     val hudExtra = with(LocalDensity.current) { HudExtrasReach.toPx() }
     world.hudExtra = hudExtra
+    // The first-run tutorial (ui/Onboarding.kt): begins once, after a new player's first arrival in
+    // the hall, or whenever Settings replays it. While it runs its coach marks replace the hints.
+    var tutorial by remember { mutableStateOf<Tutorial?>(null) }
+    var tutorialArmed by remember { mutableStateOf(false) }
+    var tutorialChecked by remember { mutableStateOf(false) }
+    world.hintsSuppressed = tutorial != null
 
     /** Puts [s] to work: the hall's controls and view, the volumes, the haptics and the shake. */
     fun applySettings(s: GameSettings) {
@@ -202,6 +212,12 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     LaunchedEffect(signals.paused) {
         if (signals.paused) world.cancelInput()
     }
+    LaunchedEffect(tutorialArmed, save.loaded) {
+        if (tutorialArmed && save.loaded && !tutorialChecked) {
+            tutorialChecked = true
+            if (TutorialPolicy.shouldAutoStart(save.isUnlocked(TUTORIAL_DONE), save.totalPlays)) tutorial = Tutorial()
+        }
+    }
     LaunchedEffect(screen) {
         audio.ambientTarget = when (screen) {
             Screen.HUB -> 1f
@@ -248,6 +264,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             audio.play(Sfx.TOKEN)
             audio.play(Sfx.WHOOSH, 0.8f)
             services.haptics.hit()
+            tutorial?.onPlayed()
             diveSpot = spot
             world.cancelInput()
             val fadeIn = launch {
@@ -299,6 +316,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     /** Opens [which] over the hall (the prize counter, the token machine, the photo booth...). */
     fun openOverlay(which: Overlay) {
         world.cancelInput()
+        if (which == Overlay.PRIZES) tutorial?.onPrizesOpened()
         overlay = which
         audio.play(Sfx.SELECT)
     }
@@ -355,6 +373,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                             onCamera = { world.camera.entrance = it },
                         )
                         busy = false
+                        tutorialArmed = true
                         handoff.fadeInHud()
                     }
                 }
@@ -403,6 +422,18 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                         },
                     )
                 }
+                tutorial?.let { t ->
+                    TutorialOverlay(
+                        tutorial = t,
+                        world = world,
+                        paused = busy || overlay != Overlay.NONE || dive.value > 0.01f,
+                        reduceMotion = settings.reduceMotion,
+                        onFinished = {
+                            tutorial = null
+                            services.persist { services.repo.unlock(TUTORIAL_DONE) }
+                        },
+                    )
+                }
                 when (overlay) {
                     Overlay.PRIZES -> PrizeCounterScreen(save, services) { overlay = Overlay.NONE }
 
@@ -417,7 +448,14 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                         },
                         onClose = { overlay = Overlay.NONE },
                     )
-                    Overlay.SETTINGS -> SettingsScreen(settings, ::changeSettings) { overlay = Overlay.NONE }
+                    Overlay.SETTINGS -> SettingsScreen(
+                        settings,
+                        ::changeSettings,
+                        onReplayTutorial = {
+                            overlay = Overlay.NONE
+                            tutorial = Tutorial()
+                        },
+                    ) { overlay = Overlay.NONE }
 
                     Overlay.PHOTO -> PhotoBoothScreen(save, services) { overlay = Overlay.NONE }
 
