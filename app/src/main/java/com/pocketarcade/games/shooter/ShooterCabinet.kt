@@ -153,6 +153,7 @@ object ShooterCabinet : CabinetDesign {
 
         // The gun deck: kick panel with the coin door, a sloped control top, the instruction strip.
         b.box(ix0, 0f, screenZ, ix1, DECK_Y - 4f, z1 - 4f, BoxFaces(front = art.kick.full, top = dark, gloss = 0.3f))
+        c.coinDoor(cx, 8f, z1 - 4f, 8f)
         val deckFront = z1 - 3f
         b.quad(ix0, DECK_Y + 2f, screenZ, ix1, DECK_Y + 2f, screenZ, ix1, DECK_Y - 1f, deckFront, ix0, DECK_Y - 1f, deckFront, HallArt.darkMetal.full, 0f, 0.97f, 0.24f, gloss = 0.5f)
         b.box(ix0, DECK_Y - 4f, deckFront - 1f, ix1, DECK_Y - 1f, deckFront, BoxFaces(front = art.panel.full, top = trim, frontEmissive = 0.7f))

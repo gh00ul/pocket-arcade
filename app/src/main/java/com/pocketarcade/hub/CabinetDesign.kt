@@ -7,6 +7,7 @@ import com.pocketarcade.engine.r3d.PointLight
 import com.pocketarcade.engine.r3d.Renderer3D
 import com.pocketarcade.engine.r3d.Xform
 import com.pocketarcade.games.MiniGame
+import kotlin.math.sqrt
 
 /**
  * A machine's own hall cabinet, supplied through [MiniGame.cabinet]: how big it is, where the
@@ -111,10 +112,55 @@ class CabinetBuild internal constructor(
         b.box(x1 - thick, 0f, z0, x1, top, depthFront, BoxFaces(right = side, left = inner, top = dark, back = dark, front = trim, frontEmissive = 0.9f, gloss = 0.35f))
     }
 
-    /** The lit marquee sign with a row of chase bulbs along its top front edge. */
+    /**
+     * The lit marquee sign: its face leans back a little so it catches the eye from the hall's
+     * high camera, a backlit topper with the game's emblem and short name covers its top (the
+     * part of a cabinet the hall view sees most of), a lit trim edge runs along the top of the
+     * face and a row of chase bulbs sits on it.
+     */
     fun marqueeBox(xa: Float, xb: Float, y0: Float, y1: Float, za: Float, zb: Float) {
-        b.box(xa, y0, za, xb, y1, zb, BoxFaces(front = art.marquee.full, top = art.darkPaint.full, left = art.darkPaint.full, right = art.darkPaint.full, back = art.darkPaint.full, frontEmissive = 1.25f))
-        bulbRow(xa + 1f, xb - 1f, y1 + 0.6f, zb - 0.6f, ((xb - xa) / 3.2f).toInt())
+        val dark = art.darkPaint.full
+        val hgt = y1 - y0
+        val lean = minOf(hgt * 0.4f, (zb - za) * 0.45f)
+        val zt = zb - lean
+        val len = sqrt(hgt * hgt + lean * lean)
+        b.quad(xa, y1, zt, xb, y1, zt, xb, y0, zb, xa, y0, zb, art.marquee.full, 0f, lean / len, hgt / len, emissive = 1.25f)
+        b.quad(xa, y1, za, xb, y1, za, xb, y1, zt, xa, y1, zt, art.topper.full, 0f, 1f, 0f, emissive = 0.9f, gloss = 0.5f)
+        b.quad(xa, y1, za, xa, y1, zt, xa, y0, zb, xa, y0, za, dark, -1f, 0f, 0f, gloss = 0.35f)
+        b.quad(xb, y1, zt, xb, y1, za, xb, y0, za, xb, y0, zb, dark, 1f, 0f, 0f, gloss = 0.35f)
+        b.quad(xb, y1, za, xa, y1, za, xa, y0, za, xb, y0, za, dark, 0f, 0f, -1f)
+        b.quad(xa, y0, zb, xb, y0, zb, xb, y0, za, xa, y0, za, dark, 0f, -1f, 0f)
+        // A lit trim edge along the top of the face and down its sides.
+        val trim = art.trimTex.full
+        b.box(xa - 0.25f, y1 - 0.3f, zt - 0.5f, xb + 0.25f, y1 + 0.35f, zt + 0.35f, BoxFaces(front = trim, top = trim, left = trim, right = trim, frontEmissive = 1.1f, topEmissive = 1.1f))
+        b.quad(xa - 0.26f, y1, zt - 0.4f, xa - 0.26f, y1, zt + 0.2f, xa - 0.26f, y0, zb + 0.2f, xa - 0.26f, y0, zb - 0.4f, trim, -1f, 0f, 0f, emissive = 1f)
+        b.quad(xb + 0.26f, y1, zt + 0.2f, xb + 0.26f, y1, zt - 0.4f, xb + 0.26f, y0, zb - 0.4f, xb + 0.26f, y0, zb + 0.2f, trim, 1f, 0f, 0f, emissive = 1f)
+        bulbRow(xa + 1f, xb - 1f, y1 + 0.9f, zt - 0.1f, ((xb - xa) / 3.2f).toInt())
+    }
+
+    /**
+     * A coin door [w] wide, its bottom at [y0], on a face at depth [z] facing +z: a steel door
+     * with a chrome frame and two coin slots that glow red, the way real ones are lit.
+     */
+    fun coinDoor(x: Float, y0: Float, z: Float, w: Float = 8f) {
+        val hgt = w * 1.25f
+        val chrome = HallArt.chrome.full
+        b.box(x - w / 2f - 0.4f, y0 - 0.4f, z, x + w / 2f + 0.4f, y0 + hgt + 0.4f, z + 0.3f, BoxFaces(front = chrome, top = chrome, left = chrome, right = chrome, gloss = 0.9f))
+        b.quad(x - w / 2f, y0 + hgt, z + 0.32f, x + w / 2f, y0 + hgt, z + 0.32f, x + w / 2f, y0, z + 0.32f, x - w / 2f, y0, z + 0.32f, art.coinDoor.full, 0f, 0f, 1f, gloss = 0.7f)
+        // The slots' lit inserts, where the painted door has its dark plates.
+        val slot = HallArt.solid(0xFFFF3B30.toInt()).full
+        for (k in 0 until 2) {
+            val sx = x - w / 2f + w * (36f + k * 56f) / 128f
+            val sw = w * 12f / 128f
+            val top = y0 + hgt * (1f - 26f / 160f)
+            val bot = y0 + hgt * (1f - 64f / 160f)
+            b.quad(sx - sw, top, z + 0.36f, sx + sw, top, z + 0.36f, sx + sw, bot, z + 0.36f, sx - sw, bot, z + 0.36f, slot, 0f, 0f, 1f, emissive = 1.7f)
+        }
+    }
+
+    /** A thin lit strip (T-molding, a neon edge) from ([xa], [ya]) to ([xb], [yb]) on a face at depth [z]. */
+    fun neonStrip(xa: Float, ya: Float, xb: Float, yb: Float, z: Float, color: Int = art.glow, emissive: Float = 1.5f) {
+        b.quad(xa, yb, z, xb, yb, z, xb, ya, z, xa, ya, z, HallArt.solid(color).full, 0f, 0f, 1f, emissive = emissive)
     }
 
     /** The red LED score display, facing +z at depth [z]. */
