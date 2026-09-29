@@ -1288,36 +1288,37 @@ class PinballGame : BaseMiniGame() {
         return sb.toString()
     }
 
+    /** Which bulb of the frame is being drawn (reset each frame), so the chase pattern runs round them in order. */
+    private var bulbIndex = 0
+
     /** Bulbs round the backglass frame: a row along the top and a column down each side, chasing. */
     private fun drawBulbs(r: Renderer3D, z: Float, mood: Int) {
-        val dot = TexKit.dot.full
-        val glow = TexKit.glow.full
+        bulbIndex = 0
         val fast = multiball || jackpotFlash > 0f
         val step = (time * (if (fast) BULB_FAST else BULB_SLOW)).toInt()
         val bz = z + 2.4f
         val top = PinballArt.GLASS_Y1 + 4f
-        var idx = 0
-        fun bulb(x: Float, y: Float) {
-            val on = (idx + step) % 3 == 0
-            val col = if (jackpotFlash > 0f) Pal.GOLD else when (idx % 3) {
-                0 -> Pal.HOTPINK
-                1 -> Pal.CYAN
-                else -> Pal.YELLOW
-            }
-            val a = if (on) 1f else BULB_DIM
-            r.sprite(x, y, bz, 7f, 7f, dot, blend = Blend.ADD, emissive = 1f, alpha = a, depthBias = 1.03f, tint = col)
-            if (on) r.sprite(x, y, bz, 19f, 19f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.55f, depthBias = 1.03f, tint = col)
-            idx++
-        }
         val n = 14
-        for (i in 0 until n) bulb(PinballArt.GLASS_X0 - 8f + (PinballArt.GLASS_X1 - PinballArt.GLASS_X0 + 16f) * i / (n - 1f), top)
+        for (i in 0 until n) bulb(r, PinballArt.GLASS_X0 - 8f + (PinballArt.GLASS_X1 - PinballArt.GLASS_X0 + 16f) * i / (n - 1f), top, bz, step)
         for (i in 0 until 6) {
             val y = PinballArt.GLASS_Y1 - 14f - i * 27f
-            bulb(PinballArt.GLASS_X0 - 8f, y)
-            bulb(PinballArt.GLASS_X1 + 8f, y)
+            bulb(r, PinballArt.GLASS_X0 - 8f, y, bz, step)
+            bulb(r, PinballArt.GLASS_X1 + 8f, y, bz, step)
         }
         // A pool of the mood colour on the top of the table, as though the glass were lighting it.
-        r.flat(T.CX + 14f, 56f, 0.4f, 320f, 130f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.06f + 0.10f * moodPulse * fxK, tint = mood)
+        r.flat(T.CX + 14f, 56f, 0.4f, 320f, 130f, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = 0.06f + 0.10f * moodPulse * fxK, tint = mood)
+    }
+
+    private fun bulb(r: Renderer3D, x: Float, y: Float, z: Float, step: Int) {
+        val on = (bulbIndex + step) % 3 == 0
+        val col = if (jackpotFlash > 0f) Pal.GOLD else when (bulbIndex % 3) {
+            0 -> Pal.HOTPINK
+            1 -> Pal.CYAN
+            else -> Pal.YELLOW
+        }
+        r.sprite(x, y, z, 7f, 7f, TexKit.dot.full, blend = Blend.ADD, emissive = 1f, alpha = if (on) 1f else BULB_DIM, depthBias = 1.03f, tint = col)
+        if (on) r.sprite(x, y, z, 19f, 19f, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = 0.55f, depthBias = 1.03f, tint = col)
+        bulbIndex++
     }
 
     /** A faint colour over the whole upper playfield in multiball and after a jackpot, like the room lights swinging. */

@@ -376,11 +376,15 @@ internal object ShooterArt {
         Texture(n, n, px)
     }
 
-    /** A brass shell casing lying along z, 2.5 world units long with its rounded ends. */
+    /**
+     * A brass shell casing: a six-sided prism 2.5 world units long, standing along y (it tumbles
+     * when drawn, so its rest orientation doesn't matter). Eight polygons: several are alive at
+     * once during rapid fire, so it is kept cheap.
+     */
     val shell: Model by lazy {
         val brass = paint(0xFFC99A3A.toInt())
         ModelBuilder()
-            .capsule(0f, 0f, -0.5f, 0f, 0f, 0.5f, 0.75f, brass, slices = 6, gloss = 0.8f)
+            .cylinder(0f, 0f, -1.25f, 1.25f, 0.75f, 6, brass, top = paint(0xFFE8C060.toInt()), bottom = brass, gloss = 0.8f)
             .build()
     }
 

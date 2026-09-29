@@ -1329,7 +1329,7 @@ class ShooterGame : BaseMiniGame() {
 
     override fun render(scope: DrawScope) {
         // The recoil kicks the view up and back a touch (drawing only; aiming never moves).
-        val kick = recoil * recoil
+        val kick = recoil * recoil * ScreenShake.intensity
         stage.look(
             ShooterWorld.EYE_X, ShooterWorld.EYE_Y + kick * 2f, ShooterWorld.EYE_Z + kick * 6f,
             ShooterWorld.EYE_X, ShooterWorld.EYE_Y + kick * 16f, 0f, ShooterWorld.FOV,
@@ -1695,6 +1695,8 @@ class ShooterGame : BaseMiniGame() {
 
     private fun crosshair(scope: DrawScope, x: Float, y: Float, alpha: Float) {
         val c = Color(Pal.YELLOW)
+        // A soft halo under the reticle so it reads over bright and busy backgrounds alike.
+        scope.drawCircle(c, 22f, Offset(x, y), alpha = alpha * 0.14f)
         scope.drawCircle(c, 14f, Offset(x, y), alpha = alpha * 0.9f, style = thin)
         scope.drawLine(c, Offset(x - 22f, y), Offset(x - 8f, y), 2f, alpha = alpha)
         scope.drawLine(c, Offset(x + 8f, y), Offset(x + 22f, y), 2f, alpha = alpha)
