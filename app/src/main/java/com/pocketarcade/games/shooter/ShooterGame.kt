@@ -10,6 +10,7 @@ import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
+import com.pocketarcade.engine.ScreenShake
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.chance
@@ -20,6 +21,7 @@ import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.r3d.Blend
 import com.pocketarcade.engine.r3d.Camera3D
 import com.pocketarcade.engine.r3d.PointLight
+import com.pocketarcade.engine.r3d.Region
 import com.pocketarcade.engine.r3d.Renderer3D
 import com.pocketarcade.engine.r3d.Stage3D
 import com.pocketarcade.engine.r3d.TexKit
@@ -32,6 +34,7 @@ import com.pocketarcade.games.GAME_H
 import com.pocketarcade.games.GAME_W
 import com.pocketarcade.hub.CabinetDesign
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.asin
 import kotlin.math.atan2
 import kotlin.math.ceil
@@ -244,6 +247,23 @@ class ShooterGame : BaseMiniGame() {
         /** However the round ends, it's over this long after the clock stops. */
         const val SETTLE_FAILSAFE = 4f
         const val DECAL_LIFE = 8f
+
+        // Look (presentation only): brass casings thrown from the gun, and flashes where bullets strike.
+        const val CASINGS = 6
+        const val CASING_LIFE = 0.9f
+        const val CASING_GRAVITY = 150f
+        const val STRIKES = 3
+        const val STRIKE_LIFE = 0.16f
+        /** How long the gun's smoke hangs, and the lamp shaft's drifting dust motes. */
+        const val SMOKE_LIFE = 0.9f
+        const val MOTES = 9
+        /** Ground mist: how fast it drifts (texels a second), how tall its banks are and how thick they are at most. */
+        const val MIST_SPEED = 9f
+        const val MIST_HEIGHT = 74f
+        const val MIST_ALPHA = 0.20f
+        /** Clouds: drift speed in texels a second and how strongly they show. */
+        const val CLOUD_SPEED = 1.6f
+        const val CLOUD_ALPHA = 0.42f
         /** Extra reach around a target so near misses by a fingertip still count (field units). */
         const val SLOP = 5f
 
@@ -342,6 +362,24 @@ class ShooterGame : BaseMiniGame() {
     private val ptrUsed = BooleanArray(POINTERS)
     private val ptrX = FloatArray(POINTERS)
     private val ptrY = FloatArray(POINTERS)
+
+    // Presentation only: brass casings in flight and bullet-strike flashes. Written by fire() and
+    // the step, read by render(); they never touch the rules or the game's random numbers (the
+    // variation in a casing's flight comes from hashing the shot count).
+    private val casingX = FloatArray(CASINGS)
+    private val casingY = FloatArray(CASINGS)
+    private val casingZ = FloatArray(CASINGS)
+    private val casingVX = FloatArray(CASINGS)
+    private val casingVY = FloatArray(CASINGS)
+    private val casingVZ = FloatArray(CASINGS)
+    private val casingAge = FloatArray(CASINGS) { CASING_LIFE }
+    private val casingSpin = FloatArray(CASINGS)
+    private var casingNext = 0
+    private val strikeX = FloatArray(STRIKES)
+    private val strikeY = FloatArray(STRIKES)
+    private val strikeZ = FloatArray(STRIKES)
+    private val strikeAge = FloatArray(STRIKES) { STRIKE_LIFE }
+    private var strikeNext = 0
 
     // Bullet holes, a ring buffer of world points.
     private val decalX = FloatArray(DECALS)
@@ -457,6 +495,8 @@ class ShooterGame : BaseMiniGame() {
         ptrUsed.fill(false)
         decalAge.fill(DECAL_LIFE)
         decalNext = 0
+        casingAge.fill(CASING_LIFE)
+        strikeAge.fill(STRIKE_LIFE)
     }
 
     override fun ticketsFor(score: Int): Int = ShooterTuning.BASE_TICKETS + score / ShooterTuning.POINTS_PER_TICKET
@@ -540,6 +580,15 @@ class ShooterGame : BaseMiniGame() {
             }
         }
         for (i in 0 until DECALS) if (decalAge[i] < DECAL_LIFE) decalAge[i] += dt
+        for (i in 0 until CASINGS) {
+            if (casingAge[i] >= CASING_LIFE) continue
+            casingAge[i] += dt
+            casingVY[i] -= CASING_GRAVITY * dt
+            casingX[i] += casingVX[i] * dt
+            casingY[i] += casingVY[i] * dt
+            casingZ[i] += casingVZ[i] * dt
+        }
+        for (i in 0 until STRIKES) if (strikeAge[i] < STRIKE_LIFE) strikeAge[i] += dt
         if (timeUp || endedEarly) settleT += dt
 
         if (!timeUp && !cleared) {
@@ -934,6 +983,7 @@ class ShooterGame : BaseMiniGame() {
         play(Sfx.GUNSHOT, 0.9f, rng.range(0.92f, 1.08f))
         shake.add(0.12f)
         fx.haptics.tick()
+        ejectCasing()
 
         when (resolve(x, y)) {
             SHOT_BOSS -> shootBoss(hitPart, x, y)
@@ -943,6 +993,7 @@ class ShooterGame : BaseMiniGame() {
                 val z = ShooterWorld.COVER[hitCover * 5 + 4]
                 rayAtZ(x, y, z)
                 addDecal(ray[0], ray[1], z + 0.4f)
+                strikeAt(ray[0], ray[1], z + 1.5f)
                 particles.burst(x, y, 7, 40f, 160f, DUST, 0.45f, 3f, grav = 300f)
                 particles.burst(x, y, 4, 80f, 220f, SPARKS, 0.15f, 2f)
                 play(Sfx.RICOCHET, 0.35f, rng.range(0.85f, 1.3f))
@@ -952,6 +1003,28 @@ class ShooterGame : BaseMiniGame() {
                 particles.burst(x, y, 5, 30f, 110f, DUST, 0.4f, 2.5f, grav = 200f)
             }
         }
+    }
+
+    /** Throws a brass casing out of the gun's right side (a little different every shot, from a hash of the shot count). */
+    private fun ejectCasing() {
+        val i = casingNext
+        casingNext = (casingNext + 1) % CASINGS
+        casingX[i] = ShooterWorld.EYE_X + 15.6f
+        casingY[i] = ShooterWorld.EYE_Y - 21.5f
+        casingZ[i] = ShooterWorld.EYE_Z - 80f
+        casingVX[i] = 16f + hash01(shots, 21) * 12f
+        casingVY[i] = 20f + hash01(shots, 22) * 16f
+        casingVZ[i] = 5f + hash01(shots, 23) * 10f
+        casingSpin[i] = 5f + hash01(shots, 24) * 9f
+        casingAge[i] = 0f
+    }
+
+    /** A flash of sparks where a bullet struck cover, at a world point. */
+    private fun strikeAt(x: Float, y: Float, z: Float) {
+        val i = strikeNext
+        strikeNext = (strikeNext + 1) % STRIKES
+        strikeX[i] = x; strikeY[i] = y; strikeZ[i] = z
+        strikeAge[i] = 0f
     }
 
     // What the last resolved shot hit.
@@ -1078,6 +1151,8 @@ class ShooterGame : BaseMiniGame() {
                 particles.burst(x, y, 14, 80f, 300f, SPARKS, 0.35f, 3f, kind = Particles.SPARKLE)
                 particles.burst(x, y, 10, 60f, 220f, DEBRIS, 0.7f, 4f, grav = 500f)
                 tg.tellHit = quick
+                rayAtZ(x, y, tg.z + 10f)
+                strikeAt(ray[0], ray[1], tg.z + 12f)
                 tg.state = HIT
                 tg.t = 0f
             }
@@ -1235,7 +1310,22 @@ class ShooterGame : BaseMiniGame() {
     private val bossLight = PointLight(0f, 0f, 0f, 0.3f, 1f, 0.9f, 260f, 0f)
     private val tellLight = PointLight(0f, 0f, 0f, 1f, 0.15f, 0.1f, 120f, 0f)
 
+    /** The street lamp itself (the fill light above is the general glow of the street). */
+    private val lampLight = PointLight(36f, 228f, -46f, 1f, 0.8f, 0.5f, 250f, 0.9f)
+    /** Sparks where a bullet strikes: a brief warm light on the cover around it. */
+    private val strikeLight = PointLight(0f, 0f, 0f, 1f, 0.85f, 0.55f, 110f, 0f)
+    /** Red light over the whole street when the player is hit. */
+    private val hurtLight = PointLight(ShooterWorld.EYE_X, ShooterWorld.EYE_Y, ShooterWorld.EYE_Z - 260f, 1f, 0.12f, 0.1f, 700f, 0f)
+
     private val thin by lazy { Stroke(2f) }
+    private val thick by lazy { Stroke(3f) }
+
+    /** Wrapping views of the cloud and mist textures, made once (drawing must not allocate). */
+    private val cloudRegion: Region by lazy { ShooterArt.clouds.region(wrap = true) }
+    private val mistRegion: Region by lazy { ShooterArt.mist.region(wrap = true) }
+
+    /** Reduce motion turns flashes down to a third of their strength (persistent glow is unchanged). */
+    private val fxK: Float get() = 0.35f + 0.65f * ScreenShake.intensity
 
     override fun render(scope: DrawScope) {
         // The recoil kicks the view up and back a touch (drawing only; aiming never moves).
@@ -1247,11 +1337,15 @@ class ShooterGame : BaseMiniGame() {
         val r = stage.begin()
         lightScene(r)
         r.gradient(0xFF05040E.toInt(), 0xFF2A1848.toInt())
+        drawSky(r)
         ShooterScene.model.draw(r)
+        drawAtmosphere(r)
         drawDecals(r)
         for (tg in targets) drawTarget(r, tg)
         drawBoss(r)
+        drawStrikes(r)
         drawGun(r)
+        drawCasings(r)
         stage.present()
         drawHud(scope)
     }
@@ -1266,6 +1360,20 @@ class ShooterGame : BaseMiniGame() {
         l.points += signLight
         l.points += streetLight
         for (w in windowLights) l.points += w
+        // The lamp buzzes: now and then it dips (a hash of the clock, so it never needs the game's dice).
+        lampLight.intensity = if (hash01((time * 9f).toInt(), 17) > 0.965f) 0.35f else 0.9f
+        l.points += lampLight
+        if (hurtFlash > 0f) {
+            hurtLight.intensity = 0.9f * hurtFlash * fxK
+            l.points += hurtLight
+        }
+        var strike = -1
+        for (i in 0 until STRIKES) if (strikeAge[i] < STRIKE_LIFE && (strike < 0 || strikeAge[i] < strikeAge[strike])) strike = i
+        if (strike >= 0) {
+            strikeLight.x = strikeX[strike]; strikeLight.y = strikeY[strike]; strikeLight.z = strikeZ[strike] + 25f
+            strikeLight.intensity = 1.5f * (1f - strikeAge[strike] / STRIKE_LIFE)
+            l.points += strikeLight
+        }
         if (muzzleT < 0.08f) {
             muzzleLight.x = ShooterWorld.EYE_X + 10f
             muzzleLight.y = ShooterWorld.EYE_Y - 10f
@@ -1296,6 +1404,88 @@ class ShooterGame : BaseMiniGame() {
             tellLight.x = tell.x; tellLight.y = tell.y + 80f; tellLight.z = tell.z + 40f
             tellLight.intensity = 0.8f + 0.6f * sin(time * 30f)
             l.points += tellLight
+        }
+    }
+
+    /**
+     * Clouds drifting over the moon, in front of the far backdrop. Drawn before the set so they
+     * are laid down (see-through things blend in the order they are recorded) behind the nearer
+     * skyline that is part of it.
+     */
+    private fun drawSky(r: Renderer3D) {
+        val cu = time * CLOUD_SPEED
+        r.quad(
+            -220f, 640f, -395f, 580f, 640f, -395f, 580f, 380f, -395f, -220f, 380f, -395f, cloudRegion, 0f, 0f, 1f,
+            u0 = cu, v0 = 0f, u1 = cu + 192f, v1 = 32f, blend = Blend.ALPHA, emissive = 0.4f, alpha = CLOUD_ALPHA, cull = false, tint = 0xFF8C76C4.toInt(),
+        )
+    }
+
+    /**
+     * The air of the street: banks of mist rolling along the
+     * ground, the lamp's dust, a halo round the neon sign and the lit windows, and the pools
+     * of light they spill onto the street. All additive or alpha, all a function of the clock.
+     */
+    private fun drawAtmosphere(r: Renderer3D) {
+        val glow = TexKit.glow.full
+        val fz = ShooterWorld.FACADE_Z
+        // Ground mist: two banks at different depths drifting opposite ways.
+        val m0 = time * MIST_SPEED
+        r.quad(
+            -400f, MIST_HEIGHT, -70f, 760f, MIST_HEIGHT, -70f, 760f, 0.2f, -70f, -400f, 0.2f, -70f, mistRegion, 0f, 0f, 1f,
+            u0 = m0, v0 = 0f, u1 = m0 + 384f, v1 = 32f, blend = Blend.ALPHA, emissive = 0.55f, alpha = MIST_ALPHA, cull = false, tint = 0xFF8E80C8.toInt(),
+        )
+        r.quad(
+            -400f, MIST_HEIGHT * 0.8f, 120f, 760f, MIST_HEIGHT * 0.8f, 120f, 760f, 0.2f, 120f, -400f, 0.2f, 120f, mistRegion, 0f, 0f, 1f,
+            u0 = -m0 * 0.7f, v0 = 0f, u1 = -m0 * 0.7f + 384f, v1 = 32f, blend = Blend.ALPHA, emissive = 0.5f, alpha = MIST_ALPHA * 0.8f, cull = false, tint = 0xFF7C70B4.toInt(),
+        )
+        // The neon sign: a halo behind it and a pool of pink light on the street, both with the
+        // sign's occasional stutter (a hash of the clock).
+        val flick = if (hash01((time * 11f).toInt(), 7) > 0.94f) 0.5f else 1f
+        r.sprite(180f, 320f, fz + 3f, 260f, 150f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.30f * flick, tint = Pal.PINK)
+        r.sprite(180f, 320f, fz + 3f, 140f, 84f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.26f * flick, tint = 0xFFFF9AD0.toInt())
+        r.flat(180f, 40f, 0.5f, 320f, 230f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.10f * flick, tint = Pal.PINK)
+        // The lit windows glow a little into the night.
+        for (k in 0 until 3) r.sprite(ShooterWorld.WINDOW_X[k], 232f, fz + 4f, 120f, 108f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.16f, tint = 0xFFFFB060.toInt())
+        // The lamp's pool of light on the pavement, and dust drifting in its shaft.
+        r.flat(36f, -40f, 0.5f, 180f, 150f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.16f, tint = 0xFFFFC070.toInt())
+        for (i in 0 until MOTES) {
+            val ph = time * 0.25f + i * 1.7f
+            val y = 30f + hash01(i, 2) * 195f + sin(ph) * 8f
+            val half = (7f + (238f - y) / 238f * 63f) * 0.8f
+            val x = 36f + (hash01(i, 1) - 0.5f) * 2f * half + sin(ph * 1.3f) * 5f
+            val a = 0.25f + 0.25f * sin(time * 1.7f + i * 2.3f)
+            r.sprite(x, y, -48f, 2.6f, 2.6f, TexKit.dot.full, blend = Blend.ADD, emissive = 1f, alpha = a, tint = 0xFFFFE0A0.toInt())
+        }
+    }
+
+    /** Flashes where bullets struck, and the shock ring of a drone or boss explosion. */
+    private fun drawStrikes(r: Renderer3D) {
+        val flash = ShooterArt.flash.full
+        val glow = TexKit.glow.full
+        for (i in 0 until STRIKES) {
+            val age = strikeAge[i]
+            if (age >= STRIKE_LIFE) continue
+            val k = age / STRIKE_LIFE
+            val size = 14f + 26f * k
+            r.sprite(strikeX[i], strikeY[i], strikeZ[i], size, size, flash, roll = i * 1.3f + age * 8f, blend = Blend.ADD, emissive = 1.6f, alpha = 1f - k, tint = Pal.YELLOW)
+            r.sprite(strikeX[i], strikeY[i], strikeZ[i] - 1f, 44f + 30f * k, 44f + 30f * k, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.5f * (1f - k), tint = Pal.ORANGE)
+        }
+        if (boomT < 0.5f) {
+            val k = boomT / 0.5f
+            val size = 30f + 380f * k
+            r.sprite(boomX, boomY, boomZ + 40f, size, size, ShooterArt.shock.full, blend = Blend.ADD, emissive = 1.4f, alpha = (1f - k) * 0.8f * fxK, tint = Pal.ORANGE)
+        }
+    }
+
+    /** Brass casings tumbling out of the gun. */
+    private fun drawCasings(r: Renderer3D) {
+        for (i in 0 until CASINGS) {
+            val age = casingAge[i]
+            if (age >= CASING_LIFE) continue
+            val k = ((CASING_LIFE - age) / 0.2f).coerceIn(0f, 1f)
+            val a = casingSpin[i] * age
+            xf.set(casingX[i], casingY[i], casingZ[i], yaw = a, pitch = a * 0.7f, roll = a * 1.3f, scale = k)
+            ShooterArt.shell.draw(r, xf = xf)
         }
     }
 
@@ -1414,14 +1604,26 @@ class ShooterGame : BaseMiniGame() {
         val pitch = asin(dy.coerceIn(-1f, 1f)) + recoil * 0.5f
         xf.set(gx, gy, gz + recoil * 3f, yaw = yaw, pitch = pitch, roll = -0.15f)
         ShooterArt.pistol.draw(r, xf = xf)
-        if (muzzleT < 0.07f) {
+        if (muzzleT < SMOKE_LIFE) {
             xf2.set(0f, 4.3f, -22f)
             xf3.setProduct(xf, xf2)
             val mx = xf3.x(0f, 0f, 0f)
             val my = xf3.y(0f, 0f, 0f)
             val mz = xf3.z(0f, 0f, 0f)
-            val s = 18f + 60f * muzzleT
-            r.sprite(mx, my, mz, s, s, ShooterArt.flash.full, blend = Blend.ADD, emissive = 1.8f, tint = Pal.YELLOW, roll = muzzleT * 30f)
+            if (muzzleT < 0.07f) {
+                val s = 18f + 60f * muzzleT
+                r.sprite(mx, my, mz, s, s, ShooterArt.flash.full, blend = Blend.ADD, emissive = 1.8f, tint = Pal.YELLOW, roll = muzzleT * 30f)
+                val g = 30f + 46f * muzzleT
+                r.sprite(mx, my, mz - 2f, g, g, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = 0.6f * (1f - muzzleT / 0.07f), tint = Pal.ORANGE)
+            }
+            // A curl of smoke off the muzzle: three soft puffs that drift up and away and thin out.
+            val fade = 1f - muzzleT / SMOKE_LIFE
+            for (i in 0 until 3) {
+                val t = muzzleT - 0.05f - i * 0.05f
+                if (t <= 0f) continue
+                val sz = 2.5f + t * 9f + i * 1.2f
+                r.sprite(mx + (i - 1) * t * 2.2f, my + t * 4f, mz - t * 6f, sz, sz, TexKit.glow.full, blend = Blend.ALPHA, emissive = 0.45f, alpha = 0.20f * fade, tint = 0xFFB4B4CC.toInt())
+            }
         }
     }
 
@@ -1436,6 +1638,15 @@ class ShooterGame : BaseMiniGame() {
             scope.drawRect(Color(Pal.DARKRED), Offset(0f, GAME_H - e), Size(GAME_W, e), alpha = 0.6f * hurtFlash)
             scope.drawRect(Color(Pal.DARKRED), Offset.Zero, Size(e, GAME_H), alpha = 0.6f * hurtFlash)
             scope.drawRect(Color(Pal.DARKRED), Offset(GAME_W - e, 0f), Size(e, GAME_H), alpha = 0.6f * hurtFlash)
+        }
+        // On the last heart the edges of the screen pulse a dull red.
+        if (hearts == 1 && downT <= 0f && !timeUp && !cleared) {
+            val a = (0.12f + 0.08f * sin(time * 6f)) * fxK
+            val e = 22f
+            scope.drawRect(Color(Pal.DARKRED), Offset.Zero, Size(GAME_W, e), alpha = a)
+            scope.drawRect(Color(Pal.DARKRED), Offset(0f, GAME_H - e), Size(GAME_W, e), alpha = a)
+            scope.drawRect(Color(Pal.DARKRED), Offset.Zero, Size(e, GAME_H), alpha = a)
+            scope.drawRect(Color(Pal.DARKRED), Offset(GAME_W - e, 0f), Size(e, GAME_H), alpha = a)
         }
         if (downT > 0f) {
             scope.drawRect(Color.Black, Offset.Zero, Size(GAME_W, GAME_H), alpha = 0.45f)
@@ -1491,32 +1702,52 @@ class ShooterGame : BaseMiniGame() {
         scope.drawLine(c, Offset(x, y + 8f), Offset(x, y + 22f), 2f, alpha = alpha)
     }
 
-    /** The reload strip along the bottom: the rounds left, and the RELOAD target. */
+    /**
+     * The reload strip along the bottom: a dark panel with a lit rail, the rounds left as brass
+     * cartridges (spent ones are empty outlines), and the RELOAD button, which pulses when empty.
+     */
     private fun drawAmmoBar(scope: DrawScope) {
         val y0 = ShooterWorld.RELOAD_Y
         val h = GAME_H - y0
         val empty = ammo == 0 && reloadT <= 0f
         val blink = empty && (time * 5f).toInt() % 2 == 0
-        scope.drawRect(Color(0xFF0A0812), Offset(0f, y0), Size(GAME_W, h), alpha = 0.82f)
-        scope.drawRect(Color(if (blink) Pal.RED else Pal.ORANGE), Offset(0f, y0), Size(GAME_W, 3f))
-        // Rounds: brass cases with red tips; spent ones are empty outlines.
+        val rail = Color(if (blink) Pal.RED else Pal.ORANGE)
+        // A soft shadow cast up onto the street, then the panel, an upper bevel and the lit rail.
+        scope.drawRect(Color.Black, Offset(0f, y0 - 9f), Size(GAME_W, 9f), alpha = 0.20f)
+        scope.drawRect(Color(0xFF0A0812), Offset(0f, y0), Size(GAME_W, h), alpha = 0.88f)
+        scope.drawRect(Color(0xFF181428), Offset(0f, y0 + 3f), Size(GAME_W, 5f), alpha = 0.9f)
+        scope.drawRect(rail, Offset(0f, y0), Size(GAME_W, 3f))
+        scope.drawRect(rail, Offset(0f, y0 + 3f), Size(GAME_W, 7f), alpha = 0.12f)
+        // Rounds: brass cases with copper tips and a highlight; spent ones are dark outlines.
         for (i in 0 until ShooterTuning.CLIP) {
             val x = 16f + i * 19f
             val loaded = if (reloadT > 0f) (1f - reloadT / ShooterTuning.RELOAD_SECONDS) * ShooterTuning.CLIP > i else i < ammo
             if (loaded) {
-                scope.drawRect(Color(Pal.GOLD), Offset(x, y0 + 16f), Size(11f, 22f))
-                scope.drawRect(Color(0xFFC8A040), Offset(x, y0 + 32f), Size(11f, 6f))
-                scope.drawRect(Color(Pal.RED), Offset(x + 1f, y0 + 10f), Size(9f, 7f))
+                scope.drawRoundRect(Color(Pal.GOLD), Offset(x, y0 + 17f), Size(11f, 21f), CornerRadius(1.5f, 1.5f))
+                scope.drawRect(Color(0xFFC8A040), Offset(x - 0.5f, y0 + 33f), Size(12f, 5f))
+                scope.drawRect(Color.White, Offset(x + 2f, y0 + 19f, ), Size(2.2f, 12f), alpha = 0.35f)
+                scope.drawRoundRect(Color(Pal.RED), Offset(x + 1f, y0 + 9f), Size(9f, 9f), CornerRadius(4f, 4f))
+                scope.drawRect(Color.White, Offset(x + 2.6f, y0 + 11f), Size(1.8f, 4f), alpha = 0.4f)
             } else {
-                scope.drawRect(Color(Pal.DARKGRAY), Offset(x, y0 + 10f), Size(11f, 28f), style = thin)
+                scope.drawRoundRect(Color(0xFF14101E), Offset(x, y0 + 10f), Size(11f, 28f), CornerRadius(3f, 3f))
+                scope.drawRoundRect(Color(Pal.DARKGRAY), Offset(x, y0 + 10f), Size(11f, 28f), CornerRadius(3f, 3f), style = thin)
             }
         }
         val label = if (reloadT > 0f) "LOADING" else "RELOAD"
         val lx = 272f
-        scope.drawRoundRectCompat(lx - 62f, y0 + 9f, 124f, 32f, if (empty) Pal.RED else Pal.PLUM, if (blink) 1f else 0.85f)
+        val bx = lx - 62f
+        val by = y0 + 9f
+        val bg = if (empty) Pal.RED else Pal.PLUM
+        scope.drawRoundRectCompat(bx, by, 124f, 32f, bg, if (blink) 1f else 0.9f)
+        // A sheen on the top half, and an edge in the rail's colour.
+        scope.drawRoundRect(Color.White, Offset(bx + 2f, by + 2f), Size(120f, 13f), CornerRadius(6f, 6f), alpha = 0.10f)
+        scope.drawRoundRect(if (empty) Color.White else Color(Pal.ORANGE), Offset(bx, by), Size(124f, 32f), CornerRadius(8f, 8f), style = thin, alpha = if (empty) 0.9f else 0.55f)
         ArcadeFont.drawCentered(scope, label, lx, y0 + 17f, 2.2f, Color(if (empty) Pal.WHITE else Pal.ORANGE))
         if (empty) {
             val bob = sin(time * 10f) * 4f
+            // A glow that swells round the button while the gun is empty.
+            val pulse = 0.35f + 0.35f * sin(time * 8f)
+            scope.drawRoundRect(Color(Pal.RED), Offset(bx - 4f, by - 4f), Size(132f, 40f), CornerRadius(11f, 11f), style = thick, alpha = pulse * fxK + 0.15f)
             ArcadeFont.drawCentered(scope, "TAP RELOAD ↓", GAME_W / 2f, y0 - 34f + bob, 2.6f, Color(Pal.RED))
         }
     }
@@ -1635,22 +1866,47 @@ class ShooterGame : BaseMiniGame() {
     // ---------------------------------------------------------------- attract mode
 
     override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) {
-        // Night sky and the bank's upstairs windows; bandits pop up and the crosshair picks them off.
-        for (y in 0 until h) p.fill(0f, y.toFloat(), w.toFloat(), 1f, Color(Pal.mix(0xFF07061A.toInt(), 0xFF3A1E5C.toInt(), y / h.toFloat())))
-        p.disc(w * 0.82f, h * 0.18f, 1.6f, Color(Pal.CREAM))
-        val top = h * 0.28f
-        p.fill(0f, top, w.toFloat(), h - top, Color(0xFF6E5E50))
-        p.fill(0f, top, w.toFloat(), 0.8f, Color(0xFF8E7A68))
-        p.textCentered("BANK", w / 2f, top + 1.2f, Color(Pal.PINK), tiny = true)
+        // A night street in miniature: a sky with a moon and skyline, the bank with its glowing
+        // sign and upstairs windows, sandbags in front. Bandits pop up, the crosshair glides to
+        // one and fires (a flash, sparks and a "+50"), and the title and "insert coin" take turns.
+        val wf = w.toFloat()
+        val hf = h.toFloat()
+        for (y in 0 until h) p.fill(0f, y.toFloat(), wf, 1f, Color(Pal.mix(0xFF07061A.toInt(), 0xFF3A1E5C.toInt(), y / hf)))
+        for (i in 0 until 10) {
+            p.px(hash01(i, 5) * wf, hash01(i, 6) * hf * 0.26f, Color(Pal.CREAM), 0.3f + 0.7f * abs(sin(time * 1.3f + i * 1.9f)))
+        }
+        p.disc(wf * 0.82f, hf * 0.16f, 2.7f, Color(Pal.LAVENDER), 0.16f)
+        p.disc(wf * 0.82f, hf * 0.16f, 1.6f, Color(Pal.CREAM))
+        val top = hf * 0.28f
+        // Skyline behind the bank, with a few lit windows.
+        var sx = 0f
+        var sk = 0
+        while (sx < wf) {
+            val bw = 1.6f + hash01(sk, 7) * 2.4f
+            val bh = 1.4f + hash01(sk, 8) * 3.0f
+            p.fill(sx, top - bh, bw, bh, Color(0xFF120E1E.toInt()))
+            if (hash01(sk, 9) > 0.45f) p.px(sx + bw * 0.5f, top - bh * 0.6f, Color(0xFFFFD890.toInt()), 0.85f)
+            sx += bw + 0.15f
+            sk++
+        }
+        // The bank: a stone front with pilasters and a lit cornice, and its neon sign glowing pink.
+        p.fill(0f, top, wf, hf - top, Color(0xFF6E5E50.toInt()))
+        p.fill(0f, top, wf, 0.8f, Color(0xFF8E7A68.toInt()))
+        p.fill(0f, top + 0.8f, wf, 0.5f, Color(0xFF3A2E28.toInt()), 0.6f)
+        for (k in 0..3) p.fill(wf * (0.05f + 0.3f * k) - 0.45f, top + 1.3f, 0.9f, hf - top, Color(0xFF8E7A68.toInt()), 0.6f)
+        p.disc(wf / 2f, top + 2.3f, 4.6f, Color(Pal.PINK), 0.10f + 0.05f * sin(time * 7f))
+        p.textCentered("BANK", wf / 2f, top + 1.2f, Color(Pal.PINK), tiny = true)
         val cycle = 2.4f
         val beat = (time / cycle).toInt()
         val phase = (time % cycle) / cycle
         val who = beat % 3
         for (k in 0 until 3) {
-            val wx = w * (0.2f + 0.3f * k)
-            val wy = h * 0.52f
-            p.fill(wx - 2.6f, wy - 3f, 5.2f, 5f, Color(0xFF2A1A28))
-            p.fill(wx - 2.6f, wy - 3f, 5.2f, 0.6f, Color(0xFFFFC77A), 0.6f)
+            val wx = wf * (0.2f + 0.3f * k)
+            val wy = hf * 0.52f
+            p.fill(wx - 2.9f, wy - 3.3f, 5.8f, 5.6f, Color(0xFF8E7A68.toInt()))
+            p.fill(wx - 2.6f, wy - 3f, 5.2f, 5f, Color(0xFF2A1A28.toInt()))
+            p.fill(wx - 2.6f, wy - 3f, 5.2f, 0.6f, Color(0xFFFFC77A.toInt()), 0.6f)
+            p.disc(wx, wy - 0.5f, 2.6f, Color(0xFFFFB060.toInt()), 0.10f)
             val up = k == who && phase < 0.7f || k == (beat + 1) % 3 && phase > 0.85f
             if (up) {
                 val civ = hash01(beat, k) > 0.75f
@@ -1665,22 +1921,44 @@ class ShooterGame : BaseMiniGame() {
                 p.fill(wx - 1.6f, wy + 0.9f, 3.2f, 1.1f, Color(if (civ) Pal.CYAN else Pal.DARKRED))
             }
         }
+        // Sandbags along the bottom, in two staggered rows.
+        val bagY = hf * 0.84f
+        for (row in 0..1) {
+            val off = if (row == 0) 0f else wf / 12f
+            for (i in -1 until 6) {
+                p.fill(off + i * wf / 6f + 0.15f, bagY + row * hf * 0.08f, wf / 6f - 0.3f, hf * 0.075f, Color(if ((i + row) % 2 == 0) 0xFFA08A60.toInt() else 0xFF8E7A52.toInt()))
+            }
+        }
         // The crosshair glides to this beat's bandit and fires.
-        val tx = w * (0.2f + 0.3f * who)
-        val ty = h * 0.5f
-        val px = w * (0.2f + 0.3f * ((beat + 2) % 3))
+        val tx = wf * (0.2f + 0.3f * who)
+        val ty = hf * 0.5f
+        val px = wf * (0.2f + 0.3f * ((beat + 2) % 3))
         val k = clamp01(phase / 0.45f)
         val e = k * k * (3f - 2f * k)
         val cx = px + (tx - px) * e
-        val cy = ty - sin(e * PI.toFloat()) * h * 0.2f
-        if (phase in 0.45f..0.55f) p.disc(tx, ty, 3f, Color(Pal.YELLOW), 0.8f)
+        val cy = ty - sin(e * PI.toFloat()) * hf * 0.2f
+        if (phase in 0.45f..0.55f) {
+            val f = 1f - (phase - 0.45f) / 0.1f
+            p.disc(tx, ty, 3.2f, Color(Pal.YELLOW), 0.8f * f)
+            p.disc(tx, ty, 1.5f, Color.White, f)
+            for (a in 0 until 6) {
+                val ang = a * 1.047f + 0.3f
+                p.px(tx + cos(ang) * (2f + 3.2f * (1f - f)), ty + sin(ang) * (2f + 3.2f * (1f - f)), Color(Pal.ORANGE), f)
+            }
+            // A flash at the gun, low on the right.
+            p.disc(wf * 0.86f, hf * 0.9f, 1.6f, Color(Pal.YELLOW), 0.9f * f)
+        }
+        if (phase in 0.5f..0.85f) {
+            val u = (phase - 0.5f) / 0.35f
+            p.textCentered("+50", tx, ty - 3f - 3.2f * u, Color(Pal.WHITE), tiny = true, alpha = 1f - u)
+        }
         p.frame(cx - 2f, cy - 2f, 4f, 4f, Color(Pal.RED))
         p.fill(cx - 3.5f, cy - 0.2f, 2f, 0.4f, Color(Pal.RED))
         p.fill(cx + 1.5f, cy - 0.2f, 2f, 0.4f, Color(Pal.RED))
         p.fill(cx - 0.2f, cy - 3.5f, 0.4f, 2f, Color(Pal.RED))
         p.fill(cx - 0.2f, cy + 1.5f, 0.4f, 2f, Color(Pal.RED))
-        if ((time * 1.5f).toInt() % 2 == 0) p.textCentered("SHOOTOUT", w / 2f, h - 5.5f, Color(Pal.ORANGE), tiny = true)
-        else p.textCentered("INSERT COIN", w / 2f, h - 5.5f, Color(Pal.YELLOW), tiny = true)
-        p.textCentered("♥♥♥", w * 0.16f, 0.8f, Color(Pal.RED), tiny = true)
+        if ((time * 1.5f).toInt() % 2 == 0) p.textCentered("SHOOTOUT", wf / 2f, hf - 5.5f, Color(Pal.ORANGE), tiny = true)
+        else p.textCentered("INSERT COIN", wf / 2f, hf - 5.5f, Color(Pal.YELLOW), tiny = true)
+        p.textCentered("♥♥♥", wf * 0.16f, 0.8f, Color(Pal.RED), tiny = true)
     }
 }
