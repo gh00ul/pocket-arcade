@@ -208,7 +208,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         }
         if (player.moving) hasWalked = true
         if (player.stepped) footstep(fp)
-        for (n in npcs) n.update(dt, this)
+        for (i in npcs.indices) npcs[i].update(dt, this)
         cafe.update(dt, this)
         val gait = if (fp) player.speedFrac else if (player.moving) 1f else 0f
         val run = if (fp) (player.speedFrac - 1f) / (Player.RUN_SCALE - 1f) else 0f
