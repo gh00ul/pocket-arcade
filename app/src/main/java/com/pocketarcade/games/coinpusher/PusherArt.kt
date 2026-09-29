@@ -82,6 +82,10 @@ internal object PusherArt {
         for (y in 0 until h step 40) rect(0f, y.toFloat(), w.toFloat(), 1.5f, Pal.INDIGO)
         for (x in 0 until w step 50) rect(x.toFloat(), 0f, 0.8f, h.toFloat(), Pal.shade(Pal.INDIGO, 0.8f))
         for (i in 0 until 60) circle(hash01(i, 31) * w, hash01(i, 32) * h, 0.5f, Pal.shade(Pal.SKY, 0.5f))
+        // A warm glow along each side wall, and a cool wash down the middle so coins pop against the deck.
+        hgrad(0f, 0f, w * 0.06f, h.toFloat(), Pal.withAlpha(Pal.GOLD, 0.22f), Pal.withAlpha(Pal.GOLD, 0f))
+        hgrad(w * 0.94f, 0f, w * 0.06f, h.toFloat(), Pal.withAlpha(Pal.GOLD, 0f), Pal.withAlpha(Pal.GOLD, 0.22f))
+        hgrad(w * 0.3f, 0f, w * 0.4f, h.toFloat(), Pal.withAlpha(Pal.SKY, 0f), Pal.withAlpha(Pal.SKY, 0.07f), Pal.withAlpha(Pal.SKY, 0f))
         for (k in 0 until 3) {
             val cy = h - 26f - k * 10f
             for (i in 0 until 6) {
@@ -105,10 +109,15 @@ internal object PusherArt {
             vgrad(0f, 0f, 120f, 2f, Pal.LIGHTGRAY, Pal.GRAY)
         }
     }
+    /** The pusher shelf's top: brushed steel, darker at the back and catching a highlight along the front. */
     val shelfTop: Texture by lazy {
         paintTexture(60, 40) {
-            vgrad(0f, 0f, 60f, 40f, Pal.GRAY, Pal.LIGHTGRAY)
-            for (y in 0 until 40 step 6) rect(0f, y.toFloat(), 60f, 0.6f, Pal.shade(Pal.GRAY, 0.75f))
+            vgrad(0f, 0f, 60f, 40f, Pal.shade(Pal.DARKGRAY, 0.9f), Pal.shade(Pal.GRAY, 0.85f))
+            for (y in 0 until 40 step 3) rect(0f, y.toFloat(), 60f, 0.5f, Pal.withAlpha(Pal.shade(Pal.GRAY, 0.6f), 0.7f))
+            for (y in 1 until 40 step 5) rect(0f, y.toFloat(), 60f, 0.35f, Pal.withAlpha(Pal.LIGHTGRAY, 0.25f))
+            vgrad(0f, 33f, 60f, 7f, Pal.withAlpha(Pal.LIGHTGRAY, 0f), Pal.withAlpha(Pal.LIGHTGRAY, 0.55f))
+            hgrad(0f, 0f, 6f, 40f, 0x66000000, 0)
+            hgrad(54f, 0f, 6f, 40f, 0, 0x66000000)
         }
     }
 
@@ -121,6 +130,10 @@ internal object PusherArt {
                 hgrad(x, 0f, 8f, 130f, Pal.shade(Pal.ORANGE, 0.62f), Pal.shade(Pal.ORANGE, 0.75f), Pal.shade(Pal.ORANGE, 0.62f))
             }
             vgrad(0f, 120f, 180f, 10f, Pal.shade(Pal.DARKRED, 0.6f), Pal.shade(Pal.DARKRED, 0.4f))
+            // Occlusion: shadow settles at the foot of the wall and in its corners.
+            vgrad(0f, 84f, 180f, 46f, 0, 0x88000000.toInt())
+            hgrad(0f, 0f, 26f, 130f, 0x77000000, 0)
+            hgrad(154f, 0f, 26f, 130f, 0, 0x77000000)
             rect(0f, 0f, 180f, 4f, Pal.GOLD)
             glow(2f, Pal.withAlpha(Pal.YELLOW, 0.6f)) { label("COIN PUSHER", 90f, 8f, 13f, -1) }
             label("COIN PUSHER", 90f, 8f, 13f, Pal.YELLOW, shadow = Pal.DARKRED)
