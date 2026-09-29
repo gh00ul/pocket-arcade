@@ -378,6 +378,7 @@ internal class GlRenderer {
             val tr = if (p.tint == -1) 1f else (p.tint shr 16 and 255) / 255f
             val tg = if (p.tint == -1) 1f else (p.tint shr 8 and 255) / 255f
             val tb = if (p.tint == -1) 1f else (p.tint and 255) / 255f
+            val shade = p.shade
             for (t in 1..tris) {
                 for (k in 0 until 3) {
                     val kk = if (flip) 2 - k else k
@@ -394,7 +395,9 @@ internal class GlRenderer {
                     }
                     out[o + 6] = (p.region.x + p.us[i]) * iw
                     out[o + 7] = (p.region.y + p.vs[i]) * ih
-                    out[o + 8] = tr; out[o + 9] = tg; out[o + 10] = tb; out[o + 11] = 1f
+                    // Baked occlusion darkens the paint per vertex (the vertex colour multiplies the texture).
+                    val sh = if (shade != null) shade[i] else 1f
+                    out[o + 8] = tr * sh; out[o + 9] = tg * sh; out[o + 10] = tb * sh; out[o + 11] = 1f
                     out[o + 12] = p.emissive; out[o + 13] = 1f; out[o + 14] = p.gloss; out[o + 15] = 1f
                     o += S
                 }
