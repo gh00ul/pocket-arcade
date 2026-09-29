@@ -220,7 +220,7 @@ object CafeArt {
         val z1 = CafeLayout.FLOOR_Z1
         // One check every 12 units.
         val tpu = 128f / 24f
-        b.quad(x0, 0.06f, z0, x1, 0.06f, z0, x1, 0.06f, z1, x0, 0.06f, z1, tiles.region(wrap = true), 0f, 1f, 0f, u0 = x0 * tpu, v0 = z0 * tpu, u1 = x1 * tpu, v1 = z1 * tpu, gloss = 0.7f)
+        b.quad(x0, 0.06f, z0, x1, 0.06f, z0, x1, 0.06f, z1, x0, 0.06f, z1, tiles.region(wrap = true), 0f, 1f, 0f, u0 = x0 * tpu, v0 = z0 * tpu, u1 = x1 * tpu, v1 = z1 * tpu, gloss = 0.3f)
         // A brass edge where the tiles meet the carpet.
         val brass = HallArt.paint(0xFFE8B84A.toInt(), 0.35f, 0.8f).full
         b.quad(x1 - 1.5f, 0.1f, z0, x1, 0.1f, z0, x1, 0.1f, z1, x1 - 1.5f, 0.1f, z1, brass, 0f, 1f, 0f, gloss = 1f)

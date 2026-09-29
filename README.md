@@ -29,13 +29,14 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 ## Features
 
 **The hall**
-- A real arcade floor plan:
+- A real arcade floor plan: a wide main aisle runs straight from the doors to the prize counter, with rows of banks either side facing the doors across cross aisles, and a neon sign on the wall over each zone:
   - at the back, a prize counter with a wall of plushies, flanked by banks of claw machines and stackers;
-  - across the floor, skee-ball and basketball alleys, air hockey tables, a whack-a-mole row, a four-machine coin-pusher island and linked racers in the middle;
-  - further toward the doors, a row of light-gun cabinets, pinball tables along the right wall and fishing tubs on the left, with two spare banks ready for new machines;
-  - on the left, a café: a service counter with a pastry case, slushie and soft-serve machines, a lit menu board and a neon sign, diner booths and tables under pendant lamps, on a checked tile floor;
-  - around the edges, vending machines and a photo booth;
-  - by the doors, a token kiosk and kiddie rides.
+  - then the ticket games: skee-ball and basketball alleys side by side, and a four-machine coin-pusher row under a JACKPOT sign;
+  - the table games: whack-a-moles and air hockey tables, and pinball tables along the right wall;
+  - the video games: linked racers under their hung sign and light-gun cabinets, fronts in line across the aisle;
+  - the family floor by the entrance: fishing tubs, kiddie rides, a photo booth, and the token kiosk just inside the doors;
+  - in the front-left corner, open to the main aisle, a café: a service counter with a pastry case, slushie and soft-serve machines, a lit menu board and a neon sign, vending machines, diner booths and tables under pendant lamps, on a checked tile floor;
+  - two spare banks, beside the pinball tables and on the family floor, ready for new machines.
 - Every cabinet is modelled for its game, from glass claw boxes with a working gantry to long lanes, basketball cages, racer seats and pusher shelves that sweep. Each has a live attract-mode screen, a backlit marquee and topper with the game's emblem, painted side art, a lit coin door, chasing bulbs, a neon glow and its own coloured light.
 - A lighting rig: trusses and wall rails with spotlights that throw beams through the haze and coloured pools in front of every bank, backlit murals, a hung TURBO RACEWAY sign with start lights, and chase bulbs round the entrance.
 - Blacklight carpet that fluoresces, terrazzo at the entrance, walls rising into the dark with acoustic panels, uplights and a backlit mural, and the street outside through the cut-away shopfront.
@@ -119,7 +120,7 @@ adb shell am start -n com.pocketarcade/.MainActivity --es play racer
 
 The ids are `claw`, `whack`, `skeeball`, `hoops`, `pusher`, `airhockey`, `racer`, `stacker`, `shooter`, `pinball` and `fishing`. To log frame times once a second, run `adb shell setprop log.tag.PocketArcade3D DEBUG` and restart the app. Each line shows the UI-thread record time, the GL draw time, the swap interval, GPU time where the driver supports timer queries, and the render scale. To compare builds like for like, also run `adb shell setprop log.tag.PocketArcade3DPin DEBUG`, which holds the render scale at 0.8.
 
-The unit tests play every machine headlessly with seeded bots of different skill, check that every round finishes and pays out within the target bands, and print average tickets per round. They also check the hall floor plan (no overlaps, every cabinet reachable on the same walk grid the kids use):
+The unit tests play every machine headlessly with seeded bots of different skill, check that every round finishes and pays out within the target bands, and print average tickets per round. They also check the hall floor plan (no overlaps, every cabinet reachable on the same walk grid the kids use, a clear main aisle from the doors to the prize counter, no bank hiding another's players from the hall camera):
 
 ```bash
 ./gradlew testDebugUnitTest
@@ -127,7 +128,7 @@ The unit tests play every machine headlessly with seeded bots of different skill
 
 ## Add a new machine
 
-Write one class and register it in one place. The hall gives it a cabinet, a play mat, a prompt, a high-score table and an attract screen automatically, and puts it in one of the spare banks near the doors. If every bank is taken, the floor plan fails loudly instead of overlapping anything: add a `Slot` to `HubLayout.slots`.
+Write one class and register it in one place. The hall gives it a cabinet, a play mat, a prompt, a high-score table and an attract screen automatically, and puts it in one of the spare banks. If every bank is taken, the floor plan fails loudly instead of overlapping anything: add a `Slot` to `HubLayout.slots`.
 
 1. Create `app/src/main/java/com/pocketarcade/games/<name>/<Name>Game.kt` and extend `BaseMiniGame`, which implements the `MiniGame` interface and provides particles, screen shake, popups, a score and a round clock. Draw with a `Stage3D`, or straight onto the Compose `DrawScope` for a flat game:
 

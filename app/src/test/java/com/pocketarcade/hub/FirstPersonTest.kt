@@ -121,19 +121,22 @@ class FirstPersonTest {
         w.setFirstPerson(true, animate = false)
         // Stand against the west wall, facing east: there's no room behind for the eye.
         val x = HubLayout.WALL + Collision.FEET_HALF_W + 1f
-        val z = (150 until 1000 step 5).map { it.toFloat() }.first { !Collision.blocked(w.map.solids, x, it) }
+        // Somewhere along it with open floor to the east, so turning round gives the eye room.
+        val z = (150 until 1000 step 5).map { it.toFloat() }.first { z ->
+            (0..40 step 2).all { d -> (-4..10 step 2).all { dz -> !Collision.blocked(w.map.solids, x + d, z + dz) } }
+        }
         w.player.x = x
         w.player.y = z
         w.camera.setLook(PI.toFloat() / 2f, 0f)
         w.update(FIXED_DT)
-        assertTrue(w.camera.eyeBack < HubCamera.EYE_BACK)
+        assertTrue("eye not pulled in at ($x, $z): ${w.camera.eyeBack}", w.camera.eyeBack < HubCamera.EYE_BACK)
         val ex = w.camera.eyeX
         val ez = w.camera.eyeZ
-        assertFalse(w.map.solids.any { ex > it.left && ex < it.right && ez > it.top && ez < it.bottom })
+        assertFalse("eye inside a solid at ($ex, $ez)", w.map.solids.any { ex > it.left && ex < it.right && ez > it.top && ez < it.bottom })
         // Turn round to face the wall: the room behind comes back and the eye eases out again.
         w.camera.setLook(-PI.toFloat() / 2f, 0f)
         w.run(1f)
-        assertTrue(w.camera.eyeBack > 0f)
+        assertTrue("eye never eased out at ($x, $z): ${w.camera.eyeBack}", w.camera.eyeBack > 0f)
     }
 
     @Test

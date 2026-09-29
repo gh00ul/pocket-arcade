@@ -212,27 +212,30 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         b.quad(wl + 0.3f, hgt - 8f, front, wl + 0.3f, hgt - 8f, back, wl + 0.3f, hgt - 10f, back, wl + 0.3f, hgt - 10f, front, neonCyan, 1f, 0f, 0f, emissive = 1.8f)
         b.quad(w - wl - 0.3f, hgt - 8f, back, w - wl - 0.3f, hgt - 8f, front, w - wl - 0.3f, hgt - 10f, front, w - wl - 0.3f, hgt - 10f, back, neonCyan, -1f, 0f, 0f, emissive = 1.8f)
         // Posters on the side walls, clear of the zone signs and the tall banks against them.
-        for ((k, pz) in floatArrayOf(320f, 430f, 670f, 880f, 1000f).withIndex()) {
+        // Wall art runs its first corner to its second left to right as seen from the hall.
+        for ((k, pz) in HubLayout.leftPosters.withIndex()) {
             val tex = HallArt.poster(k).full
             b.quad(wl + 0.4f, 100f, pz + 12f, wl + 0.4f, 100f, pz - 12f, wl + 0.4f, 64f, pz - 12f, wl + 0.4f, 64f, pz + 12f, tex, 1f, 0f, 0f, gloss = 0.5f)
         }
-        for ((k, pz) in floatArrayOf(320f, 430f, 560f, 1000f).withIndex()) {
+        for ((k, pz) in HubLayout.rightPosters.withIndex()) {
             val tex = HallArt.poster(k + 1).full
             b.quad(w - wl - 0.4f, 100f, pz - 12f, w - wl - 0.4f, 100f, pz + 12f, w - wl - 0.4f, 64f, pz + 12f, w - wl - 0.4f, 64f, pz - 12f, tex, -1f, 0f, 0f, gloss = 0.5f)
         }
         // Big neon signs on the back wall.
         b.quad(22f, 132f, back + 0.5f, 164f, 132f, back + 0.5f, 164f, 96f, back + 0.5f, 22f, 96f, back + 0.5f, HallArt.neon("POCKET ARCADE", 0xFF39E6F2.toInt(), 768, 160, 96f).full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1.7f, cull = false)
         b.quad(470f, 132f, back + 0.5f, 590f, 132f, back + 0.5f, 590f, 100f, back + 0.5f, 470f, 100f, back + 0.5f, HallArt.neon("HIGH SCORE", 0xFFB080FF.toInt(), 640, 160, 96f).full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1.7f, cull = false)
-        // Zone signs on the side walls.
-        b.quad(wl + 0.6f, 124f, 290f, wl + 0.6f, 124f, 190f, wl + 0.6f, 100f, 190f, wl + 0.6f, 100f, 290f, HallArt.neon("SKEE-BALL", 0xFFFFD84D.toInt(), 640, 160, 100f).full, 1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
-        b.quad(w - wl - 0.6f, 124f, 180f, w - wl - 0.6f, 124f, 280f, w - wl - 0.6f, 100f, 280f, w - wl - 0.6f, 100f, 180f, HallArt.neon("HOOPS", 0xFFFF8A3D.toInt(), 512, 160, 110f).full, -1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
-        b.quad(wl + 0.6f, 116f, 630f, wl + 0.6f, 116f, 510f, wl + 0.6f, 92f, 510f, wl + 0.6f, 92f, 630f, HallArt.neon("SNACK BAR", 0xFF5CF08A.toInt(), 640, 160, 100f).full, 1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
-        // Signs over the front floor's banks by the side walls, when those machines are in.
-        if (games.any { it.look.shape == CabinetShape.PINBALL }) {
-            b.quad(w - wl - 0.6f, 124f, 610f, w - wl - 0.6f, 124f, 700f, w - wl - 0.6f, 100f, 700f, w - wl - 0.6f, 100f, 610f, HallArt.neon("PINBALL", 0xFFFF77C8.toInt(), 512, 160, 100f).full, -1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
-        }
-        if (games.any { it.look.shape == CabinetShape.FISHING }) {
-            b.quad(wl + 0.6f, 124f, 800f, wl + 0.6f, 124f, 700f, wl + 0.6f, 100f, 700f, wl + 0.6f, 100f, 800f, HallArt.neon("FISHING", 0xFF4DA6FF.toInt(), 512, 160, 100f).full, 1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
+        // Zone signs on the side walls, from the floor plan: each over its bank and the cross
+        // aisle in front of it. A machine's sign is only up while that machine is on the floor.
+        for (sg in HubLayout.wallSigns) {
+            if (sg.shape != null && games.none { it.look.shape == sg.shape }) continue
+            val tex = HallArt.neon(sg.text, sg.color, sg.texW, 160, sg.size).full
+            if (sg.right) {
+                val x = w - wl - 0.6f
+                b.quad(x, sg.y1, sg.z0, x, sg.y1, sg.z1, x, sg.y0, sg.z1, x, sg.y0, sg.z0, tex, -1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
+            } else {
+                val x = wl + 0.6f
+                b.quad(x, sg.y1, sg.z1, x, sg.y1, sg.z0, x, sg.y0, sg.z0, x, sg.y0, sg.z1, tex, 1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
+            }
         }
         // Baseboards.
         val base = HallArt.darkMetal.full
