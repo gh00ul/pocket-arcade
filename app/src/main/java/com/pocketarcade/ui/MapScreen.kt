@@ -9,12 +9,21 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -200,13 +209,47 @@ object HallMap {
         }
         return best
     }
+
+    /**
+     * The room a label needs beyond its text's width, for a label [h] tall at screen [density]: padding
+     * either side and the marker dot at its left.
+     */
+    fun labelPad(h: Float, density: Float): Float = 12f * density + h * 0.6f
 }
 
+/** How often the "you are here" ring pulses, in milliseconds. */
+private const val YOU_PULSE_MILLIS = 1400
+
+/** The map's floor: a violet gradient with a faint blueprint grid every [GRID_STEP] world units. */
+private val FLOOR_TOP = Color(0xFF231A4C)
+private val FLOOR_BOTTOM = Color(0xFF130D2A)
+private const val GRID_STEP = 60f
+private const val GRID_ALPHA = 0.055f
+
+/** Props are washed in their tint at this alpha and outlined at [PROP_EDGE_ALPHA]: soft enough that the pins stay the loudest thing on the plan. */
+private const val PROP_FILL_ALPHA = 0.24f
+private const val PROP_EDGE_ALPHA = 0.7f
+
+/** The legend under the plan: what each colour of marker means. */
+private class LegendEntry(val label: String, val color: Color)
+
+private val LEGEND = listOf(
+    LegendEntry("YOU", Color(Pal.CYAN)),
+    LegendEntry("MACHINE", Color(Pal.PURPLE)),
+    LegendEntry("TOKENS", Color(Pal.GOLD)),
+    LegendEntry("PRIZES", Color(Pal.PINK)),
+    LegendEntry("CAFE", Color(Pal.GREEN)),
+    LegendEntry("DOORS", Color(Pal.SKY)),
+)
+
 /**
- * The hall's floor plan as a map: props as tinted boxes, a marker for every machine in its glow
- * colour with its marquee text, the café, the token kiosk, the prize counter, the doors and a
- * pulsing dot where you stand. Tapping a place calls [onGo] with it; the caller closes the map
- * and walks there ([MapPin.go]).
+ * The hall's floor plan as a map: a blueprint-style plan with props as soft tinted boxes, a
+ * glowing marker for every machine in its glow colour with its marquee text, the café, the token
+ * kiosk, the prize counter, the doors and a pulsing dot where you stand, and a legend under it.
+ * Tapping a place calls [onGo] with it; the caller closes the map and walks there ([MapPin.go]).
+ *
+ * The plan and pins are drawn once (they never move); only the pulsing "you" layer redraws each
+ * frame, so the map costs next to nothing to keep open.
  */
 @Composable
 fun MapScreen(world: HubWorld, onGo: (MapPin) -> Unit, onClose: () -> Unit) {
@@ -218,15 +261,20 @@ fun MapScreen(world: HubWorld, onGo: (MapPin) -> Unit, onClose: () -> Unit) {
     val youZ = remember { world.player.y }
     val youYaw = remember { world.player.yaw }
     var size by remember { mutableStateOf(IntSize.Zero) }
-    val pulse by rememberInfiniteTransition(label = "you").animateFloat(
-        0f, 1f, infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart), label = "pulse",
-    )
+    // Held as State and read only in the "you" layer's draw, so the pulse redraws that layer and nothing else.
+    // With reduce motion the ring rests part-way out instead of pulsing.
+    val pulse = if (UiMotion.enabled) {
+        rememberInfiniteTransition(label = "you").animateFloat(
+            0f, 1f, infiniteRepeatable(tween(YOU_PULSE_MILLIS, easing = LinearEasing), RepeatMode.Restart), label = "pulse",
+        )
+    } else {
+        remember { mutableFloatStateOf(0.35f) }
+    }
 
     // Pin boxes in pixels: labels as wide as their text, dots a fixed size, labels spread apart.
     val boxes = remember(pins, size, density) {
         val g = HallMap.Geometry(size.width.toFloat(), size.height.toFloat())
         val lu = 1.7f * density
-        val padX = 5f * density
         val lh = ArcadeFont.height(lu, true) + 8f * density
         val dot = 9f * density
         val n = pins.size
@@ -240,7 +288,7 @@ fun MapScreen(world: HubWorld, onGo: (MapPin) -> Unit, onClose: () -> Unit) {
             cx[i] = g.sx(p.x)
             cy[i] = g.sy(p.z)
             if (p.labelled) {
-                w[i] = ArcadeFont.width(p.text, lu, true) + padX * 2f
+                w[i] = ArcadeFont.width(p.text, lu, true) + HallMap.labelPad(lh, density)
                 h[i] = lh
                 labelled += i
             } else {
@@ -259,36 +307,63 @@ fun MapScreen(world: HubWorld, onGo: (MapPin) -> Unit, onClose: () -> Unit) {
             cx[labelled[k]] = ox[k]
             cy[labelled[k]] = oy[k]
         }
-        MapBoxes(g, cx, cy, w, h, lu, padX)
+        MapBoxes(g, cx, cy, w, h, lu, lh)
     }
 
     ArcadePanel("MAP", Color(Pal.SKY), onClose, fillHeight = true) {
-        ArcadeText("TAP A PLACE TO WALK THERE", unit = 2.dp, tiny = true, color = Color(Pal.LAVENDER))
-        Spacer(Modifier.height(8.dp))
+        ArcadeText("TAP A PLACE TO WALK THERE", UiText.CAPTION, color = UiColors.textMid, centered = true)
+        Spacer(Modifier.height(UiSpace.sm))
         Box(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .onSizeChanged { size = it },
+                .onSizeChanged { size = it }
+                .pointerInput(boxes, pins) {
+                    detectTapGestures { at ->
+                        val i = HallMap.hit(pins.size, boxes.cx, boxes.cy, boxes.w, boxes.h, at.x, at.y, 16f * density)
+                        if (i >= 0) onGo(pins[i])
+                    }
+                },
         ) {
-            Canvas(
-                Modifier
-                    .fillMaxSize()
-                    .pointerInput(boxes, pins) {
-                        detectTapGestures { at ->
-                            val i = HallMap.hit(pins.size, boxes.cx, boxes.cy, boxes.w, boxes.h, at.x, at.y, 16f * density)
-                            if (i >= 0) onGo(pins[i])
-                        }
-                    },
-            ) {
-                drawPlan(world, boxes.geometry, youX, youZ, youYaw, pulse, density)
+            Canvas(Modifier.fillMaxSize()) {
+                drawPlan(world, boxes.geometry, density)
                 drawPins(pins, boxes, density)
+            }
+            Canvas(Modifier.fillMaxSize()) {
+                drawYou(boxes.geometry.sx(youX), boxes.geometry.sy(youZ), youYaw, pulse.value, density)
+            }
+        }
+        Spacer(Modifier.height(UiSpace.sm))
+        MapLegend()
+    }
+}
+
+/** What each marker colour means, in a row of dots and words that shrink to fit a narrow phone. */
+@Composable
+private fun MapLegend() {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clearAndSetSemantics { contentDescription = "Legend: you, machines, tokens, prizes, cafe, doors" },
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        for (e in LEGEND) {
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                Canvas(Modifier.size(9.dp)) {
+                    val r = this.size.minDimension / 2f
+                    glowCircle(e.color, center, r * 0.8f, r * 0.9f, 0.4f)
+                    drawCircle(e.color, r * 0.8f, center)
+                    drawCircle(Color.White.copy(alpha = 0.7f), r * 0.28f, center + Offset(-r * 0.2f, -r * 0.25f))
+                }
+                Spacer(Modifier.width(3.dp))
+                ArcadeText(e.label, UiText.CAPTION, color = UiColors.textMid)
             }
         }
     }
 }
 
-/** The pins' pixel boxes (centres and sizes), with the label text size and padding they were made for. */
+/** The pins' pixel boxes (centres and sizes), with the label text size and the height labels were made for. */
 private class MapBoxes(
     val geometry: HallMap.Geometry,
     val cx: FloatArray,
@@ -296,11 +371,11 @@ private class MapBoxes(
     val w: FloatArray,
     val h: FloatArray,
     val labelUnit: Float,
-    val labelPad: Float,
+    val labelHeight: Float,
 )
 
-/** The floor, the walls, the café's floor and every solid prop. */
-private fun DrawScope.drawPlan(world: HubWorld, g: HallMap.Geometry, youX: Float, youZ: Float, youYaw: Float, pulse: Float, density: Float) {
+/** The floor with its blueprint grid, the walls, the café's floor and every solid prop. */
+private fun DrawScope.drawPlan(world: HubWorld, g: HallMap.Geometry, density: Float) {
     val map = world.map
     val s = g.scale
     val lw = 1.5f * density
@@ -309,10 +384,26 @@ private fun DrawScope.drawPlan(world: HubWorld, g: HallMap.Geometry, youX: Float
     val fz0 = g.sy(HubLayout.BACK_WALL)
     val fx1 = g.sx(HubLayout.WIDTH - HubLayout.WALL)
     val fz1 = g.sy(HubLayout.FRONT_WALL)
-    val corner = CornerRadius(6f * density)
-    drawRoundRect(Color(0xFF1A1236), Offset(fx0, fz0), Size(fx1 - fx0, fz1 - fz0), corner)
+    val corner = CornerRadius(8f * density)
+    val floor = Size(fx1 - fx0, fz1 - fz0)
+    glowRoundRect(Color(Pal.SKY), Offset(fx0, fz0), floor, corner.x, 10f * density, 0.16f)
+    drawRoundRect(Brush.verticalGradient(listOf(FLOOR_TOP, FLOOR_BOTTOM), fz0, fz1), Offset(fx0, fz0), floor, corner)
+    // A faint grid, so the plan reads as drawn rather than filled.
+    var gx = GRID_STEP
+    while (gx < HubLayout.WIDTH) {
+        val x = g.sx(gx)
+        if (x > fx0 && x < fx1) drawLine(Color(Pal.LAVENDER), Offset(x, fz0 + corner.x), Offset(x, fz1 - corner.x), 1f, alpha = GRID_ALPHA)
+        gx += GRID_STEP
+    }
+    var gz = GRID_STEP
+    while (gz < HubLayout.DEPTH) {
+        val y = g.sy(gz)
+        if (y > fz0 && y < fz1) drawLine(Color(Pal.LAVENDER), Offset(fx0 + corner.x, y), Offset(fx1 - corner.x, y), 1f, alpha = GRID_ALPHA)
+        gz += GRID_STEP
+    }
     drawRoundRect(
-        Color(Pal.LAVENDER), Offset(fx0, fz0), Size(fx1 - fx0, fz1 - fz0), corner, alpha = 0.55f, style = Stroke(lw * 2f),
+        Brush.verticalGradient(listOf(Color(Pal.LAVENDER).copy(alpha = 0.7f), Color(Pal.LAVENDER).copy(alpha = 0.3f)), fz0, fz1),
+        Offset(fx0, fz0), floor, corner, style = Stroke(lw * 2f),
     )
     // The café's tiled floor, and the door gap through the wall.
     drawRect(
@@ -320,7 +411,7 @@ private fun DrawScope.drawPlan(world: HubWorld, g: HallMap.Geometry, youX: Float
         Size((CafeLayout.FLOOR_X1 - CafeLayout.FLOOR_X0) * s, (CafeLayout.FLOOR_Z1 - CafeLayout.FLOOR_Z0) * s), alpha = 0.1f,
     )
     drawLine(
-        Color(0xFF1A1236), Offset(g.sx(HubLayout.DOOR_X0), fz1), Offset(g.sx(HubLayout.DOOR_X1), fz1), lw * 4f,
+        Color(0xFF130D2A), Offset(g.sx(HubLayout.DOOR_X0), fz1), Offset(g.sx(HubLayout.DOOR_X1), fz1), lw * 4.5f,
     )
     drawLine(
         Color(Pal.SKY), Offset(g.sx(HubLayout.DOOR_X0), fz1), Offset(g.sx(HubLayout.DOOR_X1), fz1), lw * 1.6f, StrokeCap.Round,
@@ -332,19 +423,19 @@ private fun DrawScope.drawPlan(world: HubWorld, g: HallMap.Geometry, youX: Float
         val c = Color(argb)
         val tl = Offset(g.sx(p.x0), g.sy(p.z0))
         val sz = Size((p.x1 - p.x0) * s, (p.z1 - p.z0) * s)
-        val r = CornerRadius(1.5f * density)
-        drawRoundRect(c, tl, sz, r, alpha = 0.32f)
-        drawRoundRect(c, tl, sz, r, alpha = 0.85f, style = Stroke(lw))
+        val r = CornerRadius(2f * density)
+        drawRoundRect(c, tl, sz, r, alpha = PROP_FILL_ALPHA)
+        drawRoundRect(c, tl, sz, r, alpha = PROP_EDGE_ALPHA, style = Stroke(lw * 0.8f))
     }
-    drawYou(g.sx(youX), g.sy(youZ), youYaw, pulse, density)
 }
 
-/** "You are here": a pulsing ring, a bright dot and a wedge pointing the way you face. */
+/** "You are here": a pulsing ring, a bright dot with a soft glow and a wedge pointing the way you face. */
 private fun DrawScope.drawYou(x: Float, y: Float, yaw: Float, pulse: Float, density: Float) {
     val c = Offset(x, y)
     val cyan = Color(Pal.CYAN)
     val r = 6f * density
     drawCircle(cyan, r * (1.2f + 1.8f * pulse), c, alpha = 0.5f * (1f - pulse), style = Stroke(2f * density))
+    glowCircle(cyan, c, r * 1.15f, r * 1.2f, 0.4f)
     // On the plan z runs down the screen, so a heading of yaw points (sin, cos).
     val fx = sin(yaw)
     val fz = cos(yaw)
@@ -360,23 +451,38 @@ private fun DrawScope.drawYou(x: Float, y: Float, yaw: Float, pulse: Float, dens
     drawCircle(Color.White, r * 0.4f, c)
 }
 
-/** A dot for every cabinet that doesn't carry its bank's label, a dark glass pill for every one that does. */
+/** A glowing dot for every cabinet that doesn't carry its bank's label, a dark glass pill with a marker dot for every one that does. */
 private fun DrawScope.drawPins(pins: List<MapPin>, b: MapBoxes, density: Float) {
     for (i in pins.indices) {
         val p = pins[i]
         val c = Color(p.color)
         val at = Offset(b.cx[i], b.cy[i])
         if (!p.labelled) {
-            drawCircle(Color.Black, b.w[i] * 0.5f, at, alpha = 0.5f)
-            drawCircle(c, b.w[i] * 0.34f, at)
+            val r = b.w[i] * 0.5f
+            glowCircle(c, at, r, r * 0.9f, 0.4f)
+            drawCircle(Color.Black, r, at, alpha = 0.55f)
+            drawCircle(c, r * 0.68f, at)
+            drawCircle(Color.White, r * 0.2f, at + Offset(-r * 0.18f, -r * 0.22f), alpha = 0.75f)
             continue
         }
         val tl = Offset(at.x - b.w[i] / 2f, at.y - b.h[i] / 2f)
         val sz = Size(b.w[i], b.h[i])
         val r = CornerRadius(b.h[i] / 2f)
-        drawRoundRect(Color(0xF0120C22), tl, sz, r)
-        drawRoundRect(c, tl, sz, r, style = Stroke(1.6f * density))
-        ArcadeFont.drawCentered(this, p.text, at.x, at.y - ArcadeFont.height(b.labelUnit, true) / 2f, b.labelUnit, c.lift(0.35f), tiny = true, shadow = false)
+        glowRoundRect(c, tl, sz, r.x, 5f * density, 0.32f)
+        drawRoundRect(
+            Brush.verticalGradient(listOf(Color(0xF02A2052), Color(0xF0120C22)), tl.y, tl.y + sz.height), tl, sz, r,
+        )
+        drawRoundRect(
+            Brush.verticalGradient(listOf(c.lift(0.2f), c.shade(0.8f)), tl.y, tl.y + sz.height), tl, sz, r, style = Stroke(1.6f * density),
+        )
+        // A marker dot at the left, then the name in the space that is left.
+        val dotR = b.h[i] * 0.16f
+        val dotC = Offset(tl.x + b.h[i] * 0.5f, at.y)
+        drawCircle(c, dotR, dotC)
+        drawCircle(Color.White, dotR * 0.35f, dotC + Offset(-dotR * 0.2f, -dotR * 0.25f), alpha = 0.8f)
+        val textLeft = dotC.x + dotR + b.h[i] * 0.18f
+        val textMid = (textLeft + tl.x + sz.width - b.h[i] * 0.3f) / 2f
+        ArcadeFont.drawCentered(this, p.text, textMid, at.y - ArcadeFont.height(b.labelUnit, true) / 2f, b.labelUnit, c.lift(0.35f), tiny = true, shadow = false)
     }
 }
 

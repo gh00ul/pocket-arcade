@@ -49,13 +49,19 @@ class Studio(val r: Renderer3D, val w: Int, val h: Int) {
         }
         private val figures = HashMap<CharacterLook, Figure>()
         private val decor = HashMap<DecorStyle, Pair<Model, List<PointLight>>>()
+
+        /** The backdrop's top colour, and the tints of the halo behind the subject and the pool of light on the turntable (added to the picture, so dark). */
+        private const val BACKDROP_TOP = 0xFF382965.toInt()
+        private const val HALO_TINT = 0xFF5B3AA6.toInt()
+        private const val POOL_TINT = 0xFF7A3A86.toInt()
     }
 
     private val xf = Xform()
 
     init {
         r.clear(0xFF120C22.toInt())
-        r.gradient(0xFF2E2150.toInt(), 0xFF120C22.toInt())
+        // A violet backdrop lit from above: the lighter top reads as a soft wash behind the subject.
+        r.gradient(BACKDROP_TOP, 0xFF120C22.toInt())
         val l = r.lighting
         l.ambR = 0.42f; l.ambG = 0.4f; l.ambB = 0.5f
         l.setDirection(-0.45f, 0.8f, 0.7f)
@@ -64,7 +70,7 @@ class Studio(val r: Renderer3D, val w: Int, val h: Int) {
         r.fogNear = 5000f
         r.fogFar = 9000f
         r.exposure = 1.15f
-        r.bloom = 0.35f
+        r.bloom = 0.42f
     }
 
     /** Aims the camera so a ball of [radius] round ([cx], [cy], [cz]) fills the picture. */
@@ -75,11 +81,16 @@ class Studio(val r: Renderer3D, val w: Int, val h: Int) {
         val dist = radius / halfMin * 1.08f
         val p = Math.toRadians(pitchDeg.toDouble()).toFloat()
         r.camera.lookAt(cx, cy + sin(p) * dist, cz + cos(p) * dist, cx, cy, cz, fovY, w, h)
-        // A warm key light, a cool rim from behind and the turntable under it all.
+        // A warm key light, a cool rim from behind, a pink fill low on the other side so shadowed
+        // faces don't go flat, and the turntable under it all.
         r.lighting.points += PointLight(cx - radius * 1.5f, cy + radius * 1.8f, cz + radius * 2f, 1f, 0.9f, 0.8f, radius * 6f, 0.7f)
-        r.lighting.points += PointLight(cx + radius * 1.2f, cy + radius, cz - radius * 1.8f, 0.5f, 0.7f, 1f, radius * 5f, 0.9f)
+        r.lighting.points += PointLight(cx + radius * 1.2f, cy + radius, cz - radius * 1.8f, 0.5f, 0.7f, 1f, radius * 5f, 1.0f)
+        r.lighting.points += PointLight(cx + radius * 1.8f, cy - radius * 0.1f, cz + radius * 1.4f, 1f, 0.42f, 0.7f, radius * 4.5f, 0.45f)
+        // A halo behind the subject and a pool of light on the turntable, both additive.
+        r.sprite(cx, cy + radius * 0.15f, cz - radius * 1.7f, radius * 4.4f, radius * 4.4f, HallArt.glow.full, blend = Blend.ADD, emissive = 1f, alpha = 0.55f, tint = HALO_TINT)
         xf.set(cx, 0f, cz, scale = radius * 0.95f)
         turntable.draw(r, xf = xf)
+        r.decal(cx - radius * 1.5f, cz - radius * 1.5f, cx + radius * 1.5f, cz + radius * 1.5f, 0.25f, HallArt.glow.full, Blend.ADD, emissive = 1f, alpha = 0.6f, tint = POOL_TINT)
     }
 
     fun figure(look: CharacterLook, yaw: Float) {
