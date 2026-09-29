@@ -264,12 +264,19 @@ object CafeArt {
         val z1 = p.z1
         val h = p.height
         val wood = HallArt.wood(0xFF5A3A28.toInt(), 5).full
-        b.box(x0, 0f, z0, x1, h - 2f, z1, BoxFaces(front = barFront.full, left = wood, right = wood, top = wood, frontEmissive = 0.55f, gloss = 0.4f))
+        b.box(x0, 0f, z0, x1, h - 2f, z1, BoxFaces(front = barFront.full, left = wood, right = wood, top = wood, back = wood, frontEmissive = 0.55f, gloss = 0.4f))
         val steel = HallArt.brushedMetal.full
-        b.box(x0 - 0.5f, h - 2f, z0 - 0.5f, x1 + 0.5f, h, z1 + 0.5f, BoxFaces(front = steel, top = steel, left = steel, right = steel, gloss = 0.9f))
+        b.box(x0 - 0.5f, h - 2f, z0 - 0.5f, x1 + 0.5f, h, z1 + 0.5f, BoxFaces(front = steel, top = steel, left = steel, right = steel, back = steel, gloss = 0.9f))
         // The wall behind it: a tiled splashback carrying the menu board, with a striped fascia on top.
         val splash = HallArt.paint(0xFF2A3A44.toInt(), 0.1f, 0.7f).full
-        b.box(x0, h, z0 - 1f, x1, 60f, z0 + 1f, BoxFaces(front = splash, left = splash, right = splash, top = splash))
+        b.box(x0, h, z0 - 1f, x1, 60f, z0 + 1f, BoxFaces(front = splash, left = splash, right = splash, top = splash, back = splash))
+        // Its back, for the aisle behind the café: a lit sign saying what's round the other side.
+        val back = HallArt.lightbox("CAFE  •  SHAKES  •  SNACKS", 0xFF1E5A4A.toInt(), 0xFFFFF4DC.toInt(), 768, 96, 52f).full
+        val bx0 = (x0 + x1) / 2f - 44f
+        val bx1 = (x0 + x1) / 2f + 44f
+        b.quad(bx1, 56f, z0 - 1.06f, bx0, 56f, z0 - 1.06f, bx0, 45f, z0 - 1.06f, bx1, 45f, z0 - 1.06f, back, 0f, 0f, -1f, emissive = 1.1f)
+        // The awning's underside, seen from behind and below.
+        b.quad(x1, 66f, z0 - 1f, x0, 66f, z0 - 1f, x0, 58f, z0 + 3f, x1, 58f, z0 + 3f, HallArt.darkMetal.full, 0f, -0.45f, -1f)
         val frame = HallArt.darkMetal.full
         val mx0 = x0 + 28f
         val mx1 = x1 - 26f

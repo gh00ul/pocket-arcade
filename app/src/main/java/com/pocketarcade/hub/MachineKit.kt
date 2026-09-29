@@ -161,6 +161,76 @@ object MachineKit {
         tp.toTexture().also { tp.recycle() }
     }
 
+    /**
+     * The back of a cabinet, as a kid walking behind a bank sees it: a screwed-on service panel
+     * with louvred vents, a fan grille, the mains inlet, a serial plate and the usual stickers.
+     * [tall] is for backs taller than they are wide.
+     */
+    fun rearPanel(tall: Boolean): Texture = if (tall) rearTall else rearWide
+    private val rearTall: Texture by lazy { paintRear(128, 256) }
+    private val rearWide: Texture by lazy { paintRear(256, 160) }
+
+    private fun paintRear(w: Int, h: Int): Texture {
+        val tp = TexPaint(w, h)
+        val fw = w.toFloat()
+        val fh = h.toFloat()
+        tp.vgrad(0f, 0f, fw, fh, 0xFF2A2830.toInt(), 0xFF17161C.toInt())
+        tp.grain(0.05f, w + h)
+        // The removable service panel, its screws and a keyed lock.
+        val m = fw * 0.08f
+        tp.round(m, m, fw - 2f * m, fh - 2f * m, 4f, 0xFF211F27.toInt())
+        tp.strokeRound(m, m, fw - 2f * m, fh - 2f * m, 4f, 1.5f, 0xFF3C3A46.toInt())
+        for (sx in floatArrayOf(m + 5f, fw - m - 5f)) for (sy in floatArrayOf(m + 5f, fh - m - 5f)) {
+            tp.circle(sx, sy, 2.4f, 0xFF8A8C98.toInt())
+            tp.rect(sx - 1.6f, sy - 0.4f, 3.2f, 0.8f, 0xFF3A3A44.toInt())
+        }
+        // Louvred vents across the top.
+        val vx = m + 12f
+        val vw = fw - 2f * vx
+        var vy = m + 12f
+        for (k in 0 until 7) {
+            tp.round(vx, vy, vw, 3.4f, 1.7f, 0xFF08070B.toInt())
+            tp.rect(vx + 1f, vy + 3.4f, vw - 2f, 1f, 0xFF3A3842.toInt())
+            vy += 7f
+        }
+        // Fan grille, and the mains inlet with its switch.
+        val fanR = minOf(fw, fh) * 0.16f
+        val fanX = if (w > h) fw * 0.72f else fw * 0.5f
+        val fanY = if (w > h) fh * 0.62f else fh * 0.5f
+        tp.circle(fanX, fanY, fanR + 2f, 0xFF3C3A46.toInt())
+        tp.circle(fanX, fanY, fanR, 0xFF09080C.toInt())
+        for (k in 1..4) tp.ring(fanX, fanY, fanR * k / 4.5f, 1f, 0xFF55535F.toInt())
+        tp.line(fanX - fanR, fanY, fanX + fanR, fanY, 1f, 0xFF55535F.toInt())
+        tp.line(fanX, fanY - fanR, fanX, fanY + fanR, 1f, 0xFF55535F.toInt())
+        val ix = if (w > h) fw * 0.2f else fw * 0.3f
+        val iy = fh - m - 34f
+        tp.round(ix, iy, 26f, 18f, 2f, 0xFF0C0B10.toInt())
+        tp.rect(ix + 5f, iy + 5f, 16f, 8f, 0xFF2A2830.toInt())
+        tp.round(ix + 30f, iy + 2f, 10f, 14f, 2f, 0xFFB0213A.toInt())
+        // A riveted serial plate.
+        val px = if (w > h) fw * 0.14f else fw * 0.22f
+        val py = if (w > h) fh * 0.5f else fh * 0.7f
+        val pw = if (w > h) fw * 0.3f else fw * 0.56f
+        tp.round(px, py, pw, 18f, 2f, 0xFFB8BCC8.toInt())
+        tp.rect(px + 4f, py + 5f, pw * 0.6f, 2f, 0xFF4A4C58.toInt())
+        tp.rect(px + 4f, py + 10f, pw * 0.8f, 2f, 0xFF4A4C58.toInt())
+        tp.text("SN 04-7731", px + pw / 2f, py + 17f, 5f, 0xFF2A2C36.toInt(), Fonts.heavy)
+        // Stickers: a yellow warning triangle and a white service label.
+        val wx = if (w > h) fw * 0.52f else fw * 0.3f
+        val wy = if (w > h) fh * 0.5f else fh * 0.34f
+        tp.polygon(floatArrayOf(wx, wy + 22f, wx + 13f, wy, wx + 26f, wy + 22f), 0xFFFFD23A.toInt())
+        tp.polygon(floatArrayOf(wx + 4f, wy + 20f, wx + 13f, wy + 5f, wx + 22f, wy + 20f), 0xFF16141C.toInt())
+        tp.polygon(floatArrayOf(wx + 6.5f, wy + 18.5f, wx + 13f, wy + 8f, wx + 19.5f, wy + 18.5f), 0xFFFFD23A.toInt())
+        tp.rect(wx + 12f, wy + 10.5f, 2f, 5f, 0xFF16141C.toInt())
+        tp.rect(wx + 12f, wy + 16.5f, 2f, 1.6f, 0xFF16141C.toInt())
+        val lx = if (w > h) fw * 0.52f else fw * 0.56f
+        val ly = if (w > h) fh * 0.72f else fh * 0.36f
+        tp.round(lx, ly, 34f, 22f, 2f, 0xFFF2F0EA.toInt())
+        tp.rect(lx, ly, 34f, 6f, 0xFFE8323C.toInt())
+        for (k in 0 until 3) tp.rect(lx + 3f, ly + 9f + k * 4f, 28f - k * 6f, 1.6f, 0xFF6A6870.toInt())
+        return tp.toTexture().also { tp.recycle() }
+    }
+
     // ------------------------------------------------------------------ small parts
 
     private fun colored(color: Int) = HallArt.paint(color, 0.25f, 0.75f).full

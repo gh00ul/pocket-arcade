@@ -84,6 +84,7 @@ object FishingCabinet : CabinetDesign {
         val live = c.liveScreen()
         b.quad(cx - 10f, 49f, postZ + 2.6f, cx + 10f, 49f, postZ + 2.6f, cx + 10f, 34f, postZ + 2.6f, cx - 10f, 34f, postZ + 2.6f, live.texture.full, 0f, 0f, 1f, emissive = 1.1f)
         c.marqueeBox(cx - 18f, cx + 18f, 51f, 60f, postZ - 2f, postZ + 3f)
+        c.rearPanel(cx - 12.5f, cx + 12.5f, 32.5f, 50.5f, postZ - 1.5f)
         // Light: the water glows blue, the sign throws a warm light over the tub.
         c.light(cx, RIM_Y + 12f, tz, 0xFF4DD8FF.toInt(), 56f, 1f)
         c.light(cx, 50f, postZ + 14f, 0xFFFFD27A.toInt(), 46f, 0.8f)

@@ -4,6 +4,7 @@ import com.pocketarcade.engine.r3d.Blend
 import com.pocketarcade.engine.r3d.BoxFaces
 import com.pocketarcade.engine.r3d.ModelBuilder
 import com.pocketarcade.engine.r3d.PointLight
+import com.pocketarcade.engine.r3d.Region
 import com.pocketarcade.engine.r3d.Renderer3D
 import com.pocketarcade.engine.r3d.Xform
 import com.pocketarcade.games.MiniGame
@@ -114,14 +115,16 @@ class CabinetBuild internal constructor(
 
     /**
      * The lit marquee sign: its face leans back a little so it catches the eye from the hall's
-     * high camera, a backlit topper with the game's emblem and short name covers its top (the
-     * part of a cabinet the hall view sees most of), a lit trim edge runs along the top of the
-     * face and a row of chase bulbs sits on it.
+     * high camera while still reading square-on from a kid's eye height in front of it, a backlit
+     * topper with the game's emblem and short name covers its top (the part of a cabinet the hall
+     * view sees most of), a lit trim edge runs along the top of the face and a row of chase bulbs
+     * sits on it.
      */
     fun marqueeBox(xa: Float, xb: Float, y0: Float, y1: Float, za: Float, zb: Float) {
         val dark = art.darkPaint.full
         val hgt = y1 - y0
-        val lean = minOf(hgt * 0.4f, (zb - za) * 0.45f)
+        // A gentle lean: enough to catch the hall camera, still square-on to a kid in front of it.
+        val lean = minOf(hgt * 0.22f, (zb - za) * 0.45f)
         val zt = zb - lean
         val len = sqrt(hgt * hgt + lean * lean)
         b.quad(xa, y1, zt, xb, y1, zt, xb, y0, zb, xa, y0, zb, art.marquee.full, 0f, lean / len, hgt / len, emissive = 1.25f)
@@ -166,6 +169,35 @@ class CabinetBuild internal constructor(
     /** The red LED score display, facing +z at depth [z]. */
     fun display(xa: Float, xb: Float, ya: Float, yb: Float, z: Float) {
         b.quad(xa, yb, z, xb, yb, z, xb, ya, z, xa, ya, z, art.display.full, 0f, 0f, 1f, emissive = 1.2f)
+    }
+
+    /**
+     * The cabinet's back, for anyone walking behind the bank: a service panel ([xa]..[xb],
+     * [y0]..[y1]) laid over the back face at depth [z], facing -z, with vents, a fan, stickers
+     * and a serial plate, and the mains cable dropping from its inlet to the floor.
+     */
+    fun rearPanel(xa: Float, xb: Float, y0: Float, y1: Float, z: Float = z0) {
+        val w = xb - xa
+        val hgt = y1 - y0
+        val tall = hgt > w * 1.3f
+        val tex = MachineKit.rearPanel(tall).full
+        val zf = z - 0.06f
+        // Seen from behind, +x runs right to left: the texture's left edge goes at xb.
+        b.quad(xb, y1, zf, xa, y1, zf, xa, y0, zf, xb, y0, zf, tex, 0f, 0f, -1f, gloss = 0.25f)
+        // The mains inlet sits near the panel's bottom (see MachineKit.paintRear); its cable drops
+        // to the floor and trails off a little way behind, towards the wall socket.
+        val px = xb - w * (if (tall) 0.4f else 0.25f)
+        val py = y1 - hgt * (if (tall) 0.86f else 0.72f)
+        // In the cabinet's own dark paint, which it already draws with: no extra draw call.
+        val cable = art.darkPaint.full
+        b.capsule(px, py, zf - 0.4f, px - 0.6f, py * 0.4f, zf - 2.2f, 0.45f, cable, slices = 5, gloss = 0.3f)
+        b.capsule(px - 0.6f, py * 0.4f, zf - 2.2f, px - 1.4f, 0.45f, zf - 2.8f, 0.45f, cable, slices = 5, gloss = 0.3f)
+        b.capsule(px - 1.4f, 0.45f, zf - 2.8f, px - 3f, 0.45f, zf - 6f, 0.45f, cable, slices = 5, gloss = 0.3f)
+    }
+
+    /** A face at height [y] looking down, closing the underside of a part hung above eye level. */
+    fun underside(xa: Float, xb: Float, za: Float, zb: Float, y: Float, region: Region = art.darkPaint.full) {
+        b.quad(xa, y, zb, xb, y, zb, xb, y, za, xa, y, za, region, 0f, -1f, 0f)
     }
 
     /** Glass front and sides (and back, if [back]) of a case. */

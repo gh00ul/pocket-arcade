@@ -99,6 +99,7 @@ object PinballCabinet : CabinetDesign {
         b.quad(x0 + 1.5f, top - 1.5f, bz + 0.15f, x1 - 1.5f, top - 1.5f, bz + 0.15f, x1 - 1.5f, 45.5f, bz + 0.15f, x0 + 1.5f, 45.5f, bz + 0.15f, live.texture.full, 0f, 0f, 1f, emissive = 1.15f)
         c.bulbRow(x0 + 1.5f, x1 - 1.5f, 44.4f, bz + 0.6f, 7)
         c.marqueeBox(x0, x1, top, c.h - 2f, z0, bz + 1f)
+        c.rearPanel(x0 + 0.3f, x1 - 0.3f, BODY_TOP + 0.5f, top, z0)
         c.light(cx, top - 4f, bz + 7f, art.glow, 48f, 0.9f)
         c.light(cx, 46f, c.cz + 8f, 0xFFB8C8FF.toInt(), 40f, 0.55f)
     }

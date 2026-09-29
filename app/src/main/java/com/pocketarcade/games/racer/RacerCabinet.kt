@@ -86,7 +86,9 @@ object RacerCabinet : CabinetDesign {
         // Sun visor over the screen, chequered along its edge with a neon strip under it.
         b.box(ix0, 53f, cabZ - 2f, ix1, 55.5f, cabZ + 6f, BoxFaces(front = RacerArt.checker.full, top = dark, left = dark, right = dark, frontEmissive = 0.5f))
         b.quad(ix0, 53f, cabZ + 6.05f, ix1, 53f, cabZ + 6.05f, ix1, 52.3f, cabZ + 6.05f, ix0, 52.3f, cabZ + 6.05f, glow, 0f, 0f, 1f, emissive = 1.4f)
+        c.underside(ix0, ix1, cabZ - 2f, cabZ + 6f, 53f)
         c.marqueeBox(ix0, ix1, h - 10f, h, z0, cabZ + 2f)
+        c.rearPanel(ix0, ix1, 1f, h - 10f)
 
         // Dash with the lit dials, steering wheel, gear lever and pedals.
         b.box(ix0, 17f, cabZ, ix1, 27f, cabZ + 7f, BoxFaces(front = RacerArt.dash.full, top = metal, frontEmissive = 0.8f, gloss = 0.5f))
