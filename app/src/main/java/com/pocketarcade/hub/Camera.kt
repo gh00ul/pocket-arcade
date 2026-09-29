@@ -52,6 +52,13 @@ class HubCamera {
         const val BOB_SWAY = 0.5f
         /** How much wider (degrees) the first-person view gets at a full run. */
         const val RUN_FOV_KICK_DEG = 4f
+        /**
+         * The arrival from the title: the eye starts this share further back from what it looks at
+         * and a little wider, and settles in as [HubCamera.entrance] drains, so the hall's first
+         * frames carry on the title's push instead of popping.
+         */
+        const val ENTRANCE_PULLBACK = 0.20f
+        const val ENTRANCE_FOV = 0.08f
         /** Near clipping distances: first person stands right against cabinets. */
         const val OVERHEAD_NEAR = 8f
         const val FP_NEAR = 1.5f
@@ -121,6 +128,12 @@ class HubCamera {
     var diveX = 0f
     var diveY = 0f
     var diveZ = 0f
+
+    /**
+     * 1 as the title hands over to the hall, easing to 0 (see [ENTRANCE_PULLBACK]); 0 at all other
+     * times. Set by the app's handoff, never by the hall itself.
+     */
+    var entrance = 0f
 
     /** The player sits a little below the middle of the screen, where there's less perspective squeeze. */
     private val below = 30f
@@ -278,6 +291,15 @@ class HubCamera {
             gy = lerp(gy, ly, s)
             gz = lerp(gz, lz, s)
             fov = lerp(fov, (fpFovY(aspect) * fovScale).coerceIn(MIN_FOV_DEG * DEG, MAX_FOV_DEG * DEG) + fovKick * DEG, s)
+        }
+        if (entrance > 0f) {
+            // Back off along the line of sight, and open the lens a touch: both settle as it drains.
+            val k = entrance.coerceIn(0f, 1f)
+            val pull = 1f + ENTRANCE_PULLBACK * k
+            ex = gx + (ex - gx) * pull
+            ey = gy + (ey - gy) * pull
+            ez = gz + (ez - gz) * pull
+            fov *= 1f + ENTRANCE_FOV * k
         }
         if (dive > 0f) {
             val t = dive.coerceIn(0f, 1f)

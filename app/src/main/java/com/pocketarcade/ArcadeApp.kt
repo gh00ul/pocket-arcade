@@ -27,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -56,11 +57,13 @@ import com.pocketarcade.ui.HudExtras
 import com.pocketarcade.ui.HudExtrasReach
 import com.pocketarcade.ui.ArcadeText
 import com.pocketarcade.ui.GlassBox
+import com.pocketarcade.ui.HandoffWash
 import com.pocketarcade.ui.MapScreen
 import com.pocketarcade.ui.PhotoBoothScreen
 import com.pocketarcade.ui.PrizeCounterScreen
 import com.pocketarcade.ui.ProfileScreen
 import com.pocketarcade.ui.SettingsScreen
+import com.pocketarcade.ui.TitleHandoff
 import com.pocketarcade.ui.TitleScreen
 import com.pocketarcade.ui.TokenMachineScreen
 import com.pocketarcade.ui.playerLook
@@ -135,6 +138,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     var diveSpot by remember { mutableStateOf<Spot?>(null) }
     val dive = remember { Animatable(0f) }
     val fade = remember { Animatable(0f) }
+    // The title's push into the hall and the hall's arrival (see ui/Handoff.kt).
+    val handoff = remember { TitleHandoff() }
     val scope = rememberCoroutineScope()
     val audio = services.audio
     // The hall's camera: taken from the save once, then driven by the HUD button (and saved).
@@ -337,16 +342,20 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         // Every 3D picture is drawn by the GPU on this surface, under the interface.
         GlSurface(Modifier.fillMaxSize())
         when (screen) {
-            Screen.TITLE -> TitleScreen(save, games) {
+            Screen.TITLE -> TitleScreen(save, games, reduceMotion = settings.reduceMotion, exit = { handoff.exit.value }) {
                 if (!busy) {
                     scope.launch {
                         busy = true
                         audio.play(Sfx.COIN)
                         audio.play(Sfx.WHOOSH, 0.5f)
-                        fade.animateTo(1f, tween(300))
-                        screen = Screen.HUB
-                        fade.animateTo(0f, tween(500))
+                        // Title push -> (a loading step can go in `gate`) -> the hall easing in.
+                        handoff.run(
+                            calm = settings.reduceMotion,
+                            enterHall = { screen = Screen.HUB },
+                            onCamera = { world.camera.entrance = it },
+                        )
                         busy = false
+                        handoff.fadeInHud()
                     }
                 }
             }
@@ -361,6 +370,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                 )
                 if (!busy && dive.value <= 0.01f) {
                     Hud(
+                        modifier = Modifier.graphicsLayer { alpha = handoff.hud.value },
                         save = save,
                         onProfile = {
                             world.cancelInput()
@@ -380,6 +390,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                         },
                     )
                     HudExtras(
+                        modifier = Modifier.graphicsLayer { alpha = handoff.hud.value },
                         onMap = {
                             world.cancelInput()
                             overlay = Overlay.MAP
@@ -441,6 +452,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                 }
             }
         }
+
+        HandoffWash(handoff, settings.reduceMotion)
 
         if (fade.value > 0.001f) {
             Canvas(Modifier.fillMaxSize()) {
