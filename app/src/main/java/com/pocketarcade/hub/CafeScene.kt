@@ -21,7 +21,7 @@ class CafeScene {
     private val barista = Figure(Looks.barista)
     private val slush: Array<Model> = Array(FLAVOURS.size) { slushModel(FLAVOURS[it]) }
     private val xf = Xform()
-    private val shadow = HallArt.shadow.full
+    private val shadow = FigureShadow(HallArt.shadow.full)
     private val puff = HallArt.glow.full
 
     /** Slush fills most of a tank: a column wrapped in swirled stripes, turned about its axis. */
@@ -44,7 +44,7 @@ class CafeScene {
         if (CafeLayout.BAR_X1 < minX || CafeLayout.BAR_X0 > maxX || CafeLayout.COUNTER_Z1 < minZ || CafeLayout.BAR_Z0 > maxZ) return
         val b = world.cafe.barista
         barista.draw(r, b.x, 0f, b.z, b.yaw, b.pose, b.phase, t, 1.1f, b.item)
-        r.flat(b.x, b.z + 1f, 0.2f, 20f * 1.1f, 14f * 1.1f, shadow, blend = Blend.ALPHA, alpha = 0.5f)
+        shadow.draw(r, b.x, b.z, 1.1f)
 
         val tanks = CafeLayout.SLUSH_TANKS
         for (i in tanks.indices) {
