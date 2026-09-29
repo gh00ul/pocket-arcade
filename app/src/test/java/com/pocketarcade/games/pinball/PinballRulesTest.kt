@@ -304,6 +304,50 @@ class PinballRulesTest {
         assertTrue(full.botBallInPlay(0) && full.botBallX(0) < T.PLAY_W)
     }
 
+    /** Steps until ball 0 is back on the plunger (or [limit] seconds pass); true if it got there. */
+    private fun rollBack(game: PinballGame, limit: Float, each: () -> Unit = {}): Boolean {
+        var t = 0f
+        while (!game.botBallInLane(0) && t < limit) {
+            each()
+            game.update(FIXED_DT, CLOCK)
+            t += FIXED_DT
+        }
+        return game.botBallInLane(0)
+    }
+
+    @Test
+    fun aWeakPlungeRollsBackForTheNextPullNotAFreeAutoLaunch() {
+        val game = plungeWithPull(0.2f)
+        assertEquals(1, game.botLaunches)
+        assertTrue("a weak plunge should fall short of the gate and roll back", rollBack(game, 6f))
+        // Long enough for an automatic relaunch (AUTO_DELAY) to have happened if one were coming.
+        steps(game, 1.5f)
+        assertEquals("the machine must not relaunch a ball the player plunged too weakly", 1, game.botLaunches)
+        assertTrue("the ball waits on the plunger for the player again", game.botLaneReady)
+        // The player's second try goes.
+        game.onTouch(TouchType.DOWN, 4L, PLUNGE_X, PLUNGE_Y, 0L)
+        game.onTouch(TouchType.MOVE, 4L, PLUNGE_X, PLUNGE_Y + PinballTuning.PULL_RANGE, 100L)
+        game.onTouch(TouchType.UP, 4L, PLUNGE_X, PLUNGE_Y + PinballTuning.PULL_RANGE, 200L)
+        assertEquals(2, game.botLaunches)
+    }
+
+    @Test
+    fun aWeakPlungeDuringMultiballIsRelaunchedByTheMachine() {
+        val game = plungeWithPull(0.2f)
+        // The player is busy with another ball elsewhere on the table (parked so it can't drain).
+        game.botPlace(1, T.CX, 200f, 0f, 0f)
+        val park = { game.botHold(1, T.CX, 200f) }
+        assertTrue(rollBack(game, 6f, park))
+        assertFalse("with another ball in play the player can't be plunging", game.botLaneReady)
+        var t = 0f
+        while (t < 1.5f) {
+            park()
+            game.update(FIXED_DT, CLOCK)
+            t += FIXED_DT
+        }
+        assertEquals("the machine plunges the returned ball itself", 2, game.botLaunches)
+    }
+
     @Test
     fun cancelInputDropsBothFlippersAndThePlungerAndANewFingerWorks() {
         val game = startedGame()
