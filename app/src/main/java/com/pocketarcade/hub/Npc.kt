@@ -213,6 +213,24 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
         }
     }
 
+    /** The direction (radians, as [yaw]) this walk is heading right now: at the next path tile or, last, the end point. */
+    private fun headingOf(world: HubWorld): Float {
+        val gx: Float
+        val gy: Float
+        if (pathPos < path.size) {
+            val node = path[pathPos]
+            val atEnd = hasEnd && pathPos == path.size - 1
+            gx = if (atEnd) endX else (node % world.map.cols) * HubLayout.TILE + HubLayout.TILE / 2f
+            gy = if (atEnd) endY else (node / world.map.cols) * HubLayout.TILE + HubLayout.TILE / 2f + 4f
+        } else if (hasEnd) {
+            gx = endX
+            gy = endY
+        } else {
+            return targetYaw
+        }
+        return if (gx == x && gy == y) targetYaw else atan2(gx - x, gy - y)
+    }
+
     private fun arrive(world: HubWorld) {
         if (queueSpot >= 0) {
             state = State.QUEUE
@@ -301,8 +319,11 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
                 timer = 0f
             }
             State.WALK -> {
-                val hx = sin(targetYaw)
-                val hy = cos(targetYaw)
+                // Which way they're really going: their facing only turns to it once they've taken
+                // a step, and this branch keeps them from taking one.
+                val heading = headingOf(world)
+                val hx = sin(heading)
+                val hy = cos(heading)
                 // The player is ahead: step aside, away from them, if there's room; else wait.
                 if (-(dx * hx + dy * hy) / d > 0.2f) {
                     var sx = -hy
