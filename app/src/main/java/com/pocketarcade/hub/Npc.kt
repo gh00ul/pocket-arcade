@@ -69,6 +69,10 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
     private val emotes = Emotes((seed * 1000f).toInt())
     private val reaction = 0.25f + 0.45f * AnimMath.unit((seed * 1000f).toInt(), 0, 9)
 
+    init {
+        anim.prime(x, y, yaw, pose)
+    }
+
     private var timer = rng.range(0.5f, 3f)
     private var path: IntArray = NO_PATH
     private var pathPos = 0

@@ -48,7 +48,7 @@ class Player {
         private set
 
     /** How the kid moves: blended poses, gait and follow-through (see [FigureAnim]); stepped by [update] and [walkFirstPerson]. */
-    val anim = FigureAnim(seed = 1)
+    val anim = FigureAnim(seed = 1).also { it.prime(0f, 0f, PI.toFloat(), Pose.STAND) }
 
     private val out = FloatArray(2)
     private val slid = FloatArray(2)

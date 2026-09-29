@@ -100,4 +100,48 @@ class FigureAnimTest {
         assertTrue("no settle at all ($overshoot)", overshoot > 0.02f)
         assertTrue("a plop, not a settle ($overshoot)", overshoot < 0.12f)
     }
+
+    @Test
+    fun portraitsKeepTheirOldPoses() {
+        // The prize counter and the photo booth pose figures from scratch: their arms must be where they always were.
+        val a = FigureAnim()
+        val t = 1.7f
+        for (side in 0..1) {
+            val sd = if (side == 0) -1f else 1f
+            a.setStatic(Pose.STAND, t, 0f, 0f)
+            assertEquals(kotlin.math.sin(t * 1.3f + sd) * 0.05f, a.armPitch[side], 1e-4f)
+            assertEquals(0.1f * sd, a.armRoll[side], 1e-4f)
+            a.setStatic(Pose.CHEER, t, 0f, 0f)
+            assertEquals(-2.6f + kotlin.math.sin(t * 9f + sd) * 0.25f, a.armPitch[side], 1e-4f)
+            assertEquals(0.2f * sd, a.armRoll[side], 1e-4f)
+            assertEquals(abs(kotlin.math.sin(t * 9f)) * 2.5f, a.rootY, 1e-4f)
+            a.setStatic(Pose.SIT, t, 0f, 0f)
+            assertEquals(-0.6f, a.armPitch[side], 1e-4f)
+            assertEquals(-FigureAnim.SEAT_LEG, a.legPitch[side], 1e-4f)
+        }
+        a.setStatic(Pose.HOLD, t, 0f, 0f)
+        assertEquals(-1.25f + kotlin.math.sin(t * 2f) * 0.04f, a.armPitch[1], 1e-4f)
+        assertEquals(kotlin.math.sin(t * 1.3f) * 0.05f, a.armPitch[0], 1e-4f)
+        // A portrait has no lean, no tilt, no turned head, no closed eyes and a hat sitting straight.
+        for (p in listOf(Pose.STAND, Pose.CHEER, Pose.SIT, Pose.HOLD)) {
+            a.setStatic(p, t, 0f, 0f)
+            assertEquals(0f, a.leanRoll, 0.02f)
+            assertEquals(0f, a.headYaw, 1e-4f)
+            assertEquals(0f, a.blink, 0f)
+            assertEquals(0f, a.hatPitch, 0f)
+            assertEquals(0f, a.hatRoll, 0f)
+            assertEquals(0f, a.tailPitch, 0f)
+        }
+    }
+
+    @Test
+    fun aPrimedFigureFacesTheRightWayFromTheFirstFrame() {
+        val a = FigureAnim()
+        a.prime(300f, 500f, 2.2f, Pose.STAND)
+        assertEquals(2.2f, a.yaw, 0f)
+        // Its first real update from where it stands doesn't look like a sprint.
+        a.update(DT, 300f, 500f, 2.2f, Pose.STAND)
+        assertEquals(0f, a.speed, 1e-3f)
+        assertEquals(2.2f, a.yaw, 1e-4f)
+    }
 }

@@ -167,8 +167,8 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         private const val SHIFT_TIME = 1.9f
 
         /** A foot tap: the toe's lift (figure units), the leg's step forward (radians), taps per second (radians) and its length. */
-        private const val TAP_LIFT = 0.35f
-        private const val TAP_PITCH = 0.07f
+        private const val TAP_LIFT = 0.6f
+        private const val TAP_PITCH = 0.09f
         private const val TAP_RATE = 14f
         private const val TAP_TIME = 1.5f
 
@@ -773,6 +773,17 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         headPitchSpring.reset(accHeadPitch)
         headRollSpring.reset(accHeadRoll)
         solve()
+    }
+
+    /**
+     * Starts the figure off already standing at ([x], [z]) facing [yaw] in [pose], so that the
+     * first frame drawn before its first update is not a figure facing the wrong way.
+     */
+    fun prime(x: Float, z: Float, yaw: Float, pose: Pose) {
+        setStatic(pose, clock, 0f, yaw)
+        px = x
+        pz = z
+        blender.snap(pose)
     }
 
     private fun seatTarget(pose: Pose): Float = if (pose == Pose.SIT || pose == Pose.SIP) 1f else 0f
