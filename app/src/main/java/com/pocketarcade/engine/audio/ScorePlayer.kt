@@ -32,6 +32,9 @@ internal class ScorePlayer(private val sampleRate: Int, poolSize: Int, private v
 
         /** A note is released this many steps' worth of a step early, so it never runs into the next one. */
         private const val GATE_TRIM = 0.06f
+
+        /** The most lanes a track may have (the cursors are allocated once, not per track). */
+        const val MAX_LANES = 32
     }
 
     private val sr = sampleRate.toFloat()
@@ -60,7 +63,7 @@ internal class ScorePlayer(private val sampleRate: Int, poolSize: Int, private v
     private var nextEdge = 0L
     private var stepNumber = 0L
     private var samplesPerStep = 0.0
-    private var cursor = IntArray(0)
+    private val cursor = IntArray(MAX_LANES)
     private val layerNow = FloatArray(Track.LAYERS)
     private val layerTarget = FloatArray(Track.LAYERS)
     private val layerStart = FloatArray(Track.LAYERS)
@@ -71,6 +74,7 @@ internal class ScorePlayer(private val sampleRate: Int, poolSize: Int, private v
 
     /** Starts [t] from its first step. [intensity] sets the layers straight away (no fade-in) so a new track begins as it means to go on. */
     fun start(t: Track, intensity: Float) {
+        require(t.lanes.size <= MAX_LANES) { "${t.name} has ${t.lanes.size} lanes" }
         for (v in voices) v.kill()
         track = t
         active = true
@@ -79,7 +83,7 @@ internal class ScorePlayer(private val sampleRate: Int, poolSize: Int, private v
         stepNumber = 0L
         samplesPerStep = sampleRate * 60.0 / (t.bpm * 4.0)
         nextEdge = edge(0)
-        cursor = IntArray(t.lanes.size)
+        java.util.Arrays.fill(cursor, 0)
         pump = 0f
         for (l in 0 until Track.LAYERS) {
             layerTarget[l] = layerGoal(t, l, intensity)

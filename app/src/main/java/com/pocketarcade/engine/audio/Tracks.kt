@@ -69,6 +69,18 @@ internal object Tracks {
     /** Every theme, for tests. */
     val themes: List<Track> get() = listOf(TITLE, HALL, RESULTS) + games.values
 
+    /**
+     * Builds every theme and stinger now (the title's and the hall's first). The mixer calls this before
+     * it starts playing, so no theme is ever built in the middle of a block.
+     */
+    fun warmUp() {
+        TITLE
+        HALL
+        RESULTS
+        themes
+        stingers
+    }
+
     /** Every stinger, for tests. */
     val stingers: List<StingerDef> get() = Stinger.entries.map { stinger(it) }
 

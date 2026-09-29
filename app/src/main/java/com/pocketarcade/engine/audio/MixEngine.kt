@@ -84,8 +84,8 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
     private val qPitch = FloatArray(QUEUE_CAP)
     private val qPriority = IntArray(QUEUE_CAP)
 
-    /** The caller's scratch for [playAt] (one per engine: callers share the app's UI thread). */
-    private val callerPlacement = Placement()
+    /** Each calling thread's scratch for [playAt], so any thread may call it without allocating or racing. */
+    private val callerPlacement = ThreadLocal.withInitial { Placement() }
 
     /** Plays [sfx] from dead centre; [pitch] scales playback speed, so 2.0 is an octave up. */
     fun play(sfx: Sfx, volume: Float, pitch: Float) {
@@ -99,7 +99,7 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
     fun playAt(sfx: Sfx, x: Float, z: Float, volume: Float, pitch: Float, priority: Int = Priority.NORMAL) {
         val v = volume * sfxVolume
         if (muted || v <= 0f) return
-        val p = callerPlacement
+        val p = callerPlacement.get()!!
         Spatial.place(listenerX, listenerZ, listenerYaw, x, z, p)
         if (p.silent) return
         enqueue(sfx, p.left * v, p.right * v, pitch, priority, p.send * v)

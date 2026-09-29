@@ -9,6 +9,7 @@ import com.pocketarcade.engine.audio.MixEngine
 import com.pocketarcade.engine.audio.Music
 import com.pocketarcade.engine.audio.MusicScene
 import com.pocketarcade.engine.audio.Room
+import com.pocketarcade.engine.audio.Tracks
 import com.pocketarcade.hub.HallSoundSink
 
 /** Every sound effect in the game. All of them are synthesized at startup; there are no audio files. */
@@ -185,6 +186,12 @@ class AudioSynth : HallSoundSink {
             generateAll()
         } catch (_: Exception) {
             return
+        }
+        // Build every theme now, before the track is playing, so a first visit to the hall or a machine
+        // never stalls the mixer in the middle of a block. A bad score costs its music, not the sound.
+        try {
+            Tracks.warmUp()
+        } catch (_: Exception) {
         }
         val track = try {
             buildTrack()
