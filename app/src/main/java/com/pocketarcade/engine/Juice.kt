@@ -273,3 +273,63 @@ class TimeScale(private val motion: () -> Float = { ScreenShake.intensity }) {
         scale = 1f
     }
 }
+
+/**
+ * The spring behind a camera punch. [kick] gives it a shove and it swings out (a push-in, the
+ * value rising to about the kicked amount in 60 ms), overshoots a little the other way (a soft
+ * pull-back of about a sixth) and settles within half a second. [value] is what the camera reads:
+ * 1 is the biggest punch, 0 rest.
+ *
+ * The response is fixed by [STIFFNESS] and [DAMPING] (slightly under-damped: ζ ≈ 0.49), and
+ * [KICK_SPEED] is calibrated so that kicking [amount] peaks at about [amount]. Sub-stepped, so a
+ * long frame can't blow it up, and allocation-free. It does nothing while reduce motion is on
+ * ([motion] is 0), and a punch in flight is cut dead if that is switched on.
+ */
+class PunchSpring(private val motion: () -> Float = { ScreenShake.intensity }) {
+    companion object {
+        const val STIFFNESS = 420f
+        const val DAMPING = 20f
+        /** The velocity a full-strength kick adds, calibrated so its peak is about 1 (see the class notes). */
+        const val KICK_SPEED = 37f
+        /** Kicks stronger than this are clamped, so a stack of them can't tear the picture. */
+        const val MAX_AMOUNT = 1.5f
+        private const val SUB_STEP = 1f / 240f
+        private const val REST = 0.0005f
+    }
+
+    /** How far the punch is out, 1 at the biggest; slightly negative while it swings back. */
+    var value = 0f
+        private set
+    private var velocity = 0f
+
+    /** True while the spring is moving. */
+    val active: Boolean get() = value != 0f || velocity != 0f
+
+    fun kick(amount: Float) {
+        if (amount.isNaN() || amount <= 0f || motion() <= 0f) return
+        // Capped as a whole, so a stack of kicks in one moment can't exceed the strongest single one.
+        velocity = (velocity + amount.coerceAtMost(MAX_AMOUNT) * KICK_SPEED).coerceAtMost(MAX_AMOUNT * KICK_SPEED)
+    }
+
+    fun update(dt: Float) {
+        if (!active) return
+        if (motion() <= 0f) {
+            reset(); return
+        }
+        var left = dt.coerceIn(0f, 0.1f)
+        while (left > 0f) {
+            val h = minOf(left, SUB_STEP)
+            // Semi-implicit Euler: stable at these rates and plenty accurate for a camera.
+            velocity += (-STIFFNESS * value - DAMPING * velocity) * h
+            value += velocity * h
+            left -= h
+        }
+        value = value.coerceIn(-0.5f, MAX_AMOUNT)
+        if (kotlin.math.abs(value) < REST && kotlin.math.abs(velocity) < 0.02f) reset()
+    }
+
+    fun reset() {
+        value = 0f
+        velocity = 0f
+    }
+}

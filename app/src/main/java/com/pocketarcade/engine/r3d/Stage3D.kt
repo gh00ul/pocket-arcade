@@ -1,6 +1,7 @@
 package com.pocketarcade.engine.r3d
 
 import com.pocketarcade.engine.Particles
+import com.pocketarcade.engine.PunchSpring
 import com.pocketarcade.engine.gl.Gfx
 import com.pocketarcade.engine.gl.GfxQuality
 import kotlin.math.roundToInt
@@ -38,6 +39,25 @@ object GameViewport {
      * Anything left false, such as a flat game with no [Stage3D], paints them in 2D instead.
      */
     var particlesInGl = false
+
+    /**
+     * A camera punch the game host wants (from [com.pocketarcade.games.GameFx.punch]), 0 for none.
+     * The next [Stage3D.begin] takes it; the host clears what no stage took (a flat game).
+     */
+    var punchRequest = 0f
+        private set
+
+    /** Asks for a camera punch of [amount] (0..1); the strongest request in a frame wins. */
+    fun requestPunch(amount: Float) {
+        if (amount > punchRequest) punchRequest = amount
+    }
+
+    /** Hands the pending punch to a stage and clears it. */
+    fun takePunch(): Float {
+        val p = punchRequest
+        punchRequest = 0f
+        return p
+    }
 }
 
 /**
@@ -48,6 +68,13 @@ object GameViewport {
  * Projection and touch helpers are plain math, so games can use them in headless tests too.
  */
 class Stage3D(val fieldW: Int, val fieldH: Int) {
+    companion object {
+        /** At a full punch the lens tightens by this fraction of the field of view... */
+        const val PUNCH_FOV = 0.05f
+        /** ...and the eye moves this fraction of the way to the target: together about 8% bigger. */
+        const val PUNCH_DOLLY = 0.03f
+    }
+
     /** Follows the frame-rate cap: on a fast display, frames the GPU would not draw aren't recorded. */
     val r = Renderer3D(fieldW, fieldH).also { it.frameCapped = true }
 
@@ -62,6 +89,23 @@ class Stage3D(val fieldW: Int, val fieldH: Int) {
     private var tgtZ = 0f
     private var fov = 1f
     private var centerY = 0.5f
+
+    private val punchSpring = PunchSpring()
+    private var punchedCam = false
+    private var lastBeginNanos = 0L
+
+    /** Where the frame clock comes from; tests swap it to step the punch deterministically. */
+    internal var nanoClock: () -> Long = System::nanoTime
+
+    /**
+     * Kicks the camera: a quick push-in (the lens tightens and the eye dollies toward the target)
+     * that springs back with a slight overshoot, applied in [begin] and off with reduce motion.
+     * [amount] is 0..1 (0.3 for a solid hit, 1 for the biggest moment).
+     */
+    fun punch(amount: Float) = punchSpring.kick(amount)
+
+    /** How far the punch is out right now (1 at the biggest, slightly negative on the swing back). */
+    val punchValue: Float get() = punchSpring.value
 
     fun look(
         eyeX: Float, eyeY: Float, eyeZ: Float, tx: Float, ty: Float, tz: Float,
@@ -84,12 +128,38 @@ class Stage3D(val fieldW: Int, val fieldH: Int) {
     fun touchToPlane(fx: Float, fy: Float, planeY: Float, out: FloatArray): Boolean =
         cam.rayToPlaneY(fx, fy, planeY, out)
 
-    /** Starts a frame with the camera set. Draw into the returned renderer. */
+    /** Starts a frame with the camera set (and any punch applied). Draw into the returned renderer. */
     fun begin(): Renderer3D {
         r.startFrame()
         r.resize(fieldW, fieldH)
         r.camera.near = cam.near
-        r.camera.lookAt(eyeX, eyeY, eyeZ, tgtX, tgtY, tgtZ, fov, fieldW, fieldH, centerY)
+        val requested = GameViewport.takePunch()
+        if (requested > 0f) punchSpring.kick(requested)
+        // The punch runs on the wall clock, so it plays out over the same half second whether the
+        // game is frozen by a hit-stop, slowed, paused or drawing at 30 or 120 fps.
+        val now = nanoClock()
+        val dt = if (lastBeginNanos == 0L) 0f else ((now - lastBeginNanos) / 1e9f).coerceIn(0f, 0.05f)
+        lastBeginNanos = now
+        punchSpring.update(dt)
+        val p = punchSpring.value
+        if (p != 0f) {
+            // Push in: a tighter lens and the eye a little nearer the target. The game's own camera
+            // follows, so touches and projected popups still land where the picture shows things.
+            val k = p * PUNCH_DOLLY
+            val ex = eyeX + (tgtX - eyeX) * k
+            val ey = eyeY + (tgtY - eyeY) * k
+            val ez = eyeZ + (tgtZ - eyeZ) * k
+            val f = fov * (1f - p * PUNCH_FOV)
+            r.camera.lookAt(ex, ey, ez, tgtX, tgtY, tgtZ, f, fieldW, fieldH, centerY)
+            cam.lookAt(ex, ey, ez, tgtX, tgtY, tgtZ, f, fieldW, fieldH, centerY)
+            punchedCam = true
+        } else {
+            r.camera.lookAt(eyeX, eyeY, eyeZ, tgtX, tgtY, tgtZ, fov, fieldW, fieldH, centerY)
+            if (punchedCam) {
+                cam.lookAt(eyeX, eyeY, eyeZ, tgtX, tgtY, tgtZ, fov, fieldW, fieldH, centerY)
+                punchedCam = false
+            }
+        }
         return r
     }
 

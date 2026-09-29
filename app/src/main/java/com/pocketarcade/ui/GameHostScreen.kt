@@ -236,7 +236,10 @@ fun GameHostScreen(
     }
 
     DisposableEffect(game) {
-        onDispose { Gfx.remove(GameViewport.SLOT) }
+        onDispose {
+            Gfx.remove(GameViewport.SLOT)
+            GameViewport.takePunch()
+        }
     }
 
     LaunchedEffect(appPaused) {
@@ -251,7 +254,9 @@ fun GameHostScreen(
         // of these real steps it gets, and each one it gets is still exactly FIXED_DT. Only the round
         // itself is ever slowed: intro, countdown, pause and results run in real time.
         val playing = state.phase == HostPhase.PLAYING
-        fx.flush(if (playing) state.time else null)
+        val punch = fx.flush(if (playing) state.time else null)
+        // The camera kick isn't time control: it plays in real time, even through a freeze.
+        if (punch > 0f) GameViewport.requestPunch(punch)
         val stepGame = (playing || state.phase == HostPhase.ENDING) && state.sim.advance(state.time.update(dt))
         when (state.phase) {
             HostPhase.COUNTDOWN -> {
@@ -582,6 +587,8 @@ private fun drawHost(scope: DrawScope, state: HostState, game: MiniGame, topInse
                 scale(gs, gs, Offset.Zero)
             }) {
                 game.draw(this)
+                // A punch no 3D stage took (a flat game) has nothing to move: drop it, don't let it linger.
+                GameViewport.takePunch()
                 drawOverlays(this, state, game)
                 state.particles.draw(this)
             }
