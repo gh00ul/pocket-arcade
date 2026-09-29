@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.pocketarcade.ArcadeServices
 import com.pocketarcade.data.SaveState
+import com.pocketarcade.data.TokenGate
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
 import com.pocketarcade.engine.ArcadeFont
@@ -136,9 +137,13 @@ fun GameHostScreen(
     val exit by rememberUpdatedState(onExit)
     val audio = services.audio
     val haptics = services.haptics
+    // A prize won at the very end of a round is saved even if the player leaves at once.
     val fx = remember(game) {
-        GameFx(audio, haptics) { id -> scope.launch { services.repo.addPrize(id) } }
+        GameFx(audio, haptics) { id -> services.persist { services.repo.addPrize(id) } }
     }
+    // Held from the PLAY AGAIN tap until its token is spent (or refused), so a quick double tap
+    // can't spend two tokens for one restart.
+    val playAgainGate = remember(game) { TokenGate() }
     val state = remember(game) {
         HostState(game).also {
             game.start(fx)
@@ -157,7 +162,8 @@ fun GameHostScreen(
         state.printingDone = total == 0
         state.phase = HostPhase.RESULTS
         state.phaseT = 0f
-        scope.launch {
+        // The payout is saved even if the player leaves before the write returns.
+        services.persist {
             services.repo.addTickets(total)
             services.repo.recordScore(game.id, score)
         }
@@ -182,10 +188,15 @@ fun GameHostScreen(
         }
     }
 
+    /** Leaves from the results screen, unless PLAY AGAIN is still spending its token (it would be lost). */
+    fun leaveResults() {
+        if (!playAgainGate.claimed) exit(false)
+    }
+
     fun onExitPressed() {
         when (state.phase) {
             HostPhase.INTRO -> exit(true)
-            HostPhase.RESULTS -> exit(false)
+            HostPhase.RESULTS -> leaveResults()
             HostPhase.PAUSED -> {
                 state.phase = state.resumePhase
             }
@@ -346,23 +357,30 @@ fun GameHostScreen(
                         ArcadeButton(
                             if (save.tokens > 0) "PLAY AGAIN\n1 TOKEN" else "NO TOKENS\nLEFT",
                             {
-                                scope.launch {
-                                    if (services.repo.spendToken()) {
-                                        audio.play(Sfx.TOKEN)
-                                        haptics.tick()
-                                        state.best = maxOf(state.best, state.resultScore)
-                                        game.start(fx)
-                                        state.resetRound()
-                                        state.phase = HostPhase.COUNTDOWN
-                                    } else {
-                                        audio.play(Sfx.ERROR)
+                                // Claimed on the tap, before the suspending spend (like enterMachine).
+                                if (playAgainGate.tryClaim()) {
+                                    scope.launch {
+                                        try {
+                                            if (services.repo.spendToken()) {
+                                                audio.play(Sfx.TOKEN)
+                                                haptics.tick()
+                                                state.best = maxOf(state.best, state.resultScore)
+                                                game.start(fx)
+                                                state.resetRound()
+                                                state.phase = HostPhase.COUNTDOWN
+                                            } else {
+                                                audio.play(Sfx.ERROR)
+                                            }
+                                        } finally {
+                                            playAgainGate.release()
+                                        }
                                     }
                                 }
                             },
                             color = Color(Pal.GREEN),
                             enabled = save.tokens > 0,
                         )
-                        ArcadeButton("EXIT", { exit(false) }, color = Color(Pal.PURPLE))
+                        ArcadeButton("EXIT", { leaveResults() }, color = Color(Pal.PURPLE))
                     }
                 }
             }

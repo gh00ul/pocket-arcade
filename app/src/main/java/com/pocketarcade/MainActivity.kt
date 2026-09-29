@@ -11,6 +11,9 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.pocketarcade.data.ArcadeRepository
 import com.pocketarcade.engine.AudioSynth
 import com.pocketarcade.engine.Haptics
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 class MainActivity : ComponentActivity() {
     private lateinit var services: ArcadeServices
@@ -22,7 +25,7 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
         val audio = AudioSynth().also { it.start() }
-        services = ArcadeServices(ArcadeRepository(applicationContext), audio, Haptics.from(applicationContext))
+        services = ArcadeServices(ArcadeRepository(applicationContext), audio, Haptics.from(applicationContext), appScope)
         signals.launchGame = intent?.getStringExtra(EXTRA_PLAY)
         setContent { ArcadeApp(services, signals) }
     }
@@ -35,6 +38,9 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** Intent extra naming a machine id to walk straight into. */
         const val EXTRA_PLAY = "play"
+
+        /** Lives as long as the process (never cancelled), so a save begun just before the Activity is recreated still lands. */
+        private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     }
 
     override fun onResume() {

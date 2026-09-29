@@ -49,11 +49,30 @@ import com.pocketarcade.ui.ProfileScreen
 import com.pocketarcade.ui.TitleScreen
 import com.pocketarcade.ui.TokenMachineScreen
 import com.pocketarcade.ui.playerLook
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-/** Long-lived services shared by every screen. */
-class ArcadeServices(val repo: ArcadeRepository, val audio: AudioSynth, val haptics: Haptics)
+/**
+ * Long-lived services shared by every screen. [appScope] outlives every screen (it is never
+ * cancelled), for saves that must land even when the player leaves the screen that asked.
+ */
+class ArcadeServices(
+    val repo: ArcadeRepository,
+    val audio: AudioSynth,
+    val haptics: Haptics,
+    val appScope: CoroutineScope,
+) {
+    /**
+     * Runs a save that must not be lost: it is launched in [appScope], so leaving the screen
+     * (which cancels that screen's own scope) can't drop it, and it can't be cancelled midway.
+     */
+    fun persist(write: suspend () -> Unit) {
+        appScope.launch { withContext(NonCancellable) { write() } }
+    }
+}
 
 /** Signals from the Activity lifecycle that screens react to. */
 class AppSignals {
@@ -165,8 +184,10 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
 
     fun exitGame(refund: Boolean) {
         if (busy) return
+        // Claimed before the suspending refund, like enterMachine: a quick second tap must not
+        // get in before the coroutine starts and refund the same token twice.
+        busy = true
         scope.launch {
-            busy = true
             if (refund) services.repo.refundToken()
             audio.play(Sfx.WHOOSH, 0.6f, 0.8f)
             fade.animateTo(1f, tween(250))
