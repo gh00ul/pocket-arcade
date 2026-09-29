@@ -262,6 +262,9 @@ fun GameHostScreen(
         services.persist {
             services.repo.addTickets(total)
             services.repo.recordScore(game.id, score)
+            // The profile's per-machine "played" counts, and lifetime tickets for later goals.
+            services.repo.addStat("plays:${game.id}")
+            services.repo.addStat("tickets:earned", total.toLong())
         }
         // The card sweeping in; the fanfares wait for their place in the reveal.
         audio.play(Sfx.WHOOSH, 0.45f, 1.25f)
