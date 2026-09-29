@@ -104,6 +104,11 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         /** With reduce motion on, the body's dip with each step keeps this share, the run's hop none. */
         private const val REDUCED_DIP = 0.35f
 
+        /** The hard limits of an arm (radians): straight up and a little behind the back, and how far it can splay. */
+        private const val ARM_PITCH_MIN = -3.05f
+        private const val ARM_PITCH_MAX = 1.25f
+        private const val ARM_ROLL_MAX = 0.85f
+
         /** What a still picture assumes for the ground speed of a walking pose. */
         private const val STILL_WALK_SPEED = 40f
 
@@ -172,6 +177,64 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         private const val BLINK_MAX = 5.6f
         private const val BLINK_TIME = 0.14f
         private const val DOUBLE_BLINK = 0.15f
+
+        // ---- follow-through
+
+        /** The arms settle onto each pose with a little overshoot (frequency in rad/s, damping ratio). */
+        private const val ARM_OMEGA = 18f
+        private const val ARM_ZETA = 0.6f
+
+        /**
+         * Arms trail behind a body that speeds up or turns: a spring pushed by the acceleration
+         * (radians a second squared per world unit a second squared, forwards and sideways), capped
+         * at [ARM_LAG_MAX]. A held arm only trails this much of the way.
+         */
+        private const val ARM_LAG_OMEGA = 13f
+        private const val ARM_LAG_ZETA = 0.42f
+        private const val ARM_LAG_PITCH = 0.05f
+        private const val ARM_LAG_ROLL = 0.03f
+        private const val ARM_LAG_MAX = 0.4f
+        private const val ARM_HELD_LAG = 0.3f
+
+        /**
+         * A hat sits on the head on springs: it tips back when the body speeds up and to the side
+         * when it turns ([HAT_PITCH_GAIN], [HAT_ROLL_GAIN] as for the arms, never past [HAT_MAX]
+         * radians), and rides up and down a little with hops ([HAT_LIFT_MAX] figure units).
+         */
+        private const val HAT_OMEGA = 17f
+        private const val HAT_ZETA = 0.3f
+        private const val HAT_PITCH_GAIN = 0.045f
+        private const val HAT_ROLL_GAIN = 0.03f
+        private const val HAT_MAX = 0.16f
+        private const val HAT_LIFT_OMEGA = 22f
+        private const val HAT_LIFT_ZETA = 0.35f
+        private const val HAT_LIFT_MAX = 0.9f
+
+        /** The strongest vertical acceleration (figure units a second squared) that shakes a hat or a ponytail. */
+        private const val VERT_CAP = 600f
+
+        /** A ponytail swings on a looser spring, pushed by acceleration and by the head turning, never past [TAIL_MAX] radians. */
+        private const val TAIL_OMEGA = 10f
+        private const val TAIL_ZETA = 0.28f
+        private const val TAIL_GAIN = 0.06f
+        private const val TAIL_TURN_GAIN = 2.5f
+        private const val TAIL_MAX = 0.6f
+
+        /** With reduce motion on, the follow-through keeps this share of its push (and the springs are critically damped, so there is no overshoot). */
+        private const val REDUCED_FOLLOW = 0.35f
+
+        /** Sitting down and standing up tip the body forwards while the seat is moving: radians per unit of seat speed, up to [SEAT_LEAN_MAX]. */
+        private const val SEAT_LEAN = 0.035f
+        private const val SEAT_LEAN_MAX = 0.25f
+
+        /**
+         * A cheer is preceded by a short crouch: the body dips, the arms sweep back and the torso tips
+         * forwards for [CHEER_WINDUP] seconds before the arms fly up.
+         */
+        private const val CHEER_WINDUP = 0.11f
+        private const val CHEER_DIP = 1.6f
+        private const val CHEER_ARM_BACK = 0.55f
+        private const val CHEER_LEAN = 0.14f
 
         private const val FIDGET_NONE = 0
         private const val FIDGET_GLANCE = 1
@@ -315,6 +378,23 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
     private val headPitchSpring = Spring()
     private val headRollSpring = Spring()
 
+    // Follow-through: springs on the arms (settling onto a pose, and trailing behind acceleration), the hat and a ponytail.
+    private val armPoseP = arrayOf(Spring(), Spring())
+    private val armPoseR = arrayOf(Spring(), Spring())
+    private val armLagP = arrayOf(Spring(), Spring())
+    private val armLagR = arrayOf(Spring(), Spring())
+    private val hatPitchSpring = Spring()
+    private val hatRollSpring = Spring()
+    private val hatLiftSpring = Spring()
+    private val tailPitchSpring = Spring()
+    private val tailRollSpring = Spring()
+    private var prevRootY = 0f
+    private var prevRootVy = 0f
+
+    /** Seconds left of a cheer wind-up (negative when not winding up) and how much of it shows (0..1). */
+    private var windLeft = -1f
+    private var windEnv = 0f
+
     // Fidgets and blinks (seeded from [seed], so the same figure fidgets the same way every run).
     private var fidgetKind = FIDGET_NONE
     private var fidgetT = 0f
@@ -403,12 +483,15 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         yawRate += (turn / h - yawRate) * AnimMath.k(YAW_RATE_SMOOTH, h)
         // The acceleration along the way the figure faces (forwards is positive).
         val af = ax * sin(this.yaw) + az * cos(this.yaw)
+        // And sideways (along the figure own +x).
+        val al = ax * cos(this.yaw) - az * sin(this.yaw)
 
         // --- pose
+        val shown = windUp(pose, h)
         val was = blender.target
-        blender.set(pose)
+        blender.set(shown)
         if (blender.target != was) {
-            when (pose) {
+            when (shown) {
                 Pose.CHEER -> cheerAge = 0f
                 Pose.WAVE -> waveAge = 0f
                 Pose.CLAP -> clapAge = 0f
@@ -421,8 +504,14 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         blender.update(h)
         // The seat follows the (already eased) sitting weight, so sitting starts gently, and its
         // spring adds the settle at the bottom.
-        seat.step(blender.weight(Pose.SIT) + blender.weight(Pose.SIP), h, SEAT_OMEGA, SEAT_ZETA)
+        seat.step(blender.weight(Pose.SIT) + blender.weight(Pose.SIP), h, SEAT_OMEGA, if (reduceMotion) 1f else SEAT_ZETA)
         accumulatePose()
+        // Arms settle onto their poses with a little overshoot.
+        val armZeta = if (reduceMotion) 1f else ARM_ZETA
+        for (s in 0..1) {
+            armPoseP[s].step(accArmP[s], h, ARM_OMEGA, armZeta)
+            armPoseR[s].step(accArmR[s], h, ARM_OMEGA, armZeta)
+        }
 
         // --- gait: the stride advances with the ground covered, and settles when the figure stops
         gait += (AnimMath.smooth(speed / GAIT_FULL_SPEED) - gait) * AnimMath.k(GAIT_RATE, h)
@@ -451,7 +540,59 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         stepFidgets(h)
         stepGaze(x, z, yawGoal, h)
         stepBlink(h)
+        stepFollowThrough(af, al, h)
         solve()
+    }
+
+    /**
+     * Holds a cheer back for a beat: asked for a [pose] of CHEER, the figure keeps the pose it was
+     * in for [CHEER_WINDUP] seconds while it crouches ([windEnv] carries the crouch), then cheers.
+     * Returns the pose to blend to now.
+     */
+    private fun windUp(pose: Pose, h: Float): Pose {
+        if (reduceMotion || pose != Pose.CHEER || blender.target == Pose.CHEER) {
+            windLeft = -1f
+            return pose
+        }
+        if (windLeft < 0f) windLeft = CHEER_WINDUP
+        windLeft -= h
+        return if (windLeft > 0f) blender.target else pose
+    }
+
+    /**
+     * Springs that lag behind the body: a hat and a ponytail that trail behind speeding up and
+     * turning and hops, arms that trail behind it. [af] and [al] are the accelerations along and
+     * across the way the figure faces.
+     */
+    private fun stepFollowThrough(af: Float, al: Float, h: Float) {
+        val calm = if (reduceMotion) REDUCED_FOLLOW else 1f
+        // How hard the body is being thrown up and down, from its own height over the last steps.
+        val v = (rootY - prevRootY) / h
+        val ay = ((v - prevRootVy) / h).coerceIn(-VERT_CAP, VERT_CAP)
+        prevRootY = rootY
+        prevRootVy = v
+        // The wind-up crouch eases in and out.
+        val windTarget = if (windLeft > 0f) AnimMath.bell(1f - windLeft / CHEER_WINDUP) else 0f
+        windEnv += (windTarget - windEnv) * AnimMath.k(30f, h)
+
+        // A hat lags: forward acceleration tips its top back (negative pitch), sideways acceleration to the other side.
+        val hatZ = if (reduceMotion) 1f else HAT_ZETA
+        hatPitchSpring.drive(0f, -HAT_PITCH_GAIN * af * calm, h, HAT_OMEGA, hatZ)
+        hatRollSpring.drive(0f, HAT_ROLL_GAIN * al * calm, h, HAT_OMEGA, hatZ)
+        hatLiftSpring.drive(0f, -ay * calm, h, HAT_LIFT_OMEGA, if (reduceMotion) 1f else HAT_LIFT_ZETA)
+        // A ponytail hangs from the back of the head: speeding up swings its end back, sideways
+        // acceleration or the head turning swings it the other way.
+        val tailZ = if (reduceMotion) 1f else TAIL_ZETA
+        tailPitchSpring.drive(0f, TAIL_GAIN * af * calm, h, TAIL_OMEGA, tailZ)
+        tailRollSpring.drive(0f, (-TAIL_GAIN * al - TAIL_TURN_GAIN * headYawSpring.v) * calm, h, TAIL_OMEGA, tailZ)
+        // Arms trail behind: forward acceleration swings them back, sideways acceleration across.
+        val armZ = if (reduceMotion) 1f else ARM_LAG_ZETA
+        for (s in 0..1) {
+            // The two arms springs differ a touch, so they never flap in perfect step.
+            val omega = ARM_LAG_OMEGA * (1f + 0.04f * (2 * s - 1))
+            armLagP[s].drive(0f, ARM_LAG_PITCH * af * calm, h, omega, armZ)
+            armLagR[s].drive(0f, -ARM_LAG_ROLL * al * calm, h, omega, armZ)
+        }
     }
 
     /**
@@ -607,6 +748,18 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         blinkT = -1f
         blink = 0f
         accumulatePose()
+        windLeft = -1f
+        windEnv = 0f
+        for (s in 0..1) {
+            armPoseP[s].reset(accArmP[s])
+            armPoseR[s].reset(accArmR[s])
+            armLagP[s].reset()
+            armLagR[s].reset()
+        }
+        hatPitchSpring.reset(); hatRollSpring.reset(); hatLiftSpring.reset()
+        tailPitchSpring.reset(); tailRollSpring.reset()
+        prevRootY = 0f
+        prevRootVy = 0f
         headYawSpring.reset(accHeadYaw)
         headPitchSpring.reset(accHeadPitch)
         headRollSpring.reset(accHeadRoll)
@@ -661,18 +814,29 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         for (s in 0..1) {
             val side = SIDES[s]
             val free = accSwing[s] * gait
-            armPitch[s] = accArmP[s] + free * (-side * armAmp * c - RUN_ARM_FORWARD * run)
-            armRoll[s] = accArmR[s] + free * (-side * RUN_ARM_IN * run)
+            // A held arm trails behind acceleration less than a free one.
+            val lag = ARM_HELD_LAG + (1f - ARM_HELD_LAG) * accSwing[s].coerceIn(0f, 1f)
+            armPitch[s] = (armPoseP[s].x + CHEER_ARM_BACK * windEnv + lag * armLagP[s].x.coerceIn(-ARM_LAG_MAX, ARM_LAG_MAX) +
+                free * (-side * armAmp * c - RUN_ARM_FORWARD * run)).coerceIn(ARM_PITCH_MIN, ARM_PITCH_MAX)
+            armRoll[s] = (armPoseR[s].x + lag * armLagR[s].x.coerceIn(-ARM_LAG_MAX, ARM_LAG_MAX) +
+                free * (-side * RUN_ARM_IN * run)).coerceIn(-ARM_ROLL_MAX, ARM_ROLL_MAX)
         }
 
-        rootY = accRoot - low * dip * gaitK + hop - SEAT_DROP * seat.x
+        rootY = accRoot - low * dip * gaitK + hop - SEAT_DROP * seat.x - CHEER_DIP * windEnv
         itemAmount = accItem.coerceIn(0f, 1f)
 
         // Spine: shoulders twist against the hips, the torso rocks over the planted foot, leans and banks.
         twist = -TWIST_WALK * (1f + TWIST_RUN_BONUS * run) * c * gait + GAZE_SHARE * headYawSpring.x
-        lean = leanSpring.x + accLean
+        lean = leanSpring.x + accLean + CHEER_LEAN * windEnv + minOf(SEAT_LEAN_MAX, SEAT_LEAN * abs(seat.v))
         leanRoll = bank + GAIT_ROLL * sin(rig) * gait + fidBank
         sway = fidSway
+
+        // Hat and ponytail lag behind the head.
+        hatPitch = hatPitchSpring.x.coerceIn(-HAT_MAX, HAT_MAX)
+        hatRoll = hatRollSpring.x.coerceIn(-HAT_MAX, HAT_MAX)
+        hatLift = hatLiftSpring.x.coerceIn(-HAT_LIFT_MAX, HAT_LIFT_MAX)
+        tailPitch = tailPitchSpring.x.coerceIn(-TAIL_MAX, TAIL_MAX)
+        tailRoll = tailRollSpring.x.coerceIn(-TAIL_MAX, TAIL_MAX)
 
         // Head: the gaze, less what the spine has already turned, so it stays steady through a stride.
         headYaw = headYawSpring.x - twist
