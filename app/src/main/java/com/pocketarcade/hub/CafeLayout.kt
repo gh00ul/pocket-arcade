@@ -137,7 +137,7 @@ object CafeLayout {
      */
     fun lights(out: MutableList<PointLight>) {
         out += PointLight(86f, 80f, COUNTER_Z1 + 6f, 1f, 0.85f, 0.66f, 130f, 1.05f)
-        out += PointLight(130f, 96f, FLOOR_Z0 + 186f, 1f, 0.82f, 0.63f, 150f, 0.9f)
+        out += PointLight(130f, 110f, FLOOR_Z0 + 186f, 1f, 0.82f, 0.63f, 150f, 0.6f)
     }
 
     /** Which way a chair of [variant] faces. */

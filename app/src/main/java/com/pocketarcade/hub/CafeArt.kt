@@ -47,7 +47,9 @@ object CafeArt {
         val tp = TexPaint(n, n)
         val s = n / 2f
         for (y in 0 until 2) for (x in 0 until 2) {
-            val base = if ((x + y) % 2 == 0) CREAM else dim(MINT, 0.82f)
+            // A shade down from the counter's cream and mint: a floor this big and this pale,
+            // lit from above, crosses the bloom threshold and glows white like a sign.
+            val base = if ((x + y) % 2 == 0) dim(CREAM, 0.7f) else dim(MINT, 0.62f)
             tp.vgrad(x * s, y * s, s, s, lift(base, 0.06f), dim(base, 0.9f))
         }
         for (k in 0..2) {
