@@ -60,3 +60,26 @@ fun rememberGameLoop(vararg keys: Any?, onStep: (dt: Float) -> Unit): State<Long
     }
     return frame
 }
+
+/**
+ * Turns the host's real fixed steps into game steps under a time scale (see [TimeScale]). The game
+ * always steps by exactly [FIXED_DT], never by a scaled time, so its physics and tuning are the
+ * same at any speed; slow motion just means fewer steps per second, and a freeze none.
+ *
+ * Feed [advance] the scaled time of each real step (at most [FIXED_DT]); it says whether the game
+ * steps this time. At full speed that is every time.
+ */
+class SimClock {
+    private var acc = 0f
+
+    fun advance(scaledDt: Float): Boolean {
+        acc += scaledDt
+        if (acc < FIXED_DT - 1e-6f) return false
+        acc = (acc - FIXED_DT).coerceAtLeast(0f)
+        return true
+    }
+
+    fun reset() {
+        acc = 0f
+    }
+}

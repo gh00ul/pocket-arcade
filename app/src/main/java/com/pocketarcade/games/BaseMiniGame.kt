@@ -80,8 +80,10 @@ abstract class BaseMiniGame : MiniGame {
             if (!GameViewport.particlesInGl) particles.draw(this)
             popups.draw(this, 0f, 0f, 1f)
         }
-        if (flash.value > 0f) {
-            scope.drawRect(Color.White, Offset(-40f, -40f), androidx.compose.ui.geometry.Size(GAME_W + 80f, GAME_H + 80f), flash.value * 0.55f)
+        // Flashes are motion too: reduce motion (intensity 0) turns them off.
+        val flashAlpha = flash.value * FLASH_ALPHA * ScreenShake.intensity.coerceIn(0f, 1f)
+        if (flashAlpha > 0f) {
+            scope.drawRect(Color.White, Offset(-40f, -40f), androidx.compose.ui.geometry.Size(GAME_W + 80f, GAME_H + 80f), flashAlpha)
         }
     }
 
@@ -109,4 +111,48 @@ abstract class BaseMiniGame : MiniGame {
     }
 
     protected fun play(sfx: Sfx, volume: Float = 1f, pitch: Float = 1f) = fx.audio.play(sfx, volume, pitch)
+
+    // ---- game feel: requests the host turns into a freeze, a slow beat and a camera kick
+
+    /** Freezes the game for a few frames as a big hit lands ([GameFx.hitStop]); the host caps and spaces them. */
+    protected fun hitStop(seconds: Float = HIT_STOP_DEFAULT) = fx.hitStop(seconds)
+
+    /** A slow-motion beat with eased ramps ([GameFx.slowMo]): jackpots, a last-second win. Off with reduce motion. */
+    protected fun slowMo(speed: Float = SLOW_MO_SPEED, seconds: Float = SLOW_MO_SECONDS) = fx.slowMo(speed, seconds)
+
+    /** Kicks the 3D camera in and springs it back ([GameFx.punch]), [amount] 0..1. */
+    protected fun punch(amount: Float = PUNCH_DEFAULT) = fx.punch(amount)
+
+    /**
+     * A solid hit in one call: screen shake, a short freeze and a camera kick, all scaled by
+     * [weight] (0 = a tap, 1 = the hardest hit a round has). Sound and particles stay the game's own.
+     */
+    protected fun impact(weight: Float) {
+        val w = weight.coerceIn(0f, 1f)
+        shake.add(IMPACT_SHAKE_MIN + IMPACT_SHAKE_RANGE * w)
+        fx.hitStop(IMPACT_STOP_MIN + IMPACT_STOP_RANGE * w)
+        fx.punch(IMPACT_PUNCH_MIN + IMPACT_PUNCH_RANGE * w)
+    }
+
+    /** The round's biggest moment (a jackpot, a perfect finish): the hardest [impact], a white flash and a slow-motion beat. */
+    protected fun bigMoment() {
+        impact(1f)
+        slowMo()
+        flash.trigger(BIG_MOMENT_FLASH)
+    }
+
+    private companion object {
+        const val HIT_STOP_DEFAULT = 0.06f
+        const val SLOW_MO_SPEED = 0.4f
+        const val SLOW_MO_SECONDS = 0.45f
+        const val PUNCH_DEFAULT = 0.4f
+        const val IMPACT_SHAKE_MIN = 0.12f
+        const val IMPACT_SHAKE_RANGE = 0.4f
+        const val IMPACT_STOP_MIN = 0.03f
+        const val IMPACT_STOP_RANGE = 0.06f
+        const val IMPACT_PUNCH_MIN = 0.15f
+        const val IMPACT_PUNCH_RANGE = 0.55f
+        const val BIG_MOMENT_FLASH = 0.5f
+        const val FLASH_ALPHA = 0.55f
+    }
 }

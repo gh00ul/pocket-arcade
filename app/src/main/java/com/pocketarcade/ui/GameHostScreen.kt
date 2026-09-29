@@ -58,8 +58,11 @@ import com.pocketarcade.data.TokenGate
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
 import com.pocketarcade.engine.ArcadeFont
+import com.pocketarcade.engine.FIXED_DT
 import com.pocketarcade.engine.ScreenShake
 import com.pocketarcade.engine.Sfx
+import com.pocketarcade.engine.SimClock
+import com.pocketarcade.engine.TimeScale
 import com.pocketarcade.engine.TiltControlled
 import com.pocketarcade.engine.TiltSteer
 import com.pocketarcade.engine.TouchType
@@ -82,6 +85,9 @@ private enum class HostPhase { INTRO, COUNTDOWN, PLAYING, ENDING, RESULTS, PAUSE
 
 private const val COUNT_STEP = 0.65f
 
+/** Simulation steps of ENDING every round gets (1.2 s at 120 Hz), however slow the last beat was. */
+private const val ENDING_STEPS = 144
+
 /** Round state owned by the host; plain fields are read by the per-frame draw, not by composition. */
 private class HostState(val game: MiniGame) {
     var phase by mutableStateOf(HostPhase.INTRO)
@@ -102,6 +108,11 @@ private class HostState(val game: MiniGame) {
     var goT = 99f
     var hostTime = 0f
     var celebrateT = 0f
+    /** Hit-stops and slow-mo beats the game asks for, and the steps they leave it. */
+    val time = TimeScale()
+    val sim = SimClock()
+    /** Game steps taken in ENDING, so a slow last beat can't shorten the settle the payout depends on. */
+    var endSteps = 0
     val particles = Particles(500)
     val shake = ScreenShake(maxOffset = 10f)
     var gx = 0f
@@ -121,6 +132,9 @@ private class HostState(val game: MiniGame) {
         newHigh = false
         goT = 99f
         celebrateT = 0f
+        endSteps = 0
+        time.reset()
+        sim.reset()
         particles.clear()
         shake.reset()
     }
@@ -233,6 +247,12 @@ fun GameHostScreen(
         state.hostTime += dt
         state.particles.update(dt)
         state.shake.update(dt)
+        // Time control lives here and only here: the game asks (GameFx), the clock decides how many
+        // of these real steps it gets, and each one it gets is still exactly FIXED_DT. Only the round
+        // itself is ever slowed: intro, countdown, pause and results run in real time.
+        val playing = state.phase == HostPhase.PLAYING
+        fx.flush(if (playing) state.time else null)
+        val stepGame = (playing || state.phase == HostPhase.ENDING) && state.sim.advance(state.time.update(dt))
         when (state.phase) {
             HostPhase.COUNTDOWN -> {
                 state.phaseT += dt
@@ -251,8 +271,11 @@ fun GameHostScreen(
             }
             HostPhase.PLAYING -> {
                 state.goT += dt
-                state.timeLeft = (state.timeLeft - dt).coerceAtLeast(0f)
-                game.update(dt, state.timeLeft)
+                if (stepGame) {
+                    // The round clock is game time: it slows and freezes with the game.
+                    state.timeLeft = (state.timeLeft - FIXED_DT).coerceAtLeast(0f)
+                    game.update(FIXED_DT, state.timeLeft)
+                }
                 val sec = ceil(state.timeLeft).toInt()
                 if (state.timeLeft > 0f && sec <= 5 && sec != state.lastTick) {
                     state.lastTick = sec
@@ -269,12 +292,16 @@ fun GameHostScreen(
                     game.cancelInput()
                     state.phase = HostPhase.ENDING
                     state.phaseT = 0f
+                    state.endSteps = 0
                 }
             }
             HostPhase.ENDING -> {
                 state.phaseT += dt
-                game.update(dt, 0f)
-                if (state.phaseT > 1.2f) startResults()
+                if (stepGame) {
+                    game.update(FIXED_DT, 0f)
+                    state.endSteps++
+                }
+                if (state.phaseT > 1.2f && state.endSteps >= ENDING_STEPS) startResults()
             }
             HostPhase.RESULTS -> {
                 state.phaseT += dt

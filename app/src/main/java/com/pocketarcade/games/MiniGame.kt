@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.pocketarcade.engine.AudioSynth
 import com.pocketarcade.engine.Haptics
 import com.pocketarcade.engine.Painter
+import com.pocketarcade.engine.TimeScale
 import com.pocketarcade.engine.TouchType
 import com.pocketarcade.hub.CabinetDesign
 
@@ -50,13 +51,61 @@ data class CabinetLook(
     val shape: CabinetShape = CabinetShape.UPRIGHT,
 )
 
-/** Services a game uses while it runs. */
+/**
+ * Services a game uses while it runs.
+ *
+ * Besides sound, haptics and collectibles it carries the game's requests for the *feel* of a
+ * moment: [hitStop], [slowMo] and [punch]. They are plain fields the game host reads once per step
+ * ([flush]) and turns into a freeze, a slow-motion beat and a camera kick; a game just says when
+ * something big happens and never touches its own clock, so its simulation always steps by the
+ * same fixed time. All three do nothing while reduce motion is on, and the host caps and spaces
+ * them (see [com.pocketarcade.engine.TimeScale]), so calling them generously is safe.
+ */
 class GameFx(
     val audio: AudioSynth,
     val haptics: Haptics,
     /** Adds a collectible (e.g. a claw-machine plush id) to the player's collection. */
     val onCollectible: (String) -> Unit,
-)
+) {
+    private var stopSeconds = 0f
+    private var slowSpeed = 1f
+    private var slowSeconds = 0f
+    private var punchAmount = 0f
+
+    /** Freezes the game for about [seconds] (0.04-0.1 feels right for a big hit; the host caps it at 0.12). */
+    fun hitStop(seconds: Float) {
+        if (seconds > stopSeconds) stopSeconds = seconds
+    }
+
+    /** Runs the game at [speed] (0.3-0.5) for [seconds] with eased ramps: a jackpot, a new high score, a last-second win. */
+    fun slowMo(speed: Float, seconds: Float) {
+        if (seconds <= 0f) return
+        slowSpeed = minOf(slowSpeed, speed)
+        if (seconds > slowSeconds) slowSeconds = seconds
+    }
+
+    /** Kicks the 3D camera in and lets it spring back: [amount] 0..1 (0.3 for a solid hit, 1 for the biggest moment). */
+    fun punch(amount: Float) {
+        if (amount > punchAmount) punchAmount = amount
+    }
+
+    /**
+     * Host only: hands the pending requests to [time] (or drops them if it is null: outside the
+     * playing phase nothing may slow the game), clears them and returns the pending camera punch.
+     */
+    fun flush(time: TimeScale?): Float {
+        if (time != null) {
+            if (stopSeconds > 0f) time.hitStop(stopSeconds)
+            if (slowSeconds > 0f) time.slowMo(slowSpeed, slowSeconds)
+        }
+        stopSeconds = 0f
+        slowSpeed = 1f
+        slowSeconds = 0f
+        val p = punchAmount
+        punchAmount = 0f
+        return p
+    }
+}
 
 /**
  * The contract every arcade machine implements. The host owns the round flow (intro, countdown,

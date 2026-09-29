@@ -131,3 +131,145 @@ class Flash(private val decayPerSec: Float = 4f) {
         value = (value - decayPerSec * dt).coerceAtLeast(0f)
     }
 }
+
+/**
+ * Time control for the game host: hit-stops (a freeze of a few frames on a big hit) and slow-motion
+ * beats (a jackpot, a new high score, a last-second win) with eased ramps. Pure and headless: the
+ * host feeds [update] the real frame step and gets back how much of it the game gets.
+ *
+ * Only the host loop uses it, and the game still steps by exactly [FIXED_DT] (see [SimClock]), so
+ * headless simulations never see a scaled time and payouts don't depend on it.
+ *
+ * Rules, so a run of big moments never turns the round into a slideshow:
+ *  - a hit-stop is at most [MAX_HIT_STOP] s, a chain of requests can't extend one past that, and a
+ *    new one is ignored for [HIT_STOP_COOLDOWN] s after one ends;
+ *  - slow-mo is at least [MIN_SCALE] × speed for at most [MAX_SLOW_SECONDS] s; a second request while
+ *    one runs deepens it (the lower scale wins) and extends it up to that cap, and a new one is
+ *    ignored for [SLOW_COOLDOWN] s after one ends;
+ *  - with reduce motion on ([motion] is 0) both are off.
+ */
+class TimeScale(private val motion: () -> Float = { ScreenShake.intensity }) {
+    companion object {
+        /** The longest freeze, in seconds (about 14 steps at 120 Hz). */
+        const val MAX_HIT_STOP = 0.12f
+        /** Freezes shorter than this can't be felt and are ignored. */
+        const val MIN_HIT_STOP = 0.015f
+        /** After a freeze ends, this long passes before another can start, so combos don't stutter. */
+        const val HIT_STOP_COOLDOWN = 0.22f
+        /** The longest slow-motion hold, in seconds (the ramps are on top). */
+        const val MAX_SLOW_SECONDS = 0.9f
+        /** The slowest the game may run: below this a beat feels like a hang. */
+        const val MIN_SCALE = 0.25f
+        /** After a slow-mo hold ends, this long passes before another can start. */
+        const val SLOW_COOLDOWN = 1.6f
+        /** How fast the scale eases down into a beat and back out (per second, exponential): snappy in, gentle out. */
+        const val RAMP_IN_RATE = 28f
+        const val RAMP_OUT_RATE = 7f
+        /** Within this of full speed the scale snaps back to 1 so the game doesn't crawl at 0.997×. */
+        private const val SNAP = 0.012f
+    }
+
+    private var stopLeft = 0f
+    private var stopSpent = 0f
+    private var stopCooldown = 0f
+    private var slowLeft = 0f
+    private var slowSpent = 0f
+    private var slowCooldown = 0f
+    private var slowTarget = 1f
+
+    /** The eased speed of the game right now, 1 at full speed (a freeze is separate: see [frozen]). */
+    var scale = 1f
+        private set
+
+    /** True while a hit-stop holds the game still. */
+    val frozen: Boolean get() = stopLeft > 0f
+
+    /** How deep into a slow-motion beat the game is, 0 at full speed up to about 0.75; for a visual cue. */
+    val depth: Float get() = 1f - scale
+
+    /** Whether anything is slowing or holding the game. */
+    val active: Boolean get() = frozen || scale < 1f || slowLeft > 0f
+
+    /** Freezes the game for about [seconds] (at most [MAX_HIT_STOP]). Returns whether it took. */
+    fun hitStop(seconds: Float): Boolean {
+        if (motion() <= 0f) return false
+        val s = if (seconds.isNaN()) 0f else seconds.coerceAtMost(MAX_HIT_STOP)
+        if (s < MIN_HIT_STOP) return false
+        if (stopLeft <= 0f) {
+            if (stopCooldown > 0f) return false
+            stopLeft = s
+            stopSpent = 0f
+        } else {
+            // Already frozen: a longer request extends it, but never past the cap in total.
+            val budget = MAX_HIT_STOP - stopSpent
+            if (budget <= 0f) return false
+            stopLeft = minOf(maxOf(stopLeft, s), budget)
+        }
+        return true
+    }
+
+    /**
+     * Runs the game at [speed] (clamped to [MIN_SCALE]..1) for [seconds] (at most [MAX_SLOW_SECONDS]),
+     * easing in and out. Returns whether it took.
+     */
+    fun slowMo(speed: Float, seconds: Float): Boolean {
+        if (motion() <= 0f) return false
+        val sp = if (speed.isNaN()) 1f else speed.coerceIn(MIN_SCALE, 1f)
+        val s = if (seconds.isNaN()) 0f else seconds.coerceAtMost(MAX_SLOW_SECONDS)
+        if (sp > 0.98f || s <= 0f) return false
+        if (slowLeft <= 0f) {
+            if (slowCooldown > 0f) return false
+            slowTarget = sp
+            slowLeft = s
+            slowSpent = 0f
+        } else {
+            val budget = MAX_SLOW_SECONDS - slowSpent
+            if (budget <= 0f) return false
+            slowTarget = minOf(slowTarget, sp)
+            slowLeft = minOf(maxOf(slowLeft, s), budget)
+        }
+        return true
+    }
+
+    /** Advances real time by [realDt] and returns how much of it the game gets: 0 while frozen, else [scale] × [realDt]. */
+    fun update(realDt: Float): Float {
+        if (motion() <= 0f) {
+            // Reduce motion switched on mid-beat: drop everything at once.
+            if (active) reset()
+            return realDt
+        }
+        val frozenNow = stopLeft > 0f
+        if (frozenNow) {
+            stopLeft -= realDt
+            stopSpent += realDt
+            if (stopLeft <= 0f) {
+                stopLeft = 0f; stopSpent = 0f; stopCooldown = HIT_STOP_COOLDOWN
+            }
+        } else if (stopCooldown > 0f) {
+            stopCooldown = (stopCooldown - realDt).coerceAtLeast(0f)
+        }
+        val target: Float
+        if (slowLeft > 0f) {
+            slowLeft -= realDt
+            slowSpent += realDt
+            target = slowTarget
+            if (slowLeft <= 0f) {
+                slowLeft = 0f; slowSpent = 0f; slowCooldown = SLOW_COOLDOWN
+            }
+        } else {
+            target = 1f
+            if (slowCooldown > 0f) slowCooldown = (slowCooldown - realDt).coerceAtLeast(0f)
+        }
+        scale = damp(scale, target, if (target < scale) RAMP_IN_RATE else RAMP_OUT_RATE, realDt)
+        if (scale > 1f - SNAP) scale = 1f
+        return if (frozenNow) 0f else realDt * scale
+    }
+
+    /** Back to full speed at once, forgetting every request and cooldown (a new round, a pause). */
+    fun reset() {
+        stopLeft = 0f; stopSpent = 0f; stopCooldown = 0f
+        slowLeft = 0f; slowSpent = 0f; slowCooldown = 0f
+        slowTarget = 1f
+        scale = 1f
+    }
+}
