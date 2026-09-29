@@ -74,6 +74,38 @@ class LoadPlanTest {
     }
 
     @Test
+    fun aStrictSliceLeavesAStepThatWouldNotFit() {
+        val clock = FakeClock()
+        val order = ArrayList<String>()
+        val steps = listOf(
+            LoadStep.Work("light", 1f) { order += "light"; clock.spendMs(1.0) },
+            LoadStep.Work("heavy", 10f) { order += "heavy"; clock.spendMs(10.0) },
+        )
+        val driver = LoadDriver(LoadPlan(steps), clock::read, initialNsPerWeight = 1 * ms)
+        driver.advance(4 * ms, strict = true)
+        assertEquals("the light one fits", listOf("light"), order)
+        // The heavy step is expected to take 10 ms: a strict 4 ms slice won't start it, however often it is asked.
+        driver.advance(4 * ms, strict = true)
+        driver.advance(4 * ms, strict = true)
+        assertEquals(listOf("light"), order)
+        assertFalse(driver.done)
+        // A slice that isn't strict (the forced one) runs it, the first step of a slice always going.
+        driver.advance(4 * ms)
+        assertEquals(listOf("light", "heavy"), order)
+        assertTrue(driver.done)
+    }
+
+    @Test
+    fun aStrictSliceThatCanHoldTheStepRunsIt() {
+        val clock = FakeClock()
+        var ran = 0
+        val steps = listOf(LoadStep.Work("a", 2f) { ran++; clock.spendMs(2.0) })
+        val driver = LoadDriver(LoadPlan(steps), clock::read, initialNsPerWeight = 1 * ms)
+        driver.advance(5 * ms, strict = true)
+        assertEquals(1, ran)
+    }
+
+    @Test
     fun anyBudgetMakesProgress() {
         val clock = FakeClock()
         val driver = LoadDriver(plan(clock, 5, weight = 3f, msPerWeight = 10.0), clock::read)

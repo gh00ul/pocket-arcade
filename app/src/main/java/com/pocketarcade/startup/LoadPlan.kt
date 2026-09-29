@@ -61,8 +61,10 @@ interface LoadListener {
  * A slice runs whole steps. It starts another only while the time already used plus what the
  * step is expected to take fits the budget, so a slice overruns only by a step that turns out
  * longer than expected, and never starts a heavy step behind a light one that has used the
- * budget up. The first step of a slice always runs, so any budget makes progress. The expected
- * cost of a step is its weight times the time per weight the driver has seen so far.
+ * budget up. The first step of a slice always runs, so any budget makes progress, unless the
+ * slice is strict (see [advance]), for a screen that must not drop a frame: then a step
+ * expected to outlast the budget waits for a slice that can hold it, or a forced one. The
+ * expected cost of a step is its weight times the time per weight the driver has seen so far.
  *
  * [progress] only moves up. All of this is meant for one thread: the one that calls [advance].
  */
@@ -126,16 +128,18 @@ class LoadDriver(
 
     /**
      * Runs steps for about [budgetNs] nanoseconds of this driver's clock. Returns whether the plan
-     * is done. Safe to call again after it is done or cancelled (it does nothing).
+     * is done. Safe to call again after it is done or cancelled (it does nothing). With [strict]
+     * not even the first step runs if it is expected to take longer than the budget (the caller
+     * comes back with more, or forces it with a slice that isn't strict).
      */
-    fun advance(budgetNs: Long): Boolean {
+    fun advance(budgetNs: Long, strict: Boolean = false): Boolean {
         if (cancelled || done) return done
         val sliceStart = clock()
         var ran = 0
         while (!cancelled && index < steps.size) {
             when (val step = steps[index]) {
                 is LoadStep.Work -> {
-                    if (ran > 0) {
+                    if (ran > 0 || strict) {
                         val expected = (step.weight * nsPerWeight).toLong()
                         if (clock() - sliceStart + expected > budgetNs) break
                     }

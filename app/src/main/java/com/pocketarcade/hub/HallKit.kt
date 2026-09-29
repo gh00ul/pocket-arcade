@@ -190,7 +190,7 @@ internal class HallKit(val map: HubMap, val games: List<MiniGame>) {
         }
 
         // Floors and the plain materials every model reaches for.
-        work(HallStages.FLOORS, 4f) { HallArt.carpet }
+        repeat(HallArt.CARPET_STAGES) { work(HallStages.FLOORS, 1.4f) { HallArt.paintCarpetStage() } }
         work(HallStages.FLOORS, 2f) { HallArt.tiles; HallArt.concrete; HallArt.asphalt; HallArt.mat }
         work(HallStages.FLOORS, 2f) { HallArt.floorLogo }
         work(HallStages.FLOORS, 2f) {

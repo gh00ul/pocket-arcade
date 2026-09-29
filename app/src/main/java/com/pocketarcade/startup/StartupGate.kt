@@ -21,8 +21,17 @@ object LoadBudget {
     const val URGENT_SHARE = 0.6f
     const val GENTLE_SHARE = 0.2f
 
-    /** A gentle slice is skipped when the last frame took longer than this many frames: the picture is struggling. */
-    const val STRUGGLING = 1.5f
+    /**
+     * A gentle slice is skipped when the last frame took longer than this many frames: frames
+     * come in whole vsyncs, so anything over one is a frame that missed its time.
+     */
+    const val STRUGGLING = 1.25f
+
+    /**
+     * A gentle load whose next step is too big for the slack of a frame forces it through anyway
+     * (one late frame) after this many frames without progress, so it can't wait for ever.
+     */
+    const val FORCE_AFTER_FRAMES = 30
 
     /** One frame's length in nanoseconds on a display refreshing at [hz]. */
     fun vsyncNs(hz: Float): Long = (1_000_000_000.0 / hz.coerceIn(24f, 240f)).toLong()
@@ -116,14 +125,21 @@ class StartupGate(
         progress = 0f
         label = driver.label
         var last = 0L
+        var idle = 0
         try {
             while (!driver.finished) {
                 withFrameNanos { now ->
                     Startup.tickFrame(now)
                     val frameNs = if (last == 0L) 0L else now - last
                     last = now
-                    val slice = LoadBudget.sliceNs(urgent(), frameNs, vsyncNs())
-                    if (slice > 0L) driver.advance(slice)
+                    val wanted = urgent()
+                    val slice = LoadBudget.sliceNs(wanted, frameNs, vsyncNs())
+                    if (slice > 0L) {
+                        val before = driver.stepsDone
+                        // While the title is up a step must fit the frame's slack; one that never will still gets its turn.
+                        driver.advance(slice, strict = !wanted && idle < LoadBudget.FORCE_AFTER_FRAMES)
+                        idle = if (driver.stepsDone > before) 0 else idle + 1
+                    }
                     progress = driver.progress
                     label = driver.label
                 }

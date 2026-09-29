@@ -26,121 +26,17 @@ object HallArt {
 
     /**
      * The classic arcade carpet: black with neon planets, stars, zigzags and squiggles that
-     * glow under the blacklights. Tiles seamlessly.
+     * glow under the blacklights. Tiles seamlessly. It is the biggest texture in the hall, so a
+     * loading plan paints it a third at a time ([paintCarpetStage]); asking for it early paints
+     * whatever is left.
      */
-    val carpet: Texture by lazy {
-        val n = 512
-        val tp = TexPaint(n, n)
-        tp.fill(0xFF0B0816.toInt())
-        tp.grain(0.35f, 3)
-        val colors = intArrayOf(0xFF39E6F2.toInt(), 0xFFFF4FA8.toInt(), 0xFFFFD84D.toInt(), 0xFF9B6BFF.toInt(), 0xFF5CF08A.toInt(), 0xFFFF8A3D.toInt())
-        // Draw each motif, wrapped round the edges so the pattern tiles.
-        fun wrapped(x: Float, y: Float, r: Float, draw: (Float, Float) -> Unit) {
-            for (ox in -1..1) for (oy in -1..1) {
-                val cx = x + ox * n
-                val cy = y + oy * n
-                if (cx + r < 0 || cx - r > n || cy + r < 0 || cy - r > n) continue
-                draw(cx, cy)
-            }
-        }
-        // Worn, mottled pile: broad soft patches a shade lighter or darker.
-        for (i in 0 until 18) {
-            val r = 50f + hash01(i, 61) * 70f
-            val c = if (i % 2 == 0) 0x0E6A4AB0 else 0x16000000
-            wrapped(hash01(i, 62) * n, hash01(i, 63) * n, r) { cx, cy -> tp.radial(cx, cy, r, c, 0) }
-        }
-        // Blacklight bleed: each motif's ink glows faintly into the fibres around it.
-        for (i in 0 until 46) {
-            val size = 10f + hash01(i, 13) * 18f
-            val halo = alpha(colors[i % colors.size], 0.16f)
-            wrapped(hash01(i, 11) * n, hash01(i, 12) * n, size * 1.7f) { cx, cy -> tp.radial(cx, cy, size * 1.7f, halo, 0) }
-        }
-        for (i in 0 until 46) {
-            val x = hash01(i, 11) * n
-            val y = hash01(i, 12) * n
-            val c = dim(colors[i % colors.size], 0.72f)
-            val kind = i % 7
-            val size = 10f + hash01(i, 13) * 18f
-            val rot = hash01(i, 14) * 6.28f
-            wrapped(x, y, size * 2f) { cx, cy ->
-                when (kind) {
-                    0 -> { // ringed planet
-                        tp.circle(cx, cy, size * 0.6f, c)
-                        tp.circle(cx - size * 0.15f, cy - size * 0.15f, size * 0.22f, lift(c, 0.4f))
-                        tp.canvas.save()
-                        tp.canvas.rotate(rot * 57.3f, cx, cy)
-                        tp.oval(cx, cy, size * 1.25f, size * 0.32f, 0)
-                        tp.paint.reset()
-                        tp.paint.isAntiAlias = true
-                        tp.paint.style = Paint.Style.STROKE
-                        tp.paint.strokeWidth = 3f
-                        tp.paint.color = dim(colors[(i + 2) % colors.size], 0.72f)
-                        tp.canvas.drawOval(cx - size * 1.25f, cy - size * 0.32f, cx + size * 1.25f, cy + size * 0.32f, tp.paint)
-                        tp.canvas.restore()
-                    }
-                    1 -> { // star
-                        val pts = FloatArray(20)
-                        for (k in 0 until 10) {
-                            val a = rot + k * PI.toFloat() / 5f
-                            val rr = if (k % 2 == 0) size * 0.8f else size * 0.35f
-                            pts[k * 2] = cx + cos(a) * rr
-                            pts[k * 2 + 1] = cy + sin(a) * rr
-                        }
-                        tp.polygon(pts, c)
-                    }
-                    2 -> { // zigzag
-                        var px = cx - size
-                        var py = cy
-                        for (k in 0 until 5) {
-                            val nx = px + size * 0.45f
-                            val ny = cy + if (k % 2 == 0) -size * 0.35f else size * 0.35f
-                            tp.line(px, py, nx, ny, 3.5f, c)
-                            px = nx; py = ny
-                        }
-                    }
-                    3 -> tp.ring(cx, cy, size * 0.55f, 3.5f, c)
-                    4 -> { // triangle outline
-                        val pts = FloatArray(6)
-                        for (k in 0 until 3) {
-                            val a = rot + k * 2.094f
-                            pts[k * 2] = cx + cos(a) * size * 0.7f
-                            pts[k * 2 + 1] = cy + sin(a) * size * 0.7f
-                        }
-                        for (k in 0 until 3) {
-                            val k2 = (k + 1) % 3
-                            tp.line(pts[k * 2], pts[k * 2 + 1], pts[k2 * 2], pts[k2 * 2 + 1], 3f, c)
-                        }
-                    }
-                    5 -> { // squiggle
-                        var px = cx - size
-                        var py = cy
-                        for (k in 1..12) {
-                            val nx = cx - size + k * size / 6f
-                            val ny = cy + sin(k * 1.1f + rot) * size * 0.3f
-                            tp.line(px, py, nx, ny, 3f, c)
-                            px = nx; py = ny
-                        }
-                    }
-                    else -> { // sparkle dots
-                        for (k in 0 until 5) {
-                            val a = rot + k * 1.256f
-                            tp.circle(cx + cos(a) * size * 0.6f, cy + sin(a) * size * 0.6f, 2.2f, c)
-                        }
-                    }
-                }
-            }
-        }
-        // Tiny stars everywhere, a few with a glint of their own.
-        for (i in 0 until 400) {
-            val x = hash01(i, 21) * n
-            val y = hash01(i, 22) * n
-            if (i % 9 == 0) tp.radial(x, y, 6f, alpha(colors[i % colors.size], 0.22f), 0)
-            tp.circle(x, y, 0.8f + hash01(i, 23) * 1.2f, alpha(colors[i % colors.size], 0.7f))
-        }
-        // Fine fibre speckle over everything.
-        tp.grain(0.12f, 29)
-        tp.toTexture().also { it.repeat = true; tp.recycle() }
-    }
+    val carpet: Texture by lazy { CarpetPainter.finish() }
+
+    /** How many stages the carpet is painted in. */
+    const val CARPET_STAGES = 3
+
+    /** Paints the next of the carpet's [CARPET_STAGES] stages (a loading step); harmless once it is done. */
+    fun paintCarpetStage() = CarpetPainter.next()
 
     /** Polished dark floor tiles for the entrance and the prize counter. */
     val tiles: Texture by lazy {
@@ -759,5 +655,144 @@ object HallArt {
         tp.fill(0xFFFFA23C.toInt())
         for (y in 0 until 64 step 6) tp.rect(0f, y.toFloat(), 64f, 1.5f, 0xFFE07A20.toInt())
         tp.toTexture().also { tp.recycle() }
+    }
+}
+
+/** Paints [HallArt.carpet] in stages so a loading screen can keep moving between them. */
+private object CarpetPainter {
+    private const val n = 512
+    private val colors = intArrayOf(0xFF39E6F2.toInt(), 0xFFFF4FA8.toInt(), 0xFFFFD84D.toInt(), 0xFF9B6BFF.toInt(), 0xFF5CF08A.toInt(), 0xFFFF8A3D.toInt())
+    private var painter: TexPaint? = null
+    private var stage = 0
+    private var texture: Texture? = null
+
+    /** Draws each motif, wrapped round the edges so the pattern tiles. */
+    private fun wrapped(x: Float, y: Float, r: Float, draw: (Float, Float) -> Unit) {
+        for (ox in -1..1) for (oy in -1..1) {
+            val cx = x + ox * n
+            val cy = y + oy * n
+            if (cx + r < 0 || cx - r > n || cy + r < 0 || cy - r > n) continue
+            draw(cx, cy)
+        }
+    }
+
+    fun next() {
+        if (texture != null) return
+        val tp = painter ?: TexPaint(n, n).also { painter = it }
+        when (stage) {
+            0 -> {
+                tp.fill(0xFF0B0816.toInt())
+                tp.grain(0.35f, 3)
+                // Worn, mottled pile: broad soft patches a shade lighter or darker.
+                for (i in 0 until 18) {
+                    val r = 50f + hash01(i, 61) * 70f
+                    val c = if (i % 2 == 0) 0x0E6A4AB0 else 0x16000000
+                    wrapped(hash01(i, 62) * n, hash01(i, 63) * n, r) { cx, cy -> tp.radial(cx, cy, r, c, 0) }
+                }
+            }
+            1 -> {
+                // Blacklight bleed: each motif's ink glows faintly into the fibres around it.
+                for (i in 0 until 46) {
+                    val size = 10f + hash01(i, 13) * 18f
+                    val halo = alpha(colors[i % colors.size], 0.16f)
+                    wrapped(hash01(i, 11) * n, hash01(i, 12) * n, size * 1.7f) { cx, cy -> tp.radial(cx, cy, size * 1.7f, halo, 0) }
+                }
+                for (i in 0 until 46) {
+                    val x = hash01(i, 11) * n
+                    val y = hash01(i, 12) * n
+                    val c = dim(colors[i % colors.size], 0.72f)
+                    val kind = i % 7
+                    val size = 10f + hash01(i, 13) * 18f
+                    val rot = hash01(i, 14) * 6.28f
+                    wrapped(x, y, size * 2f) { cx, cy ->
+                        when (kind) {
+                            0 -> { // ringed planet
+                                tp.circle(cx, cy, size * 0.6f, c)
+                                tp.circle(cx - size * 0.15f, cy - size * 0.15f, size * 0.22f, lift(c, 0.4f))
+                                tp.canvas.save()
+                                tp.canvas.rotate(rot * 57.3f, cx, cy)
+                                tp.oval(cx, cy, size * 1.25f, size * 0.32f, 0)
+                                tp.paint.reset()
+                                tp.paint.isAntiAlias = true
+                                tp.paint.style = Paint.Style.STROKE
+                                tp.paint.strokeWidth = 3f
+                                tp.paint.color = dim(colors[(i + 2) % colors.size], 0.72f)
+                                tp.canvas.drawOval(cx - size * 1.25f, cy - size * 0.32f, cx + size * 1.25f, cy + size * 0.32f, tp.paint)
+                                tp.canvas.restore()
+                            }
+                            1 -> { // star
+                                val pts = FloatArray(20)
+                                for (k in 0 until 10) {
+                                    val a = rot + k * PI.toFloat() / 5f
+                                    val rr = if (k % 2 == 0) size * 0.8f else size * 0.35f
+                                    pts[k * 2] = cx + cos(a) * rr
+                                    pts[k * 2 + 1] = cy + sin(a) * rr
+                                }
+                                tp.polygon(pts, c)
+                            }
+                            2 -> { // zigzag
+                                var px = cx - size
+                                var py = cy
+                                for (k in 0 until 5) {
+                                    val nx = px + size * 0.45f
+                                    val ny = cy + if (k % 2 == 0) -size * 0.35f else size * 0.35f
+                                    tp.line(px, py, nx, ny, 3.5f, c)
+                                    px = nx; py = ny
+                                }
+                            }
+                            3 -> tp.ring(cx, cy, size * 0.55f, 3.5f, c)
+                            4 -> { // triangle outline
+                                val pts = FloatArray(6)
+                                for (k in 0 until 3) {
+                                    val a = rot + k * 2.094f
+                                    pts[k * 2] = cx + cos(a) * size * 0.7f
+                                    pts[k * 2 + 1] = cy + sin(a) * size * 0.7f
+                                }
+                                for (k in 0 until 3) {
+                                    val k2 = (k + 1) % 3
+                                    tp.line(pts[k * 2], pts[k * 2 + 1], pts[k2 * 2], pts[k2 * 2 + 1], 3f, c)
+                                }
+                            }
+                            5 -> { // squiggle
+                                var px = cx - size
+                                var py = cy
+                                for (k in 1..12) {
+                                    val nx = cx - size + k * size / 6f
+                                    val ny = cy + sin(k * 1.1f + rot) * size * 0.3f
+                                    tp.line(px, py, nx, ny, 3f, c)
+                                    px = nx; py = ny
+                                }
+                            }
+                            else -> { // sparkle dots
+                                for (k in 0 until 5) {
+                                    val a = rot + k * 1.256f
+                                    tp.circle(cx + cos(a) * size * 0.6f, cy + sin(a) * size * 0.6f, 2.2f, c)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            else -> {
+                // Tiny stars everywhere, a few with a glint of their own.
+                for (i in 0 until 400) {
+                    val x = hash01(i, 21) * n
+                    val y = hash01(i, 22) * n
+                    if (i % 9 == 0) tp.radial(x, y, 6f, alpha(colors[i % colors.size], 0.22f), 0)
+                    tp.circle(x, y, 0.8f + hash01(i, 23) * 1.2f, alpha(colors[i % colors.size], 0.7f))
+                }
+                // Fine fibre speckle over everything.
+                tp.grain(0.12f, 29)
+                texture = tp.toTexture().also { it.repeat = true; tp.recycle() }
+                painter = null
+            }
+        }
+        stage++
+    }
+
+    /** The finished carpet, painting whatever stages are left first. */
+    fun finish(): Texture {
+        while (texture == null) next()
+        return texture!!
     }
 }
