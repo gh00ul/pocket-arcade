@@ -26,6 +26,38 @@ class GfxQualityTest {
         assertEquals(4, r.bloomOctaves)
         assertEquals(Reflections.MIRROR, r.reflections)
         assertEquals(RenderPass.MAX_LIGHTS, r.lights)
+        // And it is where the HDR picture and its whole cinematic finish live.
+        assertTrue(r.hdr)
+        assertTrue(r.glare)
+        assertTrue(r.film)
+    }
+
+    @Test
+    fun theFinishGoesFirstThenHdrThenMultisampling() {
+        val l = GfxQuality.LADDER
+        // Rung 1 keeps HDR and full multisampling but drops the glare and the film finish.
+        assertTrue(l[1].hdr)
+        assertFalse(l[1].glare)
+        assertFalse(l[1].film)
+        assertEquals(4, l[1].msaa)
+        // Rung 2 is the LDR picture; multisampling falls with it, never before it.
+        assertFalse(l[2].hdr)
+        assertTrue(l[2].msaa < l[1].msaa)
+        for (i in 0 until l.size) if (l[i].msaa < 4) assertFalse("HDR with reduced msaa at $i", l[i].hdr)
+    }
+
+    @Test
+    fun batteryNeverStartsOnAnHdrRung() {
+        for (i in GfxQuality.BATTERY_TOP until GfxQuality.LADDER.size) assertFalse("rung $i", GfxQuality.LADDER[i].hdr)
+        assertFalse(GfxQuality.LADDER[GfxQuality.startRung(Tier.BATTERY, 0)].hdr)
+    }
+
+    @Test
+    fun theFinishLeversNeedHdr() {
+        for (r in GfxQuality.LADDER) if (!r.hdr) {
+            assertFalse(r.glare)
+            assertFalse(r.film)
+        }
     }
 
     @Test
@@ -41,6 +73,9 @@ class GfxQualityTest {
             assertTrue("bloom at $i", r.bloomOctaves <= up.bloomOctaves)
             assertTrue("reflections at $i", r.reflections.ordinal >= up.reflections.ordinal)
             assertTrue("lights at $i", r.lights <= up.lights)
+            assertTrue("hdr at $i", !r.hdr || up.hdr)
+            assertTrue("glare at $i", !r.glare || up.glare)
+            assertTrue("film at $i", !r.film || up.film)
             assertTrue("floor under ceiling at $i", r.scaleFloor < r.scaleCeiling)
         }
     }

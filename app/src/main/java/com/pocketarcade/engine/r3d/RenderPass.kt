@@ -56,6 +56,7 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
 
     // Look: see the matching fields on Renderer3D.
     var bloomThreshold = Look.BLOOM_THRESHOLD
+    var bloomThresholdHdr = Look.BLOOM_THRESHOLD_HDR
     var bloomRadius = Look.BLOOM_RADIUS
     var grade = Look.GRADE
     var sharpen = Look.SHARPEN
@@ -129,6 +130,7 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
         exposure = 1f
         bloom = 0.8f
         bloomThreshold = Look.BLOOM_THRESHOLD
+        bloomThresholdHdr = Look.BLOOM_THRESHOLD_HDR
         bloomRadius = Look.BLOOM_RADIUS
         grade = Look.GRADE
         sharpen = Look.SHARPEN
