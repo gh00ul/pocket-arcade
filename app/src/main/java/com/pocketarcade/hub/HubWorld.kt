@@ -213,6 +213,9 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
     private var ownedDecor: Set<DecorStyle> = emptySet()
     private val rng = Random(42)
 
+    /** The hall as heard by the player: ears, cabinets' bleeps, kids' footsteps, the café and the crowd. */
+    private val soundscape = HallSoundscape(this, audio)
+
     init {
         player.x = map.spawnX
         player.y = map.spawnY
@@ -231,6 +234,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
             } while (!map.tileWalkable(tx, ty) && tries < 50)
             npcs += Npc(look, tx * HubLayout.TILE + 8f, ty * HubLayout.TILE + 12f, Random(100 + i), i * 1.7f)
         }
+        soundscape.publish()
     }
 
     fun setDecor(owned: Set<DecorStyle>) {
@@ -240,6 +244,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
         bodySolids = Body.solidsFor(map)
         // The scene takes the new decorations now, not in the next frame drawn.
         stage.mapChanged()
+        soundscape.publish()
         route.clear()
         // If a new decoration landed on the player, nudge them to the nearest free spot.
         if (Collision.blocked(map.solids, player.x, player.y)) {
@@ -291,6 +296,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
         lookAround()
         if (clerkCheerT > 0f) clerkCheerT -= dt
         clerk.update(dt, map.clerkX, map.clerkY, sin(time * 0.4f) * 0.4f, if (clerkCheerT > 0f) Pose.CLAP else Pose.STAND)
+        soundscape.update(dt)
         val gait = if (fp) player.speedFrac else if (player.moving) 1f else 0f
         val run = if (fp) (player.speedFrac - 1f) / (Player.RUN_SCALE - 1f) else 0f
         camera.update(player.x, player.y, player.vx, player.vy, player.moving, player.phase, dt, gait, run)

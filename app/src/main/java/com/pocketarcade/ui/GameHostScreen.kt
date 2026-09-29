@@ -75,6 +75,8 @@ import com.pocketarcade.engine.TimeScale
 import com.pocketarcade.engine.TiltControlled
 import com.pocketarcade.engine.TiltSteer
 import com.pocketarcade.engine.TouchType
+import com.pocketarcade.engine.audio.RoundMusic
+import com.pocketarcade.engine.audio.Stinger
 import com.pocketarcade.engine.thumbZoneGestureExclusion
 import com.pocketarcade.engine.clamp01
 import com.pocketarcade.engine.gl.Gfx
@@ -255,6 +257,7 @@ fun GameHostScreen(
         state.printingDone = total == 0
         state.phase = HostPhase.RESULTS
         state.phaseT = 0f
+        audio.music.stinger(if (state.newHigh) Stinger.HIGH_SCORE else Stinger.RESULTS)
         // The payout is saved even if the player leaves before the write returns.
         services.persist {
             services.repo.addTickets(total)
@@ -360,6 +363,19 @@ fun GameHostScreen(
         if (appPaused) pause()
     }
 
+    // The soundtrack follows the round: this machine's theme, sat back under the intro card and the
+    // pause menu, then the results' resolving loop (see RoundMusic for how it heats up).
+    LaunchedEffect(state.phase) {
+        when (state.phase) {
+            HostPhase.INTRO -> RoundMusic.intro(audio, game.id)
+            HostPhase.COUNTDOWN -> RoundMusic.countdown(audio, game.id)
+            HostPhase.RESULTS -> RoundMusic.results(audio)
+            HostPhase.PAUSED -> RoundMusic.pause(audio)
+            else -> RoundMusic.play(audio)
+        }
+    }
+    DisposableEffect(game) { onDispose { RoundMusic.play(audio) } }
+
     val frame = rememberGameLoop(game) { dt ->
         state.hostTime += dt
         // The results run on the time-scaled clock too, so the high-score beat that stretches the
@@ -382,6 +398,7 @@ fun GameHostScreen(
                 val step = (state.phaseT / COUNT_STEP).toInt()
                 if (step != state.lastCountdown) {
                     state.lastCountdown = step
+                    audio.music.stinger(if (step < 3) Stinger.COUNTDOWN else Stinger.GO)
                     if (step < 3) {
                         audio.play(Sfx.COUNTDOWN)
                         GameViewport.requestPunch(COUNT_PUNCH)
@@ -403,6 +420,7 @@ fun GameHostScreen(
                     state.timeLeft = (state.timeLeft - FIXED_DT).coerceAtLeast(0f)
                     game.update(FIXED_DT, state.timeLeft)
                 }
+                audio.music.setIntensity(RoundMusic.intensity(state.timeLeft, game.roundSeconds))
                 val sec = ceil(state.timeLeft).toInt()
                 if (state.timeLeft > 0f && sec <= 5 && sec != state.lastTick) {
                     state.lastTick = sec
@@ -410,6 +428,7 @@ fun GameHostScreen(
                 }
                 if (state.timeLeft <= 0f && !state.timeUpPlayed) {
                     state.timeUpPlayed = true
+                    audio.music.stinger(Stinger.TIME_UP)
                     audio.play(Sfx.BUZZER)
                     haptics.hit()
                 }
