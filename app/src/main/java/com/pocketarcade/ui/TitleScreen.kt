@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Shader
 import android.os.Build
 import androidx.compose.foundation.Canvas
+import androidx.core.graphics.withTranslation
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -210,15 +211,14 @@ fun TitleScreen(
         val logoA = TitleTimeline.logoExitAlpha(e)
         if (logoA > 0.004f) {
             val canvas = drawContext.canvas.nativeCanvas
-            canvas.save()
-            canvas.translate(0f, TitleTimeline.logoExitLift(e) * h)
             val grow = TitleTimeline.logoExitScale(e)
-            canvas.scale(grow, grow, w / 2f, logoTop + logoSize * 1.2f)
-            neonWord(canvas, state, state.pocket, w / 2f, logoTop + logoSize, t, calm, logoA)
-            neonWord(canvas, state, state.arcade, w / 2f, logoTop + logoSize * 2.08f, t, calm, logoA)
-            val tag = w * 0.0072f
-            ArcadeFont.drawCentered(this, "A WHOLE ARCADE HALL IN YOUR POCKET", w / 2f, logoTop + logoSize * 2.3f, tag, Color(0xFFD9C8FF), TitleTimeline.taglineAlpha(t) * logoA, tiny = true)
-            canvas.restore()
+            canvas.withTranslation(0f, TitleTimeline.logoExitLift(e) * h) {
+                scale(grow, grow, w / 2f, logoTop + logoSize * 1.2f)
+                neonWord(this, state, state.pocket, w / 2f, logoTop + logoSize, t, calm, logoA)
+                neonWord(this, state, state.arcade, w / 2f, logoTop + logoSize * 2.08f, t, calm, logoA)
+                val tag = w * 0.0072f
+                ArcadeFont.drawCentered(this@Canvas, "A WHOLE ARCADE HALL IN YOUR POCKET", w / 2f, logoTop + logoSize * 2.3f, tag, Color(0xFFD9C8FF), TitleTimeline.taglineAlpha(t) * logoA, tiny = true)
+            }
         }
 
         // The small print. Everything below leaves quickly on the tap.
@@ -331,41 +331,40 @@ private fun neonWord(canvas: android.graphics.Canvas, st: TitleState, wd: NeonWo
         val on = (TitleTimeline.letterOn(t, wd.start, i, calm) * TitleTimeline.buzz(t, i, n, wd.index, calm)).coerceIn(0f, 1f)
         val bob = if (calm) 0f else sin(t * 2.6f + i * 0.6f + wd.index * 1.7f) * size * 0.035f * on
         val ch = wd.letters[i]
-        canvas.save()
-        canvas.translate(left + wd.offset[i], baseline + bob)
-        // Extrusion: solid, so it shows even on an unlit tube.
-        paint.shader = null
-        paint.clearShadowLayer()
-        paint.style = Paint.Style.FILL
-        for (k in EXTRUSION_LAYERS downTo 1) {
-            paint.color = Pal.shade(extrude, 1f - k * 0.09f)
-            paint.alpha = (255f * alphaMul).toInt()
-            canvas.drawText(ch, k * size * 0.012f, k * size * 0.016f, paint)
-        }
-        // Glow: only from a lit tube, breathing slowly.
-        if (on > 0.03f) {
-            val glow = on * alphaMul
-            paint.color = wd.color
-            paint.alpha = (200f * glow).toInt()
-            paint.setShadowLayer(size * 0.22f * breath * (0.4f + 0.6f * on), 0f, 0f, (wd.color and 0xFFFFFF) or ((255f * glow).toInt() shl 24))
-            canvas.drawText(ch, 0f, 0f, paint)
+        canvas.withTranslation(left + wd.offset[i], baseline + bob) {
+            // Extrusion: solid, so it shows even on an unlit tube.
+            paint.shader = null
             paint.clearShadowLayer()
+            paint.style = Paint.Style.FILL
+            for (k in EXTRUSION_LAYERS downTo 1) {
+                paint.color = Pal.shade(extrude, 1f - k * 0.09f)
+                paint.alpha = (255f * alphaMul).toInt()
+                drawText(ch, k * size * 0.012f, k * size * 0.016f, paint)
+            }
+            // Glow: only from a lit tube, breathing slowly.
+            if (on > 0.03f) {
+                val glow = on * alphaMul
+                paint.color = wd.color
+                paint.alpha = (200f * glow).toInt()
+                paint.setShadowLayer(size * 0.22f * breath * (0.4f + 0.6f * on), 0f, 0f, (wd.color and 0xFFFFFF) or ((255f * glow).toInt() shl 24))
+                drawText(ch, 0f, 0f, paint)
+                paint.clearShadowLayer()
+            }
+            // Face: a dim ghost of the letter until it catches.
+            paint.shader = wd.face
+            paint.alpha = (255f * (FACE_UNLIT + (1f - FACE_UNLIT) * on) * alphaMul).toInt()
+            drawText(ch, 0f, 0f, paint)
+            // The sweep: a tilted band of light that slides across the whole word.
+            if (sweep >= 0f && on > 0.95f) {
+                val centre = sweep * (wd.total + size * 1.2f) - size * 0.6f
+                st.sweepMatrix.setRotate(-16f, st.sweepBand / 2f, 0f)
+                st.sweepMatrix.postTranslate(centre - wd.offset[i] - st.sweepBand / 2f, 0f)
+                st.sweep!!.setLocalMatrix(st.sweepMatrix)
+                paint.shader = st.sweep
+                paint.alpha = (255f * alphaMul).toInt()
+                drawText(ch, 0f, 0f, paint)
+            }
+            paint.shader = null
         }
-        // Face: a dim ghost of the letter until it catches.
-        paint.shader = wd.face
-        paint.alpha = (255f * (FACE_UNLIT + (1f - FACE_UNLIT) * on) * alphaMul).toInt()
-        canvas.drawText(ch, 0f, 0f, paint)
-        // The sweep: a tilted band of light that slides across the whole word.
-        if (sweep >= 0f && on > 0.95f) {
-            val centre = sweep * (wd.total + size * 1.2f) - size * 0.6f
-            st.sweepMatrix.setRotate(-16f, st.sweepBand / 2f, 0f)
-            st.sweepMatrix.postTranslate(centre - wd.offset[i] - st.sweepBand / 2f, 0f)
-            st.sweep!!.setLocalMatrix(st.sweepMatrix)
-            paint.shader = st.sweep
-            paint.alpha = (255f * alphaMul).toInt()
-            canvas.drawText(ch, 0f, 0f, paint)
-        }
-        paint.shader = null
-        canvas.restore()
     }
 }

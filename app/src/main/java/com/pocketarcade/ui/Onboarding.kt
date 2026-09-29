@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
@@ -218,28 +219,30 @@ private fun CoachCard(
             .clip(shape)
             .background(Brush.verticalGradient(listOf(Color(0xF0241A40), Color(0xF0120C22))))
             .border(2.dp, accent, shape)
-            .padding(horizontal = 14.dp, vertical = 10.dp)
-            .semantics { liveRegion = LiveRegionMode.Polite },
+            .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            if (ui.text.check) {
-                Canvas(Modifier.size(22.dp)) { drawCheck(checkProgress(), accent) }
-                Spacer(Modifier.width(8.dp))
+        // The words are one announcement, spoken again whenever they change; the buttons stay separate.
+        Column(Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (ui.text.check) {
+                    Canvas(Modifier.size(22.dp)) { drawCheck(checkProgress(), accent) }
+                    Spacer(Modifier.width(8.dp))
+                }
+                ArcadeText(ui.text.title, unit = 2.2.dp, color = accent.lift(0.2f), maxWidth = 210.dp)
+                Spacer(Modifier.weight(1f))
+                for (i in 0 until ui.count) {
+                    if (i > 0) Spacer(Modifier.width(5.dp))
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (i < ui.done) accent else Color(0x44FFFFFF)),
+                    )
+                }
             }
-            ArcadeText(ui.text.title, unit = 2.2.dp, color = accent.lift(0.2f), maxWidth = 210.dp)
-            Spacer(Modifier.weight(1f))
-            for (i in 0 until ui.count) {
-                if (i > 0) Spacer(Modifier.width(5.dp))
-                Box(
-                    Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(if (i < ui.done) accent else Color(0x44FFFFFF)),
-                )
-            }
+            Spacer(Modifier.size(6.dp))
+            ArcadeText(ui.text.body, unit = 1.7.dp, tiny = true, color = Color.White, maxWidth = 300.dp)
         }
-        Spacer(Modifier.size(6.dp))
-        ArcadeText(ui.text.body, unit = 1.7.dp, tiny = true, color = Color.White, maxWidth = 300.dp)
         if (ui.active) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 SmallAction("SKIP STEP", "Skip this step", onSkipStep)
@@ -262,7 +265,10 @@ private fun SmallAction(label: String, description: String, onClick: () -> Unit)
             .padding(horizontal = 4.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
-        ArcadeText(label, unit = 1.5.dp, tiny = true, color = Color(0xFF9A90B8))
+        // The button says its words once (above); its painted label stays out of the way.
+        Box(Modifier.clearAndSetSemantics {}) {
+            ArcadeText(label, unit = 1.5.dp, tiny = true, color = Color(0xFF9A90B8))
+        }
     }
 }
 
