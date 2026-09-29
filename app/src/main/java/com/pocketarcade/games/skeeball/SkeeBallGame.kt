@@ -8,6 +8,7 @@ import com.pocketarcade.engine.FlickTracker
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
+import com.pocketarcade.engine.ScreenShake
 import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.Spring
@@ -17,6 +18,8 @@ import com.pocketarcade.engine.Vec2
 import com.pocketarcade.engine.clamp01
 import com.pocketarcade.engine.damp
 import com.pocketarcade.engine.easeOutCubic
+import com.pocketarcade.engine.hash01
+import com.pocketarcade.engine.lerp
 import com.pocketarcade.engine.len
 import com.pocketarcade.engine.r3d.Blend
 import com.pocketarcade.engine.r3d.Model
@@ -32,6 +35,7 @@ import com.pocketarcade.games.CabinetLook
 import com.pocketarcade.games.CabinetShape
 import com.pocketarcade.games.GAME_H
 import com.pocketarcade.games.GAME_W
+import com.pocketarcade.games.scenea.SceneFx
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -117,6 +121,34 @@ class SkeeBallGame : BaseMiniGame() {
         const val SIDE_FRONT_Z = 298f
         const val SIDE_BACK_Y = 340f
         const val SIDE_FRONT_Y = 100f
+
+        // ---- Look (presentation only): these change how the alley looks, never how it plays.
+
+        /** Brightness above which things bloom; a touch over the default so the pale lane and rails stay calm. */
+        const val BLOOM_THRESHOLD = 0.66f
+        /** Gloss of the varnished lane and of the blue rails. */
+        const val LANE_GLOSS = 0.32f
+        const val RAIL_GLOSS = 0.5f
+        /** How many past positions a ball's trail keeps, how often it takes one, how long each lives (s), how bright the trail is. */
+        const val TRAIL_LEN = 10
+        const val TRAIL_STEP = 0.02f
+        const val TRAIL_LIFE = 0.26f
+        const val TRAIL_ALPHA = 0.45f
+        /** Score impacts drawn at once, how long each ring takes to cross the board (s). */
+        const val IMPACTS = 6
+        const val IMPACT_LIFE = 0.75f
+        /** Seconds between the quiet pulses that travel out over the board, and how bright they are. */
+        const val PULSE_PERIOD = 3.4f
+        const val PULSE_ALPHA = 0.16f
+        /** Strength of the work light that rides with a rolling ball. */
+        const val BALL_LIGHT = 0.5f
+        /** Seconds between sheens sweeping across the marquee. */
+        const val SWEEP_PERIOD = 5.5f
+
+        // Attract loop: seconds per throw, and which ring each throw drops into (index into the six rings) with its label.
+        const val ATTRACT_LOOP = 3.4f
+        val ATTRACT_TARGETS = intArrayOf(3, 1, 5, 2, 4)
+        val ATTRACT_LABELS = arrayOf("10", "20", "30", "40", "50", "100")
     }
 
     private enum class Phase { ROLLING, FLYING, SETTLING, GUTTER }
@@ -140,6 +172,30 @@ class SkeeBallGame : BaseMiniGame() {
         var active = false
         /** Seconds since the roll started, whatever the phase (for the failsafe). */
         var age = 0f
+
+        // Where the ball has been, for its trail: positions and the [age] each was taken at. Looks
+        // only; nothing in the rules reads them.
+        val trailX = FloatArray(TRAIL_LEN)
+        val trailY = FloatArray(TRAIL_LEN)
+        val trailZ = FloatArray(TRAIL_LEN)
+        val trailAt = FloatArray(TRAIL_LEN)
+        var trailHead = 0
+        var trailCount = 0
+        var trailClock = 0f
+
+        fun clearTrail() {
+            trailHead = 0; trailCount = 0; trailClock = 0f
+        }
+
+        /** Notes the current spot once every [TRAIL_STEP] seconds. */
+        fun sampleTrail(dt: Float) {
+            trailClock += dt
+            if (trailClock < TRAIL_STEP) return
+            trailClock = 0f
+            trailX[trailHead] = x; trailY[trailHead] = y; trailZ[trailHead] = z; trailAt[trailHead] = age
+            trailHead = (trailHead + 1) % TRAIL_LEN
+            if (trailCount < TRAIL_LEN) trailCount++
+        }
     }
 
     private val balls = Array(6) { Ball() }
@@ -151,6 +207,15 @@ class SkeeBallGame : BaseMiniGame() {
     private val flick = FlickTracker()
     private val tmp = Vec2()
     private val ringFlash = FloatArray(7)
+    // Impacts on the board: where a ball came to rest, in what colour, and how long ago (looks only).
+    private val impactX = FloatArray(IMPACTS)
+    private val impactY = FloatArray(IMPACTS)
+    private val impactColor = IntArray(IMPACTS)
+    private val impactAge = FloatArray(IMPACTS) { IMPACT_LIFE }
+    private val impactBig = BooleanArray(IMPACTS)
+    private var impactNext = 0
+    /** 0..1 excitement of the marquee: jumps on big scores and cools off. */
+    private var marqueeBoost = 0f
     private var lastSpeed = 0f
     private var speedShowT = 0f
     private val readySquash = Spring()
@@ -165,6 +230,8 @@ class SkeeBallGame : BaseMiniGame() {
         reloadT = 0f
         dragging = -1L
         ringFlash.fill(0f)
+        impactAge.fill(IMPACT_LIFE)
+        marqueeBoost = 0f
         speedShowT = 0f
         readySquash.snap(1f)
         gutters = 0
@@ -244,6 +311,7 @@ class SkeeBallGame : BaseMiniGame() {
         b.t = 0f
         b.age = 0f
         b.spin = 0f
+        b.clearTrail()
         return true
     }
 
@@ -251,6 +319,8 @@ class SkeeBallGame : BaseMiniGame() {
         readySquash.update(dt)
         speedShowT -= dt
         for (i in ringFlash.indices) ringFlash[i] = (ringFlash[i] - dt * 2f).coerceAtLeast(0f)
+        for (i in impactAge.indices) if (impactAge[i] < IMPACT_LIFE) impactAge[i] += dt
+        marqueeBoost = (marqueeBoost - dt * 0.6f).coerceAtLeast(0f)
         if (!hasReady) {
             reloadT -= dt
             if (reloadT <= 0f && !timeUp) {
@@ -270,6 +340,7 @@ class SkeeBallGame : BaseMiniGame() {
     private fun stepBall(b: Ball, dt: Float) {
         b.t += dt
         b.age += dt
+        if (b.phase == Phase.ROLLING || b.phase == Phase.FLYING) b.sampleTrail(dt)
         if (b.age > SkeeTuning.BALL_TIMEOUT && b.phase != Phase.GUTTER) {
             failsafeTrips++
             gutter(b)
@@ -387,6 +458,8 @@ class SkeeBallGame : BaseMiniGame() {
         val pts = b.points
         ringFlash[b.ring] = 1f
         val color = Color(ringColor(b.ring))
+        addImpact(b.toX, b.toY, ringColor(b.ring), pts >= 100)
+        marqueeBoost = maxOf(marqueeBoost, if (b.ring == 6) 1f else if (pts >= 100) 0.8f else 0.2f + pts / 200f)
         // Effects appear where the cup is on screen.
         stage.toField(b.toX, surfaceY(b.toY) + BALL_R, b.toY, pt)
         val sx = pt[0]
@@ -420,6 +493,13 @@ class SkeeBallGame : BaseMiniGame() {
         }
     }
 
+    /** Starts a ring spreading over the board from where a ball settled. */
+    private fun addImpact(x: Float, y: Float, color: Int, big: Boolean) {
+        val i = impactNext
+        impactNext = (impactNext + 1) % IMPACTS
+        impactX[i] = x; impactY[i] = y; impactColor[i] = color; impactBig[i] = big; impactAge[i] = 0f
+    }
+
     private fun ringColor(ring: Int): Int = when (ring) {
         0 -> Pal.RED
         1 -> Pal.YELLOW
@@ -439,6 +519,7 @@ class SkeeBallGame : BaseMiniGame() {
      */
     private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt()).apply {
         look(CX, 300f, 1000f, CX, 40f, 300f, fovDeg = 44f)
+        r.bloomThreshold = BLOOM_THRESHOLD
     }
     private val pt = FloatArray(3)
 
@@ -454,6 +535,8 @@ class SkeeBallGame : BaseMiniGame() {
     private val laneLight = PointLight(CX, 150f, 470f, 1f, 0.8f, 0.6f, 420f, 0.7f)
     private val marqueeLight = PointLight(CX, 260f, 40f, 1f, 0.35f, 0.55f, 260f, 0.8f)
     private val ringLight = PointLight(CX, 150f, CY, 1f, 1f, 1f, 260f, 0f)
+    /** A warm light that rides with the ball on the lane (the waiting ball's is faint). */
+    private val ballLight = PointLight(CX, 40f, 400f, 1f, 0.6f, 0.38f, 140f, 0f)
 
     /** Raised walls standing up from the board between the scoring rings. */
     private val ringWalls: Model by lazy {
@@ -465,7 +548,7 @@ class SkeeBallGame : BaseMiniGame() {
         for (ring in SkeeTuning.RING_RADII.indices) {
             val rad = SkeeTuning.RING_RADII[ring]
             val h = 5f + ring * 0.6f
-            val tint = Pal.mix(ringColor(ring), Pal.WHITE, 0.25f)
+            val tint = Pal.mix(ringColor(ring), Pal.WHITE, 0.12f)
             for (k in 0 until n) {
                 val a0 = k * TAU / n
                 val a1 = (k + 1) * TAU / n
@@ -499,15 +582,24 @@ class SkeeBallGame : BaseMiniGame() {
 
     override fun render(scope: DrawScope) {
         val r = stage.begin()
+        val motion = ScreenShake.intensity.coerceIn(0f, 1f)
         lightScene(r)
         r.gradient(0xFF04020A.toInt(), Pal.NIGHT)
-        drawCabinet(r)
-        drawBoardFx(r)
-        for (b in balls) if (b.active && b.phase != Phase.GUTTER) drawBall(r, b.x, b.y, b.z, b.spin, 1f, 1f)
+        drawCabinet(r, motion)
+        drawBoardFx(r, motion)
+        for (b in balls) if (b.active && b.phase != Phase.GUTTER) {
+            drawTrail(r, b)
+            drawBall(r, b.x, b.y, b.z, b.spin, 1f, 1f)
+        }
         if (hasReady) {
             val s = readySquash.value
+            // A quiet ring on the lane under the waiting ball says "take me".
+            if (dragging < 0 && !timeUp) {
+                SceneFx.shockwave(r, readyX, 0.6f, readyY, 46f + 8f * sin(time * 4f) * motion, Pal.CREAM, 0.18f + 0.1f * sin(time * 4f) * motion)
+            }
             drawBall(r, readyX, readyY, 0f, 0f, 2f - s, s)
         }
+        drawImpacts(r)
         stage.present()
 
         if (hasReady && dragging < 0 && !timeUp && stage.toField(readyX, 0f, readyY, pt)) {
@@ -519,14 +611,31 @@ class SkeeBallGame : BaseMiniGame() {
 
     private fun lightScene(r: Renderer3D) {
         val l = r.lighting
-        l.ambR = 0.5f; l.ambG = 0.47f; l.ambB = 0.62f
+        // A shade dimmer and cooler than before, so the varnished lane stops washing out.
+        l.ambR = 0.46f; l.ambG = 0.43f; l.ambB = 0.6f
         l.setDirection(0.2f, 1f, 0.7f)
-        l.dirR = 0.35f; l.dirG = 0.33f; l.dirB = 0.3f
+        l.dirR = 0.32f; l.dirG = 0.3f; l.dirB = 0.28f
         l.points.clear()
         l.points += boardLight
         l.points += laneLight
-        marqueeLight.intensity = 0.7f + 0.2f * sin(time * 5f)
+        marqueeLight.intensity = 0.7f + 0.2f * sin(time * 5f) + marqueeBoost * 0.7f
         l.points += marqueeLight
+        // The ball lights the lane it rolls over: the first one in play, else the waiting one.
+        var lit = false
+        for (b in balls) {
+            if (b.active && (b.phase == Phase.ROLLING || b.phase == Phase.FLYING)) {
+                ballLight.x = b.x; ballLight.z = b.y; ballLight.y = surfaceY(b.y) + b.z + BALL_R + 22f
+                ballLight.intensity = BALL_LIGHT
+                lit = true
+                break
+            }
+        }
+        if (!lit && hasReady) {
+            ballLight.x = readyX; ballLight.z = readyY; ballLight.y = BALL_R + 22f
+            ballLight.intensity = BALL_LIGHT * 0.5f
+            lit = true
+        }
+        if (lit) l.points += ballLight
         var hot = -1
         for (i in ringFlash.indices) if (ringFlash[i] > 0f && (hot < 0 || ringFlash[i] > ringFlash[hot])) hot = i
         if (hot >= 0) {
@@ -544,7 +653,7 @@ class SkeeBallGame : BaseMiniGame() {
         }
     }
 
-    private fun drawCabinet(r: Renderer3D) {
+    private fun drawCabinet(r: Renderer3D, motion: Float) {
         val white = TexKit.white.full
         // The pit between ramp and board, and the board's front edge.
         r.quad(
@@ -573,15 +682,15 @@ class SkeeBallGame : BaseMiniGame() {
         // The lane.
         r.quad(
             LANE_L, 0f, RAMP_Y, LANE_R, 0f, RAMP_Y, LANE_R, 0f, LANE_END, LANE_L, 0f, LANE_END,
-            laneTex.full, 0f, 1f, 0f,
+            laneTex.full, 0f, 1f, 0f, gloss = LANE_GLOSS,
         )
         // Rails along both sides of the lane and ramp.
         val railTex = SkeeArt.railSide.full
         val rt = SkeeArt.railTop.full
-        r.quad(BOARD_L, RAIL_H, BOARD_BOTTOM, LANE_L, RAIL_H, BOARD_BOTTOM, LANE_L, RAIL_H, LANE_END, BOARD_L, RAIL_H, LANE_END, rt, 0f, 1f, 0f)
-        r.quad(LANE_R, RAIL_H, BOARD_BOTTOM, BOARD_R, RAIL_H, BOARD_BOTTOM, BOARD_R, RAIL_H, LANE_END, LANE_R, RAIL_H, LANE_END, rt, 0f, 1f, 0f, u0 = rt.w.toFloat(), u1 = 0f)
-        r.quad(LANE_L, RAIL_H, BOARD_BOTTOM, LANE_L, RAIL_H, LANE_END, LANE_L, PIT_Y, LANE_END, LANE_L, PIT_Y, BOARD_BOTTOM, railTex, 1f, 0f, 0f)
-        r.quad(LANE_R, RAIL_H, LANE_END, LANE_R, RAIL_H, BOARD_BOTTOM, LANE_R, PIT_Y, BOARD_BOTTOM, LANE_R, PIT_Y, LANE_END, railTex, -1f, 0f, 0f)
+        r.quad(BOARD_L, RAIL_H, BOARD_BOTTOM, LANE_L, RAIL_H, BOARD_BOTTOM, LANE_L, RAIL_H, LANE_END, BOARD_L, RAIL_H, LANE_END, rt, 0f, 1f, 0f, gloss = RAIL_GLOSS)
+        r.quad(LANE_R, RAIL_H, BOARD_BOTTOM, BOARD_R, RAIL_H, BOARD_BOTTOM, BOARD_R, RAIL_H, LANE_END, LANE_R, RAIL_H, LANE_END, rt, 0f, 1f, 0f, u0 = rt.w.toFloat(), u1 = 0f, gloss = RAIL_GLOSS)
+        r.quad(LANE_L, RAIL_H, BOARD_BOTTOM, LANE_L, RAIL_H, LANE_END, LANE_L, PIT_Y, LANE_END, LANE_L, PIT_Y, BOARD_BOTTOM, railTex, 1f, 0f, 0f, gloss = RAIL_GLOSS)
+        r.quad(LANE_R, RAIL_H, LANE_END, LANE_R, RAIL_H, BOARD_BOTTOM, LANE_R, PIT_Y, BOARD_BOTTOM, LANE_R, PIT_Y, LANE_END, railTex, -1f, 0f, 0f, gloss = RAIL_GLOSS)
         // The target board, tilted back.
         val far = BOARD_TOP - 10f
         r.quad(
@@ -597,12 +706,13 @@ class SkeeBallGame : BaseMiniGame() {
         val topY = boardY(far)
         r.quad(BOARD_L, SIGN_TOP + 30f, far, BOARD_R, SIGN_TOP + 30f, far, BOARD_R, topY - 4f, far, BOARD_L, topY - 4f, far, SkeeArt.boardEdge.full, 0f, 0f, 1f)
         val m = SkeeArt.marquee.full
-        r.quad(BOARD_L + 6f, SIGN_TOP, far + 2f, BOARD_R - 6f, SIGN_TOP, far + 2f, BOARD_R - 6f, SIGN_TOP - 84f, far + 2f, BOARD_L + 6f, SIGN_TOP - 84f, far + 2f, m, 0f, 0f, 1f, emissive = 1f)
-        // Marquee bulbs, chasing.
+        r.quad(BOARD_L + 6f, SIGN_TOP, far + 2f, BOARD_R - 6f, SIGN_TOP, far + 2f, BOARD_R - 6f, SIGN_TOP - 84f, far + 2f, BOARD_L + 6f, SIGN_TOP - 84f, far + 2f, m, 0f, 0f, 1f, emissive = 1f + 0.15f * marqueeBoost)
+        drawMarqueeFx(r, far, motion)
+        // Marquee bulbs, chasing (faster when a big score has excited the sign).
         val glow = TexKit.glow.full
         for (i in 0 until 18) {
             val bx = BOARD_L + 6f + (9f + i * 17.8f) * (BOARD_R - BOARD_L - 12f) / 320f
-            val on = ((time * 8f).toInt() + i) % 3 == 0
+            val on = ((time * (8f + 8f * marqueeBoost)).toInt() + i) % 3 == 0
             val c = if (on) Pal.YELLOW else Pal.shade(Pal.ORANGE, 0.5f)
             for (row in 0..1) {
                 val by = if (row == 0) SIGN_TOP - 10f * 84f / 90f else SIGN_TOP - 80f * 84f / 90f
@@ -646,8 +756,8 @@ class SkeeBallGame : BaseMiniGame() {
         r.end()
     }
 
-    /** Ring flashes and the blinking bonus hole, drawn as light on the board. */
-    private fun drawBoardFx(r: Renderer3D) {
+    /** Ring flashes, quiet pulses over the board and the blinking bonus hole, drawn as light on the board. */
+    private fun drawBoardFx(r: Renderer3D, motion: Float) {
         val white = TexKit.white.full
         for (ring in 0 until 6) {
             val f = ringFlash[ring]
@@ -656,12 +766,104 @@ class SkeeBallGame : BaseMiniGame() {
             val rOut = SkeeTuning.RING_RADII[ring]
             annulus(r, rIn, rOut, ringColor(ring), f * 0.75f, white)
         }
+        // A soft pulse travels out from the bullseye now and then, so the board is never quite still.
+        if (motion > 0f) {
+            val ph = (time / PULSE_PERIOD) % 1f
+            boardRing(r, CX, CY, 8f + ph * 118f, Pal.CREAM, PULSE_ALPHA * sin(ph * Math.PI.toFloat()) * motion)
+        }
+        val f0 = ringFlash[0]
+        if (f0 > 0f) SceneFx.flare(r, CX, boardY(CY) + 30f, CY, 110f * (0.6f + 0.4f * f0), Pal.YELLOW, f0 * 0.85f)
         val glow = TexKit.glow.full
         val blink = 0.5f + 0.5f * sin(time * 9f)
         val by = boardY(BONUS_Y) + 3f
         r.sprite(BONUS_X, by, BONUS_Y, 44f, 44f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.25f + 0.35f * blink, tint = Pal.GOLD)
+        // The bonus hole shines a faint gold shaft up, and a ring of chasing lights circles it.
+        SceneFx.shaft(r, BONUS_X, by, BONUS_Y, BONUS_X, by + 90f, BONUS_Y, 26f, Pal.GOLD, 0.05f + 0.07f * blink)
+        val dot = TexKit.dot.full
+        for (k in 0 until 8) {
+            val a = k * TAU / 8f
+            val bx = BONUS_X + cos(a) * (BONUS_R + 9f)
+            val bz = BONUS_Y + sin(a) * (BONUS_R + 9f) * SQUASH
+            val on = ((time * 10f).toInt() + k) % 3 == 0
+            r.sprite(bx, boardY(bz) + 3f, bz, 5f, 5f, dot, emissive = 1.15f, tint = if (on) Pal.YELLOW else Pal.shade(Pal.GOLD, 0.4f))
+        }
         val bf = ringFlash[6]
-        if (bf > 0f) r.sprite(BONUS_X, by, BONUS_Y, 90f * (1f + bf), 90f * (1f + bf), glow, blend = Blend.ADD, emissive = 1f, alpha = bf, tint = Pal.GOLD)
+        if (bf > 0f) {
+            r.sprite(BONUS_X, by, BONUS_Y, 90f * (1f + bf), 90f * (1f + bf), glow, blend = Blend.ADD, emissive = 1f, alpha = bf, tint = Pal.GOLD)
+            SceneFx.flare(r, BONUS_X, by + 20f, BONUS_Y, 140f * (0.5f + 0.5f * bf), Pal.YELLOW, bf, roll = time * 2f * motion)
+        }
+    }
+
+    /**
+     * The largest reach for a ring centred on lane position ([x], [y]) that still ends on the
+     * board (a shockwave from the corner bonus hole must not spill over the cabinet's sides).
+     */
+    private fun fitOnBoard(x: Float, y: Float, reach: Float): Float {
+        val room = minOf(minOf(x - BOARD_L, BOARD_R - x), minOf((y - (BOARD_TOP - 10f)) / SQUASH, (BOARD_BOTTOM - y) / SQUASH))
+        return reach.coerceAtMost(room).coerceAtLeast(16f)
+    }
+
+    /** A soft ring of light lying on the tilted board: a true circle on it once seen through the camera. */
+    private fun boardRing(r: Renderer3D, x: Float, y: Float, rx: Float, color: Int, alpha: Float) {
+        if (alpha <= 0.004f) return
+        val rz = rx * SQUASH
+        val z0 = y - rz
+        val z1 = y + rz
+        r.quad(
+            x - rx, boardY(z0) + 0.9f, z0, x + rx, boardY(z0) + 0.9f, z0, x + rx, boardY(z1) + 0.9f, z1, x - rx, boardY(z1) + 0.9f, z1,
+            SceneFx.ring.full, 0f, SQUASH, 0.626f, blend = Blend.ADD, emissive = 1f, alpha = alpha, cull = false, tint = color,
+        )
+    }
+
+    /** Shockwaves crossing the board from where balls came to rest; the top scores throw a flare too. */
+    private fun drawImpacts(r: Renderer3D) {
+        for (i in 0 until IMPACTS) {
+            val t = impactAge[i] / IMPACT_LIFE
+            if (t >= 1f) continue
+            val e = easeOutCubic(t)
+            val big = impactBig[i]
+            val reach = fitOnBoard(impactX[i], impactY[i], if (big) 125f else 70f)
+            boardRing(r, impactX[i], impactY[i], 10f + e * reach, impactColor[i], (1f - t) * (if (big) 0.8f else 0.55f))
+            if (big && t < 0.55f) {
+                val k = 1f - t / 0.55f
+                SceneFx.flare(r, impactX[i], boardY(impactY[i]) + 22f, impactY[i], 60f + 60f * e, impactColor[i], k * 0.8f)
+            }
+        }
+    }
+
+    /** A warm smear behind a moving ball, fading over [TRAIL_LIFE]; samples close to the ball hide behind it. */
+    private fun drawTrail(r: Renderer3D, b: Ball) {
+        val n = b.trailCount
+        for (k in 0 until n) {
+            val idx = (b.trailHead - 1 - k + TRAIL_LEN * 2) % TRAIL_LEN
+            val life = 1f - (b.age - b.trailAt[idx]) / TRAIL_LIFE
+            if (life <= 0f) break
+            val dx = b.trailX[idx] - b.x
+            val dy = b.trailY[idx] - b.y
+            val away = clamp01(sqrt(dx * dx + dy * dy) / (BALL_R * 1.4f))
+            val gy = b.trailY[idx]
+            SceneFx.glow(r, b.trailX[idx], surfaceY(gy) + b.trailZ[idx] + BALL_R, gy, BALL_R * (0.9f + 1.4f * life), Pal.ORANGE, TRAIL_ALPHA * life * life * away)
+        }
+    }
+
+    /** The glow behind the marquee, and a sheen that sweeps across it now and then. */
+    private fun drawMarqueeFx(r: Renderer3D, far: Float, motion: Float) {
+        SceneFx.glow(r, CX, SIGN_TOP - 42f, far + 8f, 380f, Pal.ORANGE, 0.09f + 0.16f * marqueeBoost)
+        val ph = (time / SWEEP_PERIOD) % 1f
+        if (motion <= 0f || ph >= 0.35f) return
+        val k = ph / 0.35f
+        val hw = 34f
+        val sx = lerp(BOARD_L - 20f, BOARD_R + 20f, k)
+        val x0 = maxOf(BOARD_L + 6f, sx - hw)
+        val x1 = minOf(BOARD_R - 6f, sx + hw)
+        if (x1 <= x0) return
+        val reg = SceneFx.streak.full
+        val u0 = (x0 - (sx - hw)) / (2f * hw) * reg.w
+        val u1 = (x1 - (sx - hw)) / (2f * hw) * reg.w
+        r.quad(
+            x0, SIGN_TOP, far + 2.5f, x1, SIGN_TOP, far + 2.5f, x1, SIGN_TOP - 84f, far + 2.5f, x0, SIGN_TOP - 84f, far + 2.5f,
+            reg, 0f, 0f, 1f, u0 = u0, u1 = u1, blend = Blend.ADD, emissive = 1f, alpha = 0.32f, tint = Pal.CREAM,
+        )
     }
 
     private fun annulus(r: Renderer3D, rIn: Float, rOut: Float, color: Int, alpha: Float, tex: Region) {
@@ -739,19 +941,101 @@ class SkeeBallGame : BaseMiniGame() {
 
     // ---------------------------------------------------------------- attract mode
 
+    /**
+     * The alley in miniature, playing itself: a lit marquee with chasing bulbs, the ringed board,
+     * and a ball that rolls up the lane, hops the ramp and drops into a different ring each time.
+     * The ring lights up, a shockwave crosses the board and its score floats up. [ATTRACT_LOOP]
+     * seconds a throw.
+     */
     override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) {
-        p.fill(0, 0, w, h, Color(Pal.NAVY))
-        val cx = w / 2f
-        val cy = h * 0.38f
-        p.disc(cx, cy, h * 0.34f, Color(Pal.PURPLE))
-        p.disc(cx, cy, h * 0.24f, Color(Pal.PINK))
-        p.disc(cx, cy, h * 0.14f, Color(Pal.YELLOW))
-        p.disc(cx, cy, h * 0.06f, Color(Pal.RED))
-        val t = (time % 2.2f) / 2.2f
-        val by = h - 2f - t * (h - cy - 1f)
-        val bx = cx + sin(time * 2f) * 2f
-        val hop = if (t > 0.6f) sin((t - 0.6f) / 0.4f * Math.PI.toFloat()) * 3f else 0f
-        p.disc(bx, by - hop, 1.6f, Color(Pal.DARKRED))
-        if ((time * 1.5f).toInt() % 2 == 0) p.textCentered("50", w - 5f, 1f, Color(Pal.YELLOW), tiny = true)
+        val wf = w.toFloat()
+        val hf = h.toFloat()
+        for (row in 0 until h) {
+            p.fill(0f, row.toFloat(), wf, 1.05f, Color(Pal.mix(Pal.NAVY, Pal.shade(Pal.NIGHT, 0.8f), row / (hf - 1f))))
+        }
+        val cx = wf / 2f
+        val cy = hf * 0.5f
+        // Board: concentric rings, each with a dark edge, and the cup in the middle.
+        val radii = floatArrayOf(7.6f, 6.3f, 5.0f, 3.8f, 2.7f, 1.6f)
+        val colors = intArrayOf(Pal.SKY, Pal.PURPLE, Pal.PINK, Pal.ORANGE, Pal.YELLOW, Pal.RED)
+        val t = time % ATTRACT_LOOP
+        val throwIndex = (time / ATTRACT_LOOP).toInt()
+        val target = ATTRACT_TARGETS[throwIndex % ATTRACT_TARGETS.size]
+        val landed = t >= 1.7f
+        val since = t - 1.7f
+        for (i in radii.indices) {
+            val rr = radii[i]
+            val lit = landed && i == target && since < 0.9f
+            p.disc(cx, cy, rr + 0.35f, Color(Pal.shade(colors[i], 0.35f)))
+            p.disc(cx, cy, rr, Color(Pal.shade(colors[i], if (lit) 1f else 0.62f)))
+            p.disc(cx, cy + 0.2f, rr - 0.55f, Color(Pal.shade(colors[i], if (lit) 0.85f else 0.42f)))
+        }
+        p.disc(cx, cy, 0.7f, Color(Pal.BLACK))
+        // A shockwave rippling out over the rings where the ball landed.
+        if (landed && since < 0.7f) {
+            val k = since / 0.7f
+            val rr = 1.5f + k * 6.6f
+            val a = (1f - k) * 0.9f
+            for (i in 0 until 18) {
+                val ang = i * TAU / 18f
+                p.px(cx + cos(ang) * rr, cy + sin(ang) * rr, Color.White, a)
+            }
+        }
+
+        // Marquee: a red plate edged in gold with the name and chasing bulbs.
+        p.fill(0f, 0f, wf, 3.4f, Color(Pal.DARKRED))
+        p.fill(0f, 3.4f, wf, 0.35f, Color(Pal.GOLD))
+        p.fill(0f, 0f, wf, 0.3f, Color(Pal.GOLD))
+        p.textCentered("SKEE-BALL", cx, 0.3f, Color(Pal.YELLOW), tiny = true, size = 0.5f)
+        for (i in 0 until 12) {
+            val on = ((time * 6f).toInt() + i) % 3 == 0
+            p.px(i * (wf / 12f) + 0.9f, 3.05f, Color(if (on) Pal.YELLOW else Pal.shade(Pal.ORANGE, 0.5f)))
+        }
+
+        // Lane: varnished wood with blue rails and a warm glow under the ball.
+        val laneTop = hf - 5.2f
+        p.fill(0f, laneTop, wf, hf - laneTop, Color(Pal.shade(Pal.WOOD, 0.8f)))
+        for (i in 0 until w step 3) p.fill(i.toFloat(), laneTop, 0.3f, hf - laneTop, Color(Pal.shade(Pal.WOOD, 0.55f)), 0.7f)
+        p.fill(0f, laneTop, wf, 0.5f, Color(Pal.TAN))
+        p.fill(0f, laneTop, 1.4f, hf - laneTop, Color(Pal.BLUE))
+        p.fill(wf - 1.4f, laneTop, 1.4f, hf - laneTop, Color(Pal.BLUE))
+        p.fill(1.4f, laneTop, 0.3f, hf - laneTop, Color(Pal.YELLOW))
+        p.fill(wf - 1.7f, laneTop, 0.3f, hf - laneTop, Color(Pal.YELLOW))
+
+        // The throw: roll up the lane, hop off the ramp, drop into the ring, then vanish for the next.
+        val bx: Float
+        val by: Float
+        val br: Float
+        // The cup of a ring sits at the top of it: the ball comes to rest there.
+        val targetY = cy - (if (target >= 5) 0f else (radii[target] + radii[target + 1]) / 2f * 0.85f)
+        when {
+            t < 1.1f -> {
+                val k = t / 1.1f
+                bx = cx + sin(time * 1.3f) * 0.8f * (1f - k); by = lerp(hf - 1.6f, laneTop + 0.6f, k); br = lerp(1.7f, 1.2f, k)
+            }
+            t < 1.7f -> {
+                val k = (t - 1.1f) / 0.6f
+                bx = cx; by = lerp(laneTop + 0.6f, targetY, k) - sin(k * Math.PI.toFloat()) * 3.6f; br = lerp(1.2f, 0.95f, k)
+            }
+            t < 2.9f -> { bx = cx; by = targetY; br = 0.95f }
+            else -> { bx = cx; by = hf + 4f; br = 0f }
+        }
+        if (br > 0f) {
+            // A warm smear behind the ball while it moves.
+            if (t < 1.7f) p.disc(bx, by + br * 1.6f, br * 0.8f, Color(Pal.ORANGE), 0.3f)
+            p.disc(bx, by, br, Color(Pal.DARKRED))
+            p.disc(bx - br * 0.25f, by - br * 0.3f, br * 0.6f, Color(Pal.RED))
+            p.disc(bx - br * 0.35f, by - br * 0.4f, br * 0.25f, Color.White, 0.6f)
+        }
+        // The ring's score floats up.
+        if (landed && since < 1.1f) {
+            val a = 1f - since / 1.1f
+            p.textCentered(ATTRACT_LABELS[target], cx, targetY - 1.5f - since * 3f, Color(Pal.WHITE), tiny = true, alpha = a, size = 0.6f)
+            for (i in 0 until 6) {
+                val ang = i * 1.05f + 0.3f
+                val rad = 1f + since * 5f
+                p.px(cx + cos(ang) * rad, targetY + sin(ang) * rad * 0.7f, Color(if (i % 2 == 0) Pal.YELLOW else Pal.WHITE), a)
+            }
+        }
     }
 }

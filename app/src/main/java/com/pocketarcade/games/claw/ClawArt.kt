@@ -39,31 +39,67 @@ internal object ClawArt {
         canvas.drawPath(p, paint)
     }
 
+    /**
+     * The back wall of the glass box: a night sky of stars and soft glowing hearts, a pool of
+     * light where the claw works, and occlusion darkening into the corners and down to the floor
+     * so the box has depth instead of reading as a flat poster.
+     */
     val backWall: Texture by lazy {
         paintTexture(170, 250) {
-            starry(170, 250, Pal.INDIGO, Pal.PLUM, 3)
-            // Big soft hearts.
+            starry(170, 250, Pal.shade(Pal.INDIGO, 0.85f), Pal.shade(Pal.PLUM, 0.8f), 3)
+            // A wash of light behind the claw's working area.
+            radial(85f, 90f, 105f, Pal.withAlpha(Pal.LAVENDER, 0.22f), 0)
+            // Big soft hearts, lit from within rather than painted dark red.
+            val heartCol = Pal.mix(Pal.PLUM, Pal.HOTPINK, 0.4f)
             for (k in 0 until 6) {
                 val cx = 20f + (k % 3) * 65f
                 val cy = 44f + (k / 3) * 110f + (k % 2) * 20f
-                glow(4f, Pal.withAlpha(Pal.HOTPINK, 0.35f)) { heart(cx, cy, 13f, -1) }
-                heart(cx, cy, 12f, Pal.shade(Pal.PINK, 0.4f))
+                glow(5f, Pal.withAlpha(Pal.HOTPINK, 0.3f)) { heart(cx, cy, 13f, -1) }
+                heart(cx, cy, 12f, heartCol)
+                heart(cx - 1.6f, cy - 2.2f, 5.5f, Pal.withAlpha(Pal.WHITE, 0.16f))
             }
+            // Occlusion: the side corners, the ceiling and the join with the floor darken.
+            hgrad(0f, 0f, 34f, 250f, 0x88060212.toInt(), 0)
+            hgrad(136f, 0f, 34f, 250f, 0, 0x88060212.toInt())
+            vgrad(0f, 0f, 170f, 26f, 0x88060212.toInt(), 0)
+            vgrad(0f, 190f, 170f, 29f, 0, 0x99060212.toInt())
+            rect(0f, 219f, 170f, 31f, 0xFF04010A.toInt())
         }
     }
 
     val sideWall: Texture by lazy {
-        paintTexture(60, 250) { starry(60, 250, Pal.shade(Pal.INDIGO, 0.8f), Pal.shade(Pal.PLUM, 0.8f), 7) }
+        paintTexture(60, 250) {
+            starry(60, 250, Pal.shade(Pal.INDIGO, 0.7f), Pal.shade(Pal.PLUM, 0.7f), 7)
+            // Front (glass) edge is the left of the texture on the left wall; darken towards the back corner.
+            hgrad(0f, 0f, 60f, 250f, 0x22000000, 0x88060212.toInt())
+            vgrad(0f, 0f, 60f, 24f, 0x77060212, 0)
+            vgrad(0f, 190f, 60f, 29f, 0, 0x99060212.toInt())
+            rect(0f, 219f, 60f, 31f, 0xFF04010A.toInt())
+        }
     }
 
+    /** The prize floor: violet checkerboard, lit at the front and falling into shadow at the back wall. */
     val floor: Texture by lazy {
         paintTexture(96, 32) {
             fill(Pal.VIOLET)
             for (y in 0 until 32 step 8) for (x in 0 until 96 step 8) {
-                if ((x / 8 + y / 8) % 2 == 0) rect(x.toFloat(), y.toFloat(), 8f, 8f, Pal.shade(Pal.VIOLET, 0.85f))
+                if ((x / 8 + y / 8) % 2 == 0) rect(x.toFloat(), y.toFloat(), 8f, 8f, Pal.shade(Pal.VIOLET, 0.78f))
             }
-            for (x in 0..96 step 8) rect(x - 0.15f, 0f, 0.3f, 32f, Pal.shade(Pal.VIOLET, 0.7f))
-            for (y in 0..32 step 8) rect(0f, y - 0.15f, 96f, 0.3f, Pal.shade(Pal.VIOLET, 0.7f))
+            for (x in 0..96 step 8) rect(x - 0.15f, 0f, 0.3f, 32f, Pal.shade(Pal.VIOLET, 0.6f))
+            for (y in 0..32 step 8) rect(0f, y - 0.15f, 96f, 0.3f, Pal.shade(Pal.VIOLET, 0.6f))
+            vgrad(0f, 0f, 96f, 14f, 0xAA060212.toInt(), 0)
+            vgrad(0f, 26f, 96f, 6f, Pal.withAlpha(Pal.HOTPINK, 0f), Pal.withAlpha(Pal.HOTPINK, 0.18f))
+        }
+    }
+
+    /** The underside of the box's ceiling: dark brushed violet with recessed lamp slots. */
+    val ceiling: Texture by lazy {
+        paintTexture(64, 32) {
+            vgrad(0f, 0f, 64f, 32f, Pal.shade(Pal.PLUM, 0.55f), Pal.shade(Pal.NIGHT, 0.9f))
+            for (i in 0 until 3) {
+                val x = 8f + i * 20f
+                round(x, 12f, 14f, 8f, 3f, Pal.shade(Pal.NIGHT, 0.5f))
+            }
         }
     }
 
@@ -99,6 +135,13 @@ internal object ClawArt {
     }
 
     val metal: Texture by lazy { metalTex(Pal.LIGHTGRAY, Pal.GRAY, true) }
+
+    /** Chrome for upright posts: the texture wraps once round, so bright and dark bands read as a cylinder's sheen. */
+    val pole: Texture by lazy {
+        paintTexture(32, 8) {
+            hgrad(0f, 0f, 32f, 8f, Pal.GRAY, Pal.LIGHTGRAY, Pal.mix(Pal.LIGHTGRAY, Pal.WHITE, 0.25f), Pal.LIGHTGRAY, Pal.shade(Pal.GRAY, 0.6f), Pal.GRAY, Pal.LIGHTGRAY)
+        }
+    }
     val darkMetal: Texture by lazy { metalTex(Pal.GRAY, Pal.DARKGRAY, false) }
     val goldMetal: Texture by lazy { metalTex(Pal.YELLOW, Pal.ORANGE, true) }
 
@@ -134,5 +177,8 @@ internal object ClawArt {
     }
 
     val neon: Texture by lazy { TexKit.solid(8, 8, Pal.HOTPINK) }
+
+    /** Glowing lamp tubes and neon strips: the colour is chosen when drawing, with a tint. */
+    val tube: Texture by lazy { TexKit.solid(8, 8, Pal.WHITE) }
     val pit: Texture by lazy { TexKit.solid(8, 8, Pal.BLACK) }
 }

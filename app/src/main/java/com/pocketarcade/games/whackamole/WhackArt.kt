@@ -27,9 +27,13 @@ internal object WhackArt {
      * and the holes themselves cut out (transparent) so moles can rise through them.
      */
     fun table(w: Int, h: Int, holes: List<FloatArray>, holeR: Float): Texture = paintTexture(w, h, 2) {
-        vgrad(0f, 0f, w.toFloat(), h.toFloat(), Pal.shade(Pal.GREEN, 0.9f), Pal.shade(Pal.GREEN, 0.74f))
-        // Mown stripes, blade tufts and little flowers.
-        for (y in 0 until h step 40) rect(0f, y.toFloat(), w.toFloat(), 20f, Pal.withAlpha(Pal.shade(Pal.GREEN, 0.7f), 0.35f))
+        // Deeper than the paint looks under the lights: the grass sits well under the bloom.
+        vgrad(0f, 0f, w.toFloat(), h.toFloat(), Pal.shade(Pal.GREEN, 0.72f), Pal.shade(Pal.GREEN, 0.56f))
+        // Mown stripes (dark and faintly bright in turn), blade tufts and little flowers.
+        for (y in 0 until h step 40) {
+            rect(0f, y.toFloat(), w.toFloat(), 20f, Pal.withAlpha(Pal.shade(Pal.GREEN, 0.5f), 0.4f))
+            rect(0f, y + 20f, w.toFloat(), 20f, Pal.withAlpha(Pal.LIME, 0.05f))
+        }
         for (i in 0 until 900) {
             val x = hash01(i, 11) * w
             val y = hash01(i, 12) * h
@@ -51,12 +55,16 @@ internal object WhackArt {
             }
             circle(x, y, 0.8f, Pal.ORANGE)
         }
-        // Soft earth round each hole.
+        // Contact shadow round each hole, and trampled earth right at its rim.
         for (hc in holes) {
-            radial(hc[0], hc[1] + 2f, holeR + 20f, Pal.withAlpha(Pal.shade(Pal.GREEN, 0.45f), 0.9f), 0)
-            circle(hc[0], hc[1] + 3f, holeR + 11f, Pal.shade(Pal.BROWN, 0.78f))
-            ring(hc[0], hc[1] + 3f, holeR + 10f, 2f, Pal.shade(Pal.BROWN, 0.6f))
+            radial(hc[0], hc[1] + 3f, holeR + 30f, Pal.withAlpha(Pal.BLACK, 0.6f), 0)
+            circle(hc[0], hc[1] + 3f, holeR + 11f, Pal.shade(Pal.BROWN, 0.62f))
+            ring(hc[0], hc[1] + 3f, holeR + 10f, 2f, Pal.shade(Pal.BROWN, 0.45f))
         }
+        // The far corners and the edges of the playfield fall into shadow.
+        vgrad(0f, 0f, w.toFloat(), h * 0.16f, 0x66000000, 0)
+        hgrad(0f, 0f, w * 0.06f, h.toFloat(), 0x55000000, 0)
+        hgrad(w * 0.94f, 0f, w * 0.06f, h.toFloat(), 0, 0x55000000)
         // Wooden border.
         val b = 18f
         woodGrain(0f, 0f, w.toFloat(), b, Pal.WOOD, 21)
@@ -86,14 +94,7 @@ internal object WhackArt {
             radial(178f, 30f, 30f, Pal.withAlpha(Pal.YELLOW, 0.55f), 0)
             circle(178f, 30f, 11f, Pal.YELLOW)
             circle(178f, 30f, 8.5f, Pal.CREAM)
-            for (i in 0 until 3) {
-                val cx = 30f + i * 55f
-                val cy = 22f + (i % 2) * 10f
-                oval(cx, cy + 1f, 15f, 5f, Pal.withAlpha(Pal.shade(Pal.SKY, 0.8f), 0.5f))
-                oval(cx, cy, 14f, 5f, Pal.WHITE)
-                circle(cx - 5f, cy - 3f, 5f, Pal.WHITE)
-                circle(cx + 4f, cy - 4f, 6f, Pal.WHITE)
-            }
+            // (The clouds drift across live: see cloud.)
             // Rolling hills.
             fun hill(base: Float, amp1: Float, f1: Float, amp2: Float, f2: Float, phase: Float, color: Int) {
                 val pts = ArrayList<Float>()
@@ -118,6 +119,23 @@ internal object WhackArt {
             woodGrain(0f, 0f, 6f, 140f, Pal.WOOD, 42)
             woodGrain(204f, 0f, 6f, 140f, Pal.WOOD, 43)
             strokeRound(6f, 6f, 198f, 140f, 1f, 1f, Pal.shade(Pal.WOOD, 0.55f))
+            // Occlusion under the frame and towards the corners.
+            vgrad(6f, 6f, 198f, 14f, 0x55000000, 0)
+            hgrad(6f, 6f, 16f, 134f, 0x44000000, 0)
+            hgrad(188f, 6f, 16f, 134f, 0, 0x44000000)
+        }
+    }
+
+    /** A soft white cloud with a faintly shaded underside, drifted across the backboard by the game. */
+    val cloud: Texture by lazy {
+        paintTexture(32, 12, 8) {
+            clear(0)
+            oval(16f, 8.2f, 14f, 3.2f, Pal.withAlpha(Pal.shade(Pal.SKY, 0.85f), 0.55f))
+            oval(16f, 7.4f, 13.5f, 3.6f, Pal.WHITE)
+            circle(10f, 5.6f, 4f, Pal.WHITE)
+            circle(17f, 4.2f, 4.8f, Pal.WHITE)
+            circle(22.5f, 5.8f, 3.6f, Pal.WHITE)
+            oval(17f, 3.4f, 3f, 1.4f, Pal.withAlpha(Pal.CREAM, 0.7f))
         }
     }
 
@@ -126,7 +144,7 @@ internal object WhackArt {
     /** Dark soil inside the holes, darker towards the bottom. */
     val well: Texture by lazy {
         paintTexture(16, 32) {
-            vgrad(0f, 0f, 16f, 32f, Pal.shade(Pal.DARKBROWN, 0.7f), Pal.BLACK)
+            vgrad(0f, 0f, 16f, 32f, Pal.shade(Pal.DARKBROWN, 0.55f), Pal.BLACK, Pal.BLACK)
             for (i in 0 until 14) circle(hash01(i, 7) * 16f, hash01(i, 8) * 20f, 0.5f, Pal.shade(Pal.BROWN, 0.55f))
         }
     }
@@ -135,8 +153,8 @@ internal object WhackArt {
     /** Rubber hole rim: a light top edge fading down. */
     val rim: Texture by lazy {
         paintTexture(32, 8) {
-            vgrad(0f, 0f, 32f, 8f, Pal.shade(Pal.DARKGREEN, 1.25f), Pal.shade(Pal.DARKGREEN, 0.7f))
-            vgrad(0f, 0f, 32f, 2.5f, Pal.LIME, Pal.withAlpha(Pal.LIME, 0f))
+            vgrad(0f, 0f, 32f, 8f, Pal.shade(Pal.DARKGREEN, 1.05f), Pal.shade(Pal.DARKGREEN, 0.5f))
+            vgrad(0f, 0f, 32f, 2.5f, Pal.withAlpha(Pal.LIME, 0.75f), Pal.withAlpha(Pal.LIME, 0f))
         }
     }
 

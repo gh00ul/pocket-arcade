@@ -19,7 +19,7 @@ internal object SkeeArt {
         val n = ((w + plankW - 1f) / plankW).toInt()
         for (i in 0 until n) {
             val tone = 0.86f + hash01(i, seed) * 0.22f
-            val col = if (tone > 1f) Pal.mix(base, Pal.CREAM, (tone - 1f) * 1.5f) else Pal.shade(base, tone)
+            val col = if (tone > 1f) Pal.mix(base, Pal.CREAM, (tone - 1f) * 0.8f) else Pal.shade(base, tone)
             val x0 = i * plankW
             hgrad(x0, 0f, plankW, h, Pal.shade(col, 0.95f), col, Pal.shade(col, 0.93f))
             // Grain: long faint streaks.
@@ -50,11 +50,13 @@ internal object SkeeArt {
         val w = (widthUnits * tpu).toInt()
         val h = (lengthUnits * tpu).toInt()
         return paintTexture(w, h, 2) {
-            planks(w.toFloat(), h.toFloat(), 18f, Pal.WOOD, 3)
-            // Varnish: a sheen down the middle, darker edges.
+            planks(w.toFloat(), h.toFloat(), 18f, Pal.shade(Pal.WOOD, 0.92f), 3)
+            // Varnish: a faint sheen down the middle, darker edges.
             hgrad(0f, 0f, w * 0.18f, h.toFloat(), 0x55000000, 0)
             hgrad(w * 0.82f, 0f, w * 0.18f, h.toFloat(), 0, 0x55000000)
-            hgrad(w * 0.3f, 0f, w * 0.4f, h.toFloat(), 0, 0x14FFFFFF, 0)
+            hgrad(w * 0.3f, 0f, w * 0.4f, h.toFloat(), 0, 0x0EFFFFFF, 0)
+            // Depth: the far end of the lane, by the ramp, sits in shadow and the player's end catches the light.
+            vgrad(0f, 0f, w.toFloat(), h * 0.45f, 0x88000000.toInt(), 0)
             // Foul line near the player's end.
             val fy = h - 60f * tpu
             rect(0f, fy, w.toFloat(), 3f, Pal.CREAM)
@@ -97,6 +99,11 @@ internal object SkeeArt {
             for (y in 0 until h step 24) rect(0f, y.toFloat(), w.toFloat(), 0.8f, Pal.withAlpha(Pal.shade(Pal.NAVY, 0.6f), 0.7f))
             val ux = (cx - left) * tu
             val vy = (cy - top) * tv
+            // Soft light behind the rings, and shadow towards the board's top and sides (occlusion).
+            radial(ux, vy, w * 0.55f, Pal.withAlpha(Pal.SKY, 0.16f), 0)
+            vgrad(0f, 0f, w.toFloat(), h * 0.3f, 0x77000000, 0)
+            hgrad(0f, 0f, w * 0.12f, h.toFloat(), 0x66000000, 0)
+            hgrad(w * 0.88f, 0f, w * 0.12f, h.toFloat(), 0, 0x66000000)
             for (i in radii.indices.reversed()) {
                 val r = radii[i] * tu
                 val col = colors[i]
@@ -159,7 +166,7 @@ internal object SkeeArt {
     /** The raised ring walls: white, shading darker towards their base. */
     val ringWall: Texture by lazy {
         paintTexture(4, 8) {
-            vgrad(0f, 0f, 4f, 8f, Pal.WHITE, Pal.GRAY)
+            vgrad(0f, 0f, 4f, 8f, 0xFFE2E2EA.toInt(), 0xFF6A6A80.toInt())
         }
     }
 
@@ -183,12 +190,14 @@ internal object SkeeArt {
     val pit: Texture by lazy { TexKit.solid(8, 8, Pal.shade(Pal.NIGHT, 0.6f)) }
     val boardEdge: Texture by lazy { TexKit.solid(8, 8, Pal.shade(Pal.NAVY, 0.5f)) }
 
-    /** The ball: glossy dark red with a bright band round its middle. */
+    /** The ball: glossy red with a brighter band round its middle, edged in cream pinstripes. */
     fun ball(radius: Float): Model {
         val tex = paintTexture(64, 32) {
-            vgrad(0f, 0f, 64f, 32f, Pal.mix(Pal.DARKRED, Pal.RED, 0.5f), Pal.DARKRED)
-            rect(0f, 13f, 64f, 6f, Pal.RED)
-            rect(0f, 13f, 64f, 0.6f, Pal.mix(Pal.RED, Pal.WHITE, 0.4f))
+            vgrad(0f, 0f, 64f, 32f, Pal.mix(Pal.RED, Pal.DARKRED, 0.3f), Pal.shade(Pal.DARKRED, 0.9f))
+            rect(0f, 12f, 64f, 8f, Pal.RED)
+            rect(0f, 11f, 64f, 1.2f, Pal.shade(Pal.CREAM, 0.9f))
+            rect(0f, 19.8f, 64f, 1.2f, Pal.shade(Pal.CREAM, 0.9f))
+            rect(0f, 12.2f, 64f, 0.6f, Pal.mix(Pal.RED, Pal.WHITE, 0.4f))
         }
         return ModelBuilder().sphere(0f, 0f, 0f, radius, tex.full, slices = 20, stacks = 14, gloss = 0.9f).build()
     }

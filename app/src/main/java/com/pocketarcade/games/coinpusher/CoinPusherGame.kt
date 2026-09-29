@@ -8,6 +8,7 @@ import com.pocketarcade.engine.FIXED_DT
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
+import com.pocketarcade.engine.ScreenShake
 import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Segment
 import com.pocketarcade.engine.Sfx
@@ -25,12 +26,14 @@ import com.pocketarcade.engine.r3d.PointLight
 import com.pocketarcade.engine.r3d.Renderer3D
 import com.pocketarcade.engine.r3d.Stage3D
 import com.pocketarcade.engine.r3d.TexKit
+import com.pocketarcade.engine.easeOutCubic
 import com.pocketarcade.engine.range
 import com.pocketarcade.games.BaseMiniGame
 import com.pocketarcade.games.CabinetLook
 import com.pocketarcade.games.CabinetShape
 import com.pocketarcade.games.GAME_H
 import com.pocketarcade.games.GAME_W
+import com.pocketarcade.games.scenea.SceneFx
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -108,6 +111,26 @@ class CoinPusherGame : BaseMiniGame() {
         const val TICKETS = 2
         const val STAR = 3
         const val BIG = 4
+
+        // ---- Look (presentation only): these change how the machine looks, never how it plays.
+
+        /** Brightness above which things bloom; a touch over the default so the gold pile and steel shelf stay calm. */
+        const val BLOOM_THRESHOLD = 0.66f
+        const val SHELF_GLOSS = 0.4f
+        const val DECK_GLOSS = 0.28f
+        /** Every coin is tinted one of these (multiplied into its gold), by a hash of the coin, so the pile isn't stamped out. */
+        val COIN_TONES = intArrayOf(-1, 0xFFF0EAD8.toInt(), 0xFFE4D8C0.toInt(), 0xFFF8F0E0.toInt(), 0xFFD8CCB4.toInt())
+        /** One coin in this many twinkles now and then. */
+        const val GLINT_EVERY = 19
+        /** Rings and lights left where a coin lands on the deck or spills into the tray: how many, how long (s). */
+        const val FX_SLOTS = 8
+        const val LAND_LIFE = 0.4f
+        const val SPILL_LIFE = 0.7f
+        /** How quickly the machine's excitement (from bonuses and avalanches) cools off, per second. */
+        const val EXCITE_DECAY = 0.7f
+        /** Strength of the amber lights along the side ledges and the cyan light riding the shelf. */
+        const val LEDGE_LIGHT = 0.4f
+        const val SHELF_LIGHT = 0.35f
     }
 
     private class Drop {
@@ -143,6 +166,17 @@ class CoinPusherGame : BaseMiniGame() {
     private var spillCount = 0
     private var trayFlash = 0f
     private var lowCoinWarned = false
+    // Looks only: where the last coins landed and spilled, how long ago, and how excited the machine is.
+    private val landX = FloatArray(FX_SLOTS)
+    private val landZ = FloatArray(FX_SLOTS)
+    private val landAge = FloatArray(FX_SLOTS) { LAND_LIFE }
+    private var landNext = 0
+    private val spillX = FloatArray(FX_SLOTS)
+    private val spillKind = IntArray(FX_SLOTS)
+    private val spillAge = FloatArray(FX_SLOTS) { SPILL_LIFE }
+    private var spillNext = 0
+    private var excite = 0f
+    private var motionK = 1f
 
     init {
         world.constraint = { b -> pushBody(b) }
@@ -181,6 +215,9 @@ class CoinPusherGame : BaseMiniGame() {
         spillCount = 0
         trayFlash = 0f
         lowCoinWarned = false
+        landAge.fill(LAND_LIFE)
+        spillAge.fill(SPILL_LIFE)
+        excite = 0f
         // A real pusher deck is packed edge to edge: a jittered hex pack from the front lip back
         // to just ahead of the shelf, so every push travels through the pile.
         val spacingX = COIN_R * 2f + 0.6f
@@ -273,6 +310,11 @@ class CoinPusherGame : BaseMiniGame() {
         sinceLastDrop += dt
         trayFlash = (trayFlash - dt * 2f).coerceAtLeast(0f)
         for (i in recentSpills.indices) recentSpills[i] -= dt
+        for (i in 0 until FX_SLOTS) {
+            if (landAge[i] < LAND_LIFE) landAge[i] += dt
+            if (spillAge[i] < SPILL_LIFE) spillAge[i] += dt
+        }
+        excite = (excite - EXCITE_DECAY * dt).coerceAtLeast(0f)
 
         // Pusher shelf: smooth back-and-forth.
         pusherPhase += dt / PusherTuning.PUSHER_PERIOD * TAU
@@ -289,6 +331,8 @@ class CoinPusherGame : BaseMiniGame() {
                 d.active = false
                 val landY = pusherFront + radiusFor(d.kind) + rng.range(4f, 26f)
                 val b = addBody(d.kind, d.x, landY)
+                landX[landNext] = d.x; landZ[landNext] = landY; landAge[landNext] = 0f
+                landNext = (landNext + 1) % FX_SLOTS
                 b.vy = 120f
                 b.vx = rng.range(-30f, 30f)
                 play(Sfx.CLINK, 0.5f, rng.range(0.8f, 1.2f))
@@ -342,6 +386,14 @@ class CoinPusherGame : BaseMiniGame() {
     private fun collect(kind: Int, deckX: Float) {
         won++
         trayFlash = 1f
+        spillX[spillNext] = deckX; spillKind[spillNext] = kind; spillAge[spillNext] = 0f
+        spillNext = (spillNext + 1) % FX_SLOTS
+        excite = maxOf(excite, when (kind) {
+            STAR -> 1f
+            TICKETS, GEM -> 0.7f
+            BIG -> 0.5f
+            else -> 0.15f
+        })
         recentSpills[spillCount % recentSpills.size] = PusherTuning.AVALANCHE_WINDOW
         spillCount++
         // Effects happen where the lip is on screen.
@@ -389,6 +441,7 @@ class CoinPusherGame : BaseMiniGame() {
         particles.burst(x, y, 6, 40f, 140f, intArrayOf(Pal.GOLD, Pal.YELLOW), 0.4f, 3f, grav = 400f)
         val recent = recentSpills.count { it > 0f }
         if (recent >= PusherTuning.AVALANCHE_COUNT) {
+            excite = 1f
             recentSpills.fill(0f)
             addScore(PusherTuning.AVALANCHE_BONUS, GAME_W / 2f, 250f, Color(Pal.PINK), "AVALANCHE +${PusherTuning.AVALANCHE_BONUS}")
             play(Sfx.SPILL)
@@ -410,6 +463,7 @@ class CoinPusherGame : BaseMiniGame() {
      */
     private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt()).apply {
         look(180f, 520f, 900f, 180f, 0f, 330f, fovDeg = 50f)
+        r.bloomThreshold = BLOOM_THRESHOLD
     }
     private val pt = FloatArray(3)
     private val frontScreenY: Float = run {
@@ -425,7 +479,7 @@ class CoinPusherGame : BaseMiniGame() {
         val cab = PusherArt.cabinet.full
         val dark = PusherArt.dark.full
         val gold = PusherArt.gold.full
-        b.quad(PF_L, 0f, DECK_TOP, PF_R, 0f, DECK_TOP, PF_R, 0f, FRONT_EDGE, PF_L, 0f, FRONT_EDGE, deckTex.full, 0f, 1f, 0f)
+        b.quad(PF_L, 0f, DECK_TOP, PF_R, 0f, DECK_TOP, PF_R, 0f, FRONT_EDGE, PF_L, 0f, FRONT_EDGE, deckTex.full, 0f, 1f, 0f, gloss = DECK_GLOSS)
         // Under the shelf, behind the deck.
         b.quad(PF_L, 0f, BACK_Z, PF_R, 0f, BACK_Z, PF_R, 0f, DECK_TOP, PF_L, 0f, DECK_TOP, dark, 0f, 1f, 0f)
         b.quad(0f, BACK_H, BACK_Z, GAME_W, BACK_H, BACK_Z, GAME_W, 0f, BACK_Z, 0f, 0f, BACK_Z, PusherArt.backWall.full, 0f, 0f, 1f)
@@ -453,16 +507,26 @@ class CoinPusherGame : BaseMiniGame() {
     private val warm = PointLight(180f, 380f, 320f, 1f, 0.9f, 0.75f, 720f, 1f)
     private val backGlow = PointLight(180f, 150f, 80f, 1f, 0.45f, 0.6f, 320f, 0.7f)
     private val trayLight = PointLight(180f, TRAY_Y + 40f, FRONT_EDGE + 40f, 1f, 0.85f, 0.3f, 300f, 0f)
+    /** Amber lights over the gold side ledges, and a cyan one that rides along the shelf's front edge. */
+    private val ledgeLeft = PointLight(PF_L - 8f, 46f, 320f, 1f, 0.62f, 0.2f, 260f, LEDGE_LIGHT)
+    private val ledgeRight = PointLight(PF_R + 8f, 46f, 320f, 1f, 0.62f, 0.2f, 260f, LEDGE_LIGHT)
+    private val shelfLight = PointLight(180f, 44f, 150f, 0.3f, 0.9f, 1f, 190f, SHELF_LIGHT)
 
     override fun render(scope: DrawScope) {
         val r = stage.begin()
+        motionK = ScreenShake.intensity.coerceIn(0f, 1f)
         val l = r.lighting
-        l.ambR = 0.55f; l.ambG = 0.5f; l.ambB = 0.6f
+        l.ambR = 0.5f; l.ambG = 0.46f; l.ambB = 0.58f
         l.setDirection(0.2f, 1f, 0.6f)
-        l.dirR = 0.35f; l.dirG = 0.32f; l.dirB = 0.28f
+        l.dirR = 0.32f; l.dirG = 0.3f; l.dirB = 0.27f
         l.points.clear()
         l.points += warm
+        backGlow.intensity = 0.7f + 0.6f * excite
         l.points += backGlow
+        l.points += ledgeLeft
+        l.points += ledgeRight
+        shelfLight.z = pusherFront - 10f
+        l.points += shelfLight
         trayLight.intensity = trayFlash * 1.6f
         if (trayFlash > 0f) l.points += trayLight
         r.gradient(0xFF0C0610.toInt(), Pal.shade(Pal.ORANGE, 0.2f))
@@ -471,7 +535,16 @@ class CoinPusherGame : BaseMiniGame() {
         drawShelf(r)
         drawTrayPile(r)
         drawPanels(r)
-        for (b in world.bodies) drawItem(r, b.kind, b.x, b.y, 0f, b.angle, 1f)
+        for (i in world.bodies.indices) {
+            val b = world.bodies[i]
+            val h = System.identityHashCode(b) ushr 4
+            drawItem(r, b.kind, b.x, b.y, 0f, b.angle, 1f, COIN_TONES[h % COIN_TONES.size])
+            // One coin in a while catches the light.
+            if (h % GLINT_EVERY == 0 && b.kind == COIN) {
+                val tw = sin(time * 2.6f + (h % 97) * 0.7f)
+                if (tw > 0.8f) SceneFx.flare(r, b.x - 4f, COIN_THICK + 5f, b.y - 2f, 20f, Pal.WHITE, (tw - 0.8f) * 4f * 0.6f)
+            }
+        }
         for (f in fallers) {
             if (!f.active) continue
             // Tipping over the lip and dropping into the tray (or a gutter).
@@ -489,6 +562,7 @@ class CoinPusherGame : BaseMiniGame() {
             drawTumbling(r, d.kind, d.x, z, y, time * 9f, time * 12f)
         }
         drawBulbs(r)
+        drawImpacts(r)
         // Glass side panels over the back of the deck.
         val glass = PusherArt.glass.full
         for (x in floatArrayOf(PF_L - GUTTER_W, PF_R + GUTTER_W)) {
@@ -517,7 +591,7 @@ class CoinPusherGame : BaseMiniGame() {
     private fun drawShelf(r: Renderer3D) {
         val front = pusherFront
         r.quad(PF_L, SHELF_H, front, PF_R, SHELF_H, front, PF_R, 0f, front, PF_L, 0f, front, PusherArt.shelfFront.full, 0f, 0f, 1f)
-        r.quad(PF_L, SHELF_H, BACK_Z, PF_R, SHELF_H, BACK_Z, PF_R, SHELF_H, front, PF_L, SHELF_H, front, PusherArt.shelfTop.full, 0f, 1f, 0f)
+        r.quad(PF_L, SHELF_H, BACK_Z, PF_R, SHELF_H, BACK_Z, PF_R, SHELF_H, front, PF_L, SHELF_H, front, PusherArt.shelfTop.full, 0f, 1f, 0f, gloss = SHELF_GLOSS)
         val white = TexKit.white.full
         val glow = TexKit.glow.full
         for (i in 0 until 6) {
@@ -545,7 +619,7 @@ class CoinPusherGame : BaseMiniGame() {
             val x = if (s == 0) (PF_L - GUTTER_W) / 2f else (PF_R + GUTTER_W + GAME_W) / 2f
             for (i in 0 until 12) {
                 val z = BACK_Z + 20f + i * (TRAY_FRONT - BACK_Z - 40f) / 11f
-                val on = ((time * 8f).toInt() - i) % 4 == 0
+                val on = ((time * (8f + 8f * excite)).toInt() - i) % 4 == 0
                 r.sprite(x, SIDE_H + 4f, z, 7f, 7f, TexKit.dot.full, emissive = 1.2f, tint = if (on) Pal.YELLOW else Pal.shade(Pal.GOLD, 0.4f))
                 if (on) r.sprite(x, SIDE_H + 5f, z, 26f, 26f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.55f, tint = Pal.GOLD)
             }
@@ -553,18 +627,63 @@ class CoinPusherGame : BaseMiniGame() {
     }
 
     /** An item lying flat on the deck at ([x], [z]). */
-    private fun drawItem(r: Renderer3D, kind: Int, x: Float, z: Float, y: Float, angle: Float, scale: Float) {
+    private fun drawItem(r: Renderer3D, kind: Int, x: Float, z: Float, y: Float, angle: Float, scale: Float, tone: Int = -1) {
         val rad = radiusFor(kind) * scale
+        val pulse = 0.5f + 0.5f * sin(time * 4.5f + x * 0.07f)
         when (kind) {
             COIN, BIG -> {
                 // A darker disc under the face reads as the coin's edge.
                 r.flat(x, z + 1.2f, y + 0.4f, rad * 2f, rad * 2f, PusherArt.coinEdge.full, angle)
-                r.flat(x, z, y + COIN_THICK, rad * 2f, rad * 2f, (if (kind == BIG) PusherArt.bigCoin else PusherArt.coin).full, angle)
+                r.flat(x, z, y + COIN_THICK, rad * 2f, rad * 2f, (if (kind == BIG) PusherArt.bigCoin else PusherArt.coin).full, angle, tint = tone)
+                if (kind == BIG) SceneFx.glow(r, x, 8f, z, rad * 3.4f, Pal.GOLD, 0.1f + 0.08f * pulse)
             }
-            TICKETS -> r.flat(x, z, y + 3f, rad * 2.2f, rad * 1.6f, PusherArt.tickets.full, angle)
-            GEM -> r.billboard(x, y, z, rad * 2f, rad * 2f, PusherArt.gem.full, lean = 0.4f)
-            else -> r.billboard(x, y, z, rad * 2.2f, rad * 2.2f, PusherArt.star.full, lean = 0.4f)
+            TICKETS -> {
+                r.flat(x, z, y + 3f, rad * 2.2f, rad * 1.6f, PusherArt.tickets.full, angle)
+                SceneFx.glow(r, x, 8f, z, rad * 3.4f, Pal.ORANGE, 0.1f + 0.08f * pulse)
+            }
+            GEM -> {
+                r.billboard(x, y, z, rad * 2f, rad * 2f, PusherArt.gem.full, lean = 0.4f)
+                // A gem breathes cyan light and glints.
+                SceneFx.glow(r, x, y + rad, z, rad * 4f, Pal.CYAN, 0.14f + 0.12f * pulse)
+                SceneFx.flare(r, x + rad * 0.2f, y + rad * 1.6f, z, rad * 2.2f, Pal.WHITE, 0.25f + 0.5f * pulse, roll = time * 0.6f * motionK)
+            }
+            else -> {
+                r.billboard(x, y, z, rad * 2.2f, rad * 2.2f, PusherArt.star.full, lean = 0.4f)
+                // The shower star throws slow, turning rays.
+                SceneFx.flare(r, x, y + rad, z, rad * 4.4f, Pal.YELLOW, 0.3f + 0.2f * pulse, roll = time * 0.9f * motionK)
+                SceneFx.glow(r, x, y + rad, z, rad * 3.4f, Pal.GOLD, 0.12f)
+            }
         }
+    }
+
+    /** Rings where coins land on the deck, and where anything spills into the tray, with a lift of light for bonuses. */
+    private fun drawImpacts(r: Renderer3D) {
+        for (i in 0 until FX_SLOTS) {
+            val lt = landAge[i] / LAND_LIFE
+            if (lt < 1f) {
+                SceneFx.shockwave(r, landX[i], 1.2f, landZ[i], 16f + 46f * easeOutCubic(lt), Pal.CREAM, (1f - lt) * 0.5f)
+            }
+            val st = spillAge[i] / SPILL_LIFE
+            if (st < 1f) {
+                val color = when (spillKind[i]) {
+                    GEM -> Pal.CYAN
+                    TICKETS -> Pal.ORANGE
+                    STAR -> Pal.YELLOW
+                    else -> Pal.GOLD
+                }
+                val e = easeOutCubic(st)
+                val a = 1f - st
+                SceneFx.shockwave(r, spillX[i], TRAY_Y + 1.2f, FRONT_EDGE + 26f, 30f + 120f * e, color, a * 0.7f)
+                SceneFx.pool(r, spillX[i], TRAY_Y + 1f, FRONT_EDGE + 26f, 130f, 90f, color, a * 0.35f)
+                if (spillKind[i] != COIN) {
+                    SceneFx.shaft(r, spillX[i], TRAY_Y + 2f, FRONT_EDGE + 20f, spillX[i], TRAY_Y + 150f * (0.6f + 0.4f * e), FRONT_EDGE + 20f, 34f, color, a * 0.5f)
+                    if (st < 0.5f) SceneFx.flare(r, spillX[i], TRAY_Y + 30f, FRONT_EDGE + 30f, 90f * (0.6f + 0.4f * e), color, (1f - st * 2f) * 0.8f, roll = st * 2f)
+                }
+            }
+        }
+        // The title glows brighter when the machine is excited, and the coin counter throbs when the coins run low.
+        if (excite > 0.02f) SceneFx.glow(r, GAME_W / 2f, 213f, BACK_Z + 1f, 240f, Pal.YELLOW, 0.16f * excite)
+        if (coinsLeft in 1..5 && !timeUp) SceneFx.glow(r, GAME_W / 2f, 104f, BACK_Z + 1.5f, 170f, Pal.ORANGE, 0.14f + 0.1f * sin(time * 6f) * motionK)
     }
 
     /** An item in the air: coins show their face turning edge-on as they tumble. */
@@ -587,18 +706,79 @@ class CoinPusherGame : BaseMiniGame() {
 
     // ---------------------------------------------------------------- attract mode
 
+    /**
+     * The machine in miniature: a glowing gold marquee over the pusher shelf with its hazard
+     * front and chasing lights, a packed deck of coins, and the shelf sliding back and forth,
+     * shoving the front rows over the lip. Each spill lands in the tray with a flash and a
+     * score; every few pushes a gem and a star come over with it. Coins drop from the slot
+     * meanwhile. Looks only: the deck is a fixed packing, sheared by the shelf's stroke.
+     */
     override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) {
-        p.fill(0, 0, w, h, Color(Pal.NAVY))
-        val shelf = 3f + (0.5f - 0.5f * cos(time * 2f)) * 3f
-        p.fill(0f, 0f, w.toFloat(), shelf, Color(Pal.GRAY))
-        p.fill(0f, shelf - 1f, w.toFloat(), 1f, Color(Pal.YELLOW))
-        for (i in 0 until 18) {
-            val cx = 2f + (i * 7 % (w - 3)).toFloat()
-            val cy = shelf + 3f + (i * 5 % (h - 7)).toFloat()
-            p.fill(cx, cy, 2f, 2f, Color(Pal.GOLD))
+        val wf = w.toFloat()
+        val hf = h.toFloat()
+        p.fill(0f, 0f, wf, hf, Color(Pal.NAVY))
+        for (row in 0 until h) {
+            p.fill(0f, row.toFloat(), wf, 1.05f, Color(Pal.mix(Pal.shade(Pal.NAVY, 0.9f), Pal.shade(Pal.INDIGO, 0.7f), row / (hf - 1f))))
         }
-        val fall = (time * 1.4f) % 1f
-        p.fill(w / 2f, h - 3f + fall * 3f, 2f, 2f, Color(Pal.YELLOW))
-        p.fill(0f, h - 1f, w.toFloat(), 1f, Color(Pal.GOLD))
+        val push = 0.5f - 0.5f * cos(time * 2f)
+        // Back wall: orange stripes under a gold marquee bar with chasing bulbs.
+        p.fill(0f, 0f, wf, 3.2f, Color(Pal.shade(Pal.ORANGE, 0.8f)))
+        for (i in 0 until w step 2) p.fill(i.toFloat(), 0f, 0.8f, 3.2f, Color(Pal.shade(Pal.DARKRED, 0.7f)), 0.5f)
+        p.fill(0f, 0f, wf, 0.4f, Color(Pal.GOLD))
+        for (i in 0 until 12) {
+            val on = ((time * 6f).toInt() + i) % 3 == 0
+            p.px(i * (wf / 12f) + 0.9f, 2.85f, Color(if (on) Pal.YELLOW else Pal.shade(Pal.ORANGE, 0.5f)), 1f)
+        }
+        p.textCentered("PUSHER", wf / 2f, 0.5f, Color(Pal.YELLOW), tiny = true, size = 0.5f, alpha = 0.9f)
+        // The shelf: steel with a hazard front edge, sliding forward.
+        val shelf = 3.2f + push * 3.2f
+        p.fill(0f, 3.2f, wf, shelf - 3.2f, Color(Pal.shade(Pal.GRAY, 0.75f)))
+        p.fill(0f, shelf - 0.2f, wf, 0.2f, Color(Pal.LIGHTGRAY), 0.6f)
+        for (i in 0 until w step 2) p.fill(i.toFloat(), shelf, 1f, 0.9f, Color(Pal.YELLOW))
+        for (i in 1 until w step 2) p.fill(i.toFloat(), shelf, 1f, 0.9f, Color(Pal.BLACK))
+        p.fill(0f, shelf + 0.9f, wf, 0.25f, Color(Pal.CYAN), 0.4f + 0.3f * push)
+        // The deck: a packed pile of coins the shelf shoves along, row by row.
+        val lip = hf - 2.4f
+        val rows = 8
+        for (row in 0 until rows) {
+            val y = shelf + 2.1f + row * 1.55f + push * 0.6f
+            if (y > lip - 0.5f) break
+            val off = if (row % 2 == 0) 0f else 0.9f
+            var x = 0.9f + off
+            var k = 0
+            while (x < wf - 0.5f) {
+                val shine = 0.5f + 0.5f * sin(time * 2.4f + row * 0.9f + k * 1.3f)
+                val c = if ((row + k) % 7 == 3) Pal.YELLOW else Pal.GOLD
+                p.disc(x, y + 0.15f, 0.92f, Color(Pal.shade(Pal.ORANGE, 0.65f)))
+                p.disc(x, y, 0.92f, Color(c))
+                // Only the coins that catch the light get a glint, to keep the screen cheap to paint.
+                if (shine > 0.75f) p.disc(x - 0.3f, y - 0.3f, 0.3f, Color.White, 0.3f + 0.5f * shine * shine)
+                x += 1.85f
+                k++
+            }
+        }
+        // Coins dropping through the slot at the top and rolling out over the lip.
+        val drop = (time * 1.1f) % 1f
+        p.disc(wf * 0.5f, shelf - 0.6f + drop * 1.6f, 0.7f, Color(Pal.YELLOW), 1f - drop)
+        // The front lip, and the tray with the spills.
+        p.fill(0f, lip, wf, 0.4f, Color(Pal.GOLD))
+        p.fill(0f, lip + 0.4f, wf, hf - lip, Color(Pal.PLUM))
+        for (i in 0 until w step 2) p.fill(i.toFloat(), lip + 0.4f, 0.3f, hf - lip, Color(Pal.shade(Pal.GOLD, 0.5f)), 0.8f)
+        // A coin tips off the lip roughly every push, in a lane of its own.
+        val spillT = (time / 3.14f) % 1f
+        val lane = (time / 3.14f).toInt() % 5
+        val sx = 3f + lane * (wf - 6f) / 4f
+        if (spillT in 0.55f..0.95f) {
+            val k = (spillT - 0.55f) / 0.4f
+            val gem = (time / 3.14f).toInt() % 4 == 3
+            val col = if (gem) Pal.CYAN else Pal.GOLD
+            p.disc(sx, lip - 0.4f + k * 2.6f, if (gem) 0.8f else 0.9f, Color(col), 1f - k * 0.4f)
+            if (k > 0.75f) {
+                val f = (k - 0.75f) / 0.25f
+                p.disc(sx, lip + 1.6f, 1.2f + f * 2.4f, Color(col), 0.5f * (1f - f))
+                p.textCentered(if (gem) "+50" else "+10", sx.coerceIn(4.5f, wf - 4.5f), lip - 4.5f - f * 1.5f, Color(col), tiny = true, size = 0.5f, alpha = 1f - f * 0.5f)
+            }
+        }
+        p.fill(0f, lip - 0.02f, wf, 0.15f, Color(Pal.YELLOW), 0.35f)
     }
 }
