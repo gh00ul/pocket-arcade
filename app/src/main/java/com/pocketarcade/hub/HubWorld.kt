@@ -1,6 +1,7 @@
 package com.pocketarcade.hub
 
 import com.pocketarcade.data.DecorStyle
+import com.pocketarcade.data.GameSettings
 import com.pocketarcade.engine.AudioSynth
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.damp
@@ -38,6 +39,8 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         const val LEVEL_DELAY = 0.6f
         /** ...easing back to the resting pitch at this rate (per second, at walking pace). */
         const val LEVEL_RATE = 1.4f
+        /** After a walk overhead, the kid turns to face the machine at this rate (per second). */
+        const val FACE_RATE = 10f
         /** Stepping into a play spot turns the view to its machine at this rate (per second). */
         const val ASSIST_RATE = 7f
         /** The assist only kicks in if you're facing within this of the machine (radians) or stopping. */
@@ -55,6 +58,12 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         const val TAP_REACH = 700f
 
         private const val DEG = PI.toFloat() / 180f
+
+        /**
+         * Whether a first-person touch at screen x [x] (of a [width]-wide screen) drags the view
+         * rather than the stick: the right half, or the left half for a left-handed player.
+         */
+        fun isLookSide(x: Float, width: Float, leftHanded: Boolean): Boolean = (x >= width / 2f) != leftHanded
 
         /** Footstep pitch for walking at [speedFrac] of the walking speed: brisker steps, a touch higher. */
         fun stepPitch(speedFrac: Float): Float = 0.8f + 0.25f * speedFrac.coerceIn(0f, 1.4f)
@@ -103,8 +112,23 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
     /** Screen pixels per dp, for the look speed, the tap slop and the stick's size. */
     var density = 1f
 
+    private var hudBase = 0f
+    /** Extra rows of HUD buttons under the first one, in pixels ([hudBottom] includes them). */
+    var hudExtra = 0f
+
     /** Pixels down from the top of the screen that the HUD's buttons cover (the prompt stays below). */
-    var hudBottom = 0f
+    var hudBottom: Float
+        get() = hudBase + hudExtra
+        set(v) {
+            hudBase = v
+        }
+
+    /**
+     * The player's options (see [applySettings]): look speed and direction, which hand walks,
+     * and the run latch. The camera and the joystick carry the rest.
+     */
+    var settings = GameSettings()
+        private set
 
     /** The finger dragging the first-person view (the right half of the screen), or -1. */
     var lookPointer = -1L
@@ -126,9 +150,11 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
     private var lookDownT = 0f
     private var stickDownT = 0f
 
-    /** First person's tap-to-walk route (see [tapToWalk]); [WalkRoute.active] while on the way. */
+    /** Tap-to-walk's route (see [tapToWalk]); [WalkRoute.active] while on the way. */
     val route = WalkRoute()
     private val pickCam = Camera3D()
+    /** Overhead: the spot whose machine the kid is turning to face after walking there, or null. */
+    private var faceTarget: Spot? = null
 
     /** The spot whose machine the view is turning to face, or null. */
     var assistSpot: Spot? = null
@@ -191,6 +217,15 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
 
     fun setPlayerLook(look: CharacterLook) = player.setLook(look)
 
+    /** Takes the player's options: the controls, the view and the comfort settings. */
+    fun applySettings(s: GameSettings) {
+        val v = s.sanitized()
+        settings = v
+        camera.fovScale = v.fovDeg / HubCamera.FP_FOV_DEG
+        camera.bobScale = if (v.reduceMotion) 0f else 1f
+        camera.kickScale = if (v.reduceMotion) 0f else 1f
+    }
+
     fun setViewport(widthPx: Float, heightPx: Float) {
         if (widthPx <= 0f || heightPx <= 0f) return
         screenW = widthPx
@@ -201,11 +236,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
     fun update(dt: Float) {
         time += dt
         val fp = camera.firstPerson
-        if (fp) {
-            walkFirstPerson(dt)
-        } else {
-            player.update(dt, joystick.outX, joystick.outY, map.solids)
-        }
+        if (fp) walkFirstPerson(dt) else walkOverhead(dt)
         if (player.moving) hasWalked = true
         if (player.stepped) footstep(fp)
         for (i in npcs.indices) npcs[i].update(dt, this)
@@ -249,6 +280,36 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         steps++
         lastStepPitch = pitch
         audio?.play(Sfx.STEP, volume, pitch)
+    }
+
+    /**
+     * Overhead's step: the stick walks the kid, or the tap-to-walk route does (the stick
+     * takes over at once); arriving at a machine turns the kid to face it.
+     */
+    private fun walkOverhead(dt: Float) {
+        var jx = joystick.outX
+        var jy = joystick.outY
+        if (jx != 0f || jy != 0f) {
+            route.clear()
+            faceTarget = null
+        } else if (route.active) {
+            val wasFor = route.spot
+            if (route.steer(player.x, player.y, dt, move)) {
+                jx = move[0]
+                jy = move[1]
+            } else if (wasFor != null && wasFor.area.contains(player.x, player.y)) {
+                faceTarget = wasFor
+            }
+        }
+        player.update(dt, jx, jy, map.solids)
+        val face = faceTarget ?: return
+        if (player.moving) {
+            faceTarget = null
+            return
+        }
+        val d = HubCamera.wrap(atan2(face.focusX - player.x, face.focusZ - player.y) - player.yaw)
+        player.yaw += d * (1f - exp(-dt * FACE_RATE))
+        if (abs(d) < 0.02f) faceTarget = null
     }
 
     /**
@@ -488,12 +549,16 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
     // ---------------------------------------------------------------- tap to walk
 
     /**
-     * First person: walks to what's under screen pixel ([sx], [sy]) — a machine (anywhere on
-     * it) or a counter walks to its play spot and faces it; the floor walks to that point.
-     * Returns whether a route was set.
+     * Walks to what's under screen pixel ([sx], [sy]) — a machine (anywhere on it) or a counter
+     * walks to its play spot and faces it; the floor walks to that point. The tap is projected
+     * through whichever camera is showing, the kid's eyes or the overhead view. Returns whether
+     * a route was set.
      */
     fun tapToWalk(sx: Float, sy: Float): Boolean {
-        if (!camera.firstPerson || camera.fpAmount < 0.99f || camera.dive > 0f || screenW <= 0f) return false
+        if (camera.dive > 0f || screenW <= 0f) return false
+        // Halfway between the two views nothing on screen is where it seems to be.
+        val fp = camera.firstPerson
+        if (if (fp) camera.fpAmount < 0.99f else camera.fpAmount > 0.01f) return false
         camera.apply(pickCam, screenW.toInt(), screenH.toInt())
         val c = pickCam
         val u = (sx - c.cx) / c.focal
@@ -520,23 +585,26 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
             // Something without a spot (a pillar, a table): walk up to where you tapped it.
             return walkToPoint(c.ex + dx * bestT, c.ez + dz * bestT)
         }
-        if (floorT > TAP_REACH) return false
+        // From the eyes the floor stretches to the horizon: only what's near counts. The overhead
+        // view only ever shows a slice of it, all of it within reach.
+        if (fp && floorT > TAP_REACH) return false
         return walkToPoint(c.ex + dx * floorT, c.ez + dz * floorT)
     }
 
-    /** Walks (first person) to [spot]'s standing point and faces its machine there. */
+    /** Walks (either camera) to [spot]'s standing point and faces its machine there. */
     fun walkTo(spot: Spot): Boolean {
         val x = spot.area.centerX
         val y = (spot.area.top + STAND_DEPTH).coerceAtMost(spot.area.bottom - 2f)
         if (spot.area.contains(player.x, player.y) && abs(player.x - x) < 4f && abs(player.y - y) < 4f) {
             route.clear()
             startAssist(spot)
+            if (!camera.firstPerson) faceTarget = spot
             return true
         }
         return plan(x, y, spot)
     }
 
-    /** Walks (first person) to the nearest place the body fits by floor point ([x], [z]). */
+    /** Walks (either camera) to the nearest place the body fits by floor point ([x], [z]). */
     fun walkToPoint(x: Float, z: Float): Boolean {
         val r = Body.RADIUS
         val cx = x.coerceIn(HubLayout.WALL + r, HubLayout.WIDTH - HubLayout.WALL - r)
@@ -547,6 +615,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
 
     private fun plan(x: Float, y: Float, spot: Spot?): Boolean {
         assistSpot = null
+        faceTarget = null
         val ok = route.plan(this, bodySolids, player.x, player.y, x, y, spot)
         if (ok) hasWalked = true
         return ok
@@ -609,14 +678,15 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
 
     /**
      * A finger went down. The prompt bubble takes it first. Overhead, anywhere else starts the
-     * floating joystick; in first person the left half does, and the right half drags the view.
+     * floating joystick; in first person the left half does, and the right half drags the view
+     * (the other way round for a left-handed player).
      */
     fun pointerDown(id: Long, x: Float, y: Float) {
         if (inBubble(x, y) && bubblePressed < 0) {
             bubblePressed = id
             return
         }
-        if (camera.firstPerson && x >= screenW / 2f) {
+        if (camera.firstPerson && isLookSide(x, screenW, settings.leftHanded)) {
             if (lookPointer < 0L) {
                 lookPointer = id
                 lookStartX = x
@@ -630,6 +700,8 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         }
         if (!joystick.active) {
             joystick.radius = Joystick.radiusFor(density, screenW, screenH)
+            // Only running (first person) has a rim to lock; overhead the stick is as it always was.
+            joystick.runLatch = settings.runLatch && camera.firstPerson
             stickDownT = time
         }
         joystick.down(id, x, y)
@@ -646,9 +718,9 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
             if (lookDragging) {
                 // Drag right to turn right, up to look up; the same angle per dp on any screen.
                 // Steering the view yourself stops a walk to a machine and the turn to face one.
-                val k = LOOK_DEG_PER_DP * DEG / density.coerceAtLeast(0.1f)
+                val k = LOOK_DEG_PER_DP * DEG / density.coerceAtLeast(0.1f) * settings.lookScale
                 pendingYaw += -(x - lookLastX) * k
-                pendingPitch += -(y - lookLastY) * k * LOOK_PITCH_SCALE
+                pendingPitch += -(y - lookLastY) * k * LOOK_PITCH_SCALE * (if (settings.invertY) -1f else 1f)
                 lookLastX = x
                 lookLastY = y
                 hasLooked = true
@@ -662,8 +734,8 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
     }
 
     /**
-     * Returns the spot whose prompt was tapped, if this release completes a tap on it. In first
-     * person, a tap anywhere else (either half) walks you to what you tapped ([tapToWalk]).
+     * Returns the spot whose prompt was tapped, if this release completes a tap on it. A tap
+     * anywhere else (either half, either camera) walks you to what you tapped ([tapToWalk]).
      */
     fun pointerUp(id: Long, x: Float, y: Float): Spot? {
         var tap = false
@@ -673,7 +745,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
             lookDragging = false
         }
         if (id == joystick.pointerId && joystick.active) {
-            tap = camera.firstPerson && joystick.travel < TAP_SLOP_DP * density && time - stickDownT < TAP_TIME
+            tap = joystick.travel < TAP_SLOP_DP * density && time - stickDownT < TAP_TIME
         }
         joystick.up(id)
         if (id == bubblePressed) {
@@ -694,5 +766,6 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         flushLook()
         route.clear()
         assistSpot = null
+        faceTarget = null
     }
 }

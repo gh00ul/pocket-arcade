@@ -6,8 +6,14 @@ import kotlin.math.sin
 
 /**
  * Trauma-based screen shake: [add] trauma (0..1), offsets grow with trauma² and decay smoothly.
+ * Every shake in the game is scaled by [intensity].
  */
 class ScreenShake(private val maxOffset: Float = 14f, private val decayPerSec: Float = 1.8f) {
+    companion object {
+        /** How much of every shake shows: 1 as designed, 0 with the reduce-motion setting. */
+        @Volatile var intensity = 1f
+    }
+
     var trauma = 0f
         private set
     private var time = 0f
@@ -27,7 +33,7 @@ class ScreenShake(private val maxOffset: Float = 14f, private val decayPerSec: F
     fun update(dt: Float) {
         time += dt
         trauma = (trauma - decayPerSec * dt).coerceAtLeast(0f)
-        val k = trauma * trauma * maxOffset
+        val k = trauma * trauma * maxOffset * intensity
         offsetX = k * (sin(time * 71f) * 0.6f + sin(time * 113f + 1.3f) * 0.4f)
         offsetY = k * (sin(time * 83f + 2.1f) * 0.6f + sin(time * 127f + 0.4f) * 0.4f)
     }

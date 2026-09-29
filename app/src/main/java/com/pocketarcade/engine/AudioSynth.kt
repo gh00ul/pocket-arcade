@@ -63,6 +63,10 @@ class AudioSynth {
     /** Target loudness of the arcade ambience (0 = silent). Smoothly approached by the mixer. */
     @Volatile var ambientTarget = 0f
 
+    /** The player's volume settings: master multipliers on every sound effect, and on the ambience (with its bleeps). */
+    @Volatile var sfxVolume = 1f
+    @Volatile var ambienceVolume = 1f
+
     private var thread: Thread? = null
 
     fun start() {
@@ -85,8 +89,10 @@ class AudioSynth {
     }
 
     /** Plays [sfx]; [pitch] scales playback speed, so 2.0 is an octave up. */
-    fun play(sfx: Sfx, volume: Float = 1f, pitch: Float = 1f) {
-        if (muted) return
+    fun play(sfx: Sfx, volume: Float = 1f, pitch: Float = 1f) = voice(sfx, volume * sfxVolume, pitch)
+
+    private fun voice(sfx: Sfx, volume: Float, pitch: Float) {
+        if (muted || volume <= 0f) return
         val snd = sounds[sfx.ordinal] ?: return
         synchronized(voiceLock) {
             var slot = voices.firstOrNull { it.sound == null }
@@ -150,7 +156,7 @@ class AudioSynth {
                 bleepTimer -= blockSeconds
                 if (bleepTimer <= 0f) {
                     bleepTimer = rng.range(0.7f, 2.4f)
-                    if (ambient > 0.05f) {
+                    if (ambient > 0.05f && ambienceVolume > 0f) {
                         val pick = when (rng.nextInt(5)) {
                             0 -> Sfx.BLIP
                             1 -> Sfx.COIN
@@ -158,12 +164,12 @@ class AudioSynth {
                             3 -> Sfx.SELECT
                             else -> Sfx.CLINK
                         }
-                        play(pick, rng.range(0.035f, 0.075f) * ambient, rng.range(0.5f, 1.6f))
+                        voice(pick, rng.range(0.035f, 0.075f) * ambient * ambienceVolume, rng.range(0.5f, 1.6f))
                     }
                 }
 
-                val humVol = ambient * 0.05f
-                val crowdVol = ambient * 0.9f
+                val humVol = ambient * ambienceVolume * 0.05f
+                val crowdVol = ambient * ambienceVolume * 0.9f
                 val sr = sampleRate.toFloat()
                 for (i in 0 until block) {
                     p1 = (p1 + 55f / sr) % 1f

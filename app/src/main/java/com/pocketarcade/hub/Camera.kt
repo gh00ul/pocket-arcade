@@ -36,6 +36,9 @@ class HubCamera {
         const val FP_FOV_DEG = 70f
         /** On tall portrait screens the vertical view widens (up to this) to keep a sensible width. */
         const val FP_MAX_FOV_DEG = 90f
+        /** However the player's setting scales it, first person's vertical view stays within these, degrees. */
+        const val MIN_FOV_DEG = 40f
+        const val MAX_FOV_DEG = 120f
         /** The narrowest horizontal view first person aims for, degrees. */
         const val FP_MIN_HFOV_DEG = 50f
         /** How far first person can look up or down, degrees. */
@@ -161,6 +164,15 @@ class HubCamera {
     var fovKick = 0f
         private set
 
+    /**
+     * The player's options: a multiplier on the first-person field of view (1 = as designed; the
+     * setting's degrees over [FP_FOV_DEG]), and on the head-bob and the run's field-of-view
+     * kick (both 0 with reduced motion).
+     */
+    var fovScale = 1f
+    var bobScale = 1f
+    var kickScale = 1f
+
     /** How far behind the feet the eye is. */
     val eyeBack: Float get() = EYE_BACK
 
@@ -169,8 +181,8 @@ class HubCamera {
     val eyeY: Float get() = EYE_HEIGHT + bobLift()
     val eyeZ: Float get() = playerZ - cos(yaw) * eyeBack + sway() * sin(yaw)
 
-    private fun bobLift(): Float = if (bobWeight <= 0f) 0f else BOB_HEIGHT * bobWeight * (abs(sin(walkPhase)) - 0.35f)
-    private fun sway(): Float = if (bobWeight <= 0f) 0f else BOB_SWAY * bobWeight * cos(walkPhase)
+    private fun bobLift(): Float = if (bobWeight <= 0f) 0f else BOB_HEIGHT * bobScale * bobWeight * (abs(sin(walkPhase)) - 0.35f)
+    private fun sway(): Float = if (bobWeight <= 0f) 0f else BOB_SWAY * bobScale * bobWeight * cos(walkPhase)
 
     fun snapTo(px: Float, pz: Float) {
         targetX = px.coerceIn(minX, maxX)
@@ -200,7 +212,7 @@ class HubCamera {
         playerZ = pz
         walkPhase = phase
         bobWeight = approach(bobWeight, if (moving) gait.coerceIn(0f, 1.5f) else 0f, dt * 5f)
-        fovKick = approach(fovKick, RUN_FOV_KICK_DEG * run.coerceIn(0f, 1f), dt * RUN_FOV_KICK_DEG * 3f)
+        fovKick = approach(fovKick, RUN_FOV_KICK_DEG * kickScale * run.coerceIn(0f, 1f), dt * RUN_FOV_KICK_DEG * 3f)
         fpBlend = approach(fpBlend, if (firstPerson) 1f else 0f, dt / BLEND_TIME)
     }
 
@@ -265,7 +277,7 @@ class HubCamera {
             gx = lerp(gx, lx, s)
             gy = lerp(gy, ly, s)
             gz = lerp(gz, lz, s)
-            fov = lerp(fov, fpFovY(aspect) + fovKick * DEG, s)
+            fov = lerp(fov, (fpFovY(aspect) * fovScale).coerceIn(MIN_FOV_DEG * DEG, MAX_FOV_DEG * DEG) + fovKick * DEG, s)
         }
         if (dive > 0f) {
             val t = dive.coerceIn(0f, 1f)
