@@ -1,6 +1,6 @@
 # Pocket Arcade
 
-A 3D arcade for Android that you walk around in. Stroll a blacklight-carpeted arcade floor with a floating joystick, past banks of claw machines, skee-ball alleys, linked racers, light-gun cabinets, pinball tables, fishing tubs and a coin-pusher island. Step up to a glowing cabinet, spend a token, and the camera dives into the machine's screen. Play a 40–75 second round, watch your tickets print out of the slot, then trade them at the prize counter for hats, outfits and decorations that show up in the hall.
+A 3D arcade for Android that you walk around in. Stroll a blacklight-carpeted arcade floor with a floating joystick, from overhead or in first person at a kid's eye height, past banks of claw machines, skee-ball alleys, linked racers, light-gun cabinets, pinball tables, fishing tubs and a coin-pusher island. Step up to a glowing cabinet, spend a token, and the camera dives into the machine's screen. Play a 40–75 second round, watch your tickets print out of the slot, then trade them at the prize counter for hats, outfits and decorations that show up in the hall.
 
 Everything is made in code. The hall and every machine are rendered on the GPU with OpenGL ES 3: per-pixel lighting from dozens of coloured lights with rim light, 4× anti-aliasing, a multi-scale bloom glow on neon and screens, and colour grading. Every model, texture, font glyph and sound is generated at runtime. Textures are painted with Android's 2D canvas, and sounds are synthesized through `AudioTrack`. The app ships no image or audio files and uses no third-party libraries beyond AndroidX/Compose.
 
@@ -8,6 +8,7 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
   <img src="docs/screenshots/title.png" width="160" alt="Title screen">
   <img src="docs/screenshots/hall.png" width="160" alt="The arcade hall">
   <img src="docs/screenshots/cafe.png" width="160" alt="The café">
+  <img src="docs/screenshots/first-person.png" width="160" alt="First person">
   <img src="docs/screenshots/prize-counter.png" width="160" alt="Prize counter">
   <img src="docs/screenshots/claw.png" width="160" alt="Claw machine">
   <img src="docs/screenshots/skeeball.png" width="160" alt="Skee-ball">
@@ -41,8 +42,9 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 - A lighting rig: trusses and wall rails with spotlights that throw beams through the haze and coloured pools in front of every bank, backlit murals, a hung TURBO RACEWAY sign with start lights, and chase bulbs round the entrance.
 - Blacklight carpet that fluoresces, terrazzo at the entrance, walls rising into the dark with acoustic panels, uplights and a backlit mural, and the street outside through the cut-away shopfront.
 - 3D kids with a walk cycle, poses for playing, cheering and sitting, and hats. Yours follows a floating joystick that appears wherever your thumb lands. The other kids find their way between machines, play them, queue at the café till and sit down with a drink or a cone. A barista wipes the counter and makes each order at the slushie, espresso or soft-serve station.
+- **First person.** The eye button next to the trophy switches between the overhead camera and a kid's-eye view, easing between the two. In first person the left thumb walks (forward, back and strafe), the right thumb drags to look, and your choice is remembered. Up close the hall is finished on every side: closed cabinet backs with service panels, a ceiling of acoustic tiles, light panels, ducts and sprinklers, and a glass shopfront onto the street.
 - Collision against walls, cabinets and furniture, with sliding along edges.
-- Walk up to a machine and a **▶ PLAY (1 token)** prompt pops up. Tap it and the camera flies into the screen of the cabinet you're standing at. Exiting flies you back out to exactly where you stood.
+- Walk up to a machine and a **▶ PLAY (1 token)** prompt pops up. Tap it and the camera flies into the screen of the cabinet you're standing at. Exiting flies you back out to exactly where you stood (in first person, facing the machine).
 - An ambient arcade soundscape: mains hum, crowd murmur and distant machine bleeps.
 
 **Eleven machines**, each a full 3D game that pays out tickets:
@@ -89,6 +91,7 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
   - The multisampled buffers are discarded after the resolve, which saves memory bandwidth on tile-based phone GPUs.
   - The render resolution eases down if frames run long and recovers after a hitch; on fast GPUs with timer queries it can go above the usual 0.8.
 - **Textures.** They are painted with Android's `Canvas` (gradients, real fonts, glows and grain). A texture can be stored at a finer resolution than the texel size the code maps it in. Live textures such as cabinet screens reuse their upload buffers instead of allocating a copy every frame.
+- **Culling.** The hall culls cabinets, fixtures, kids and lights against the camera's view frustum and a draw distance hidden by fog, so the same scene works looking straight down or level at eye height. Each pass sets its own near plane.
 - **Stage3D.** Gives each game a 3D view that maps touches onto world planes and world points back to the screen.
 - **GL context loss.** GPU resources are tagged with a process-wide generation, so models and textures cached for the whole app are re-uploaded after the activity is recreated.
 
