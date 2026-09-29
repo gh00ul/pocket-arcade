@@ -174,9 +174,11 @@ internal class HallKit(val map: HubMap, val games: List<MiniGame>) {
         hallLights += PointLight(534f, 110f, 40f, 0.7f, 0.4f, 1f, 130f, 0.7f)
     }
 
-    /** Builds the whole hall now. */
+    /** Builds the whole hall now. A step that fails is not carried on past here: its error is the scene's. */
     fun buildAll() {
-        LoadDriver(plan(emptyList())).runToEnd()
+        val driver = LoadDriver(plan(emptyList()))
+        driver.runToEnd()
+        driver.failures.firstOrNull()?.let { throw it }
     }
 
     /**
