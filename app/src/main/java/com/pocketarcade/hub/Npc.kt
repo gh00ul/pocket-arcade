@@ -4,18 +4,27 @@ import com.pocketarcade.engine.dist
 import com.pocketarcade.engine.range
 import kotlin.math.PI
 import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 /**
  * A kid enjoying the arcade: wanders a path to a free machine, plays it for a while (with the
  * odd cheer), sits down for a bit, or queues at the café, buys a treat and takes it to a café
- * seat, then moves on.
+ * seat, then moves on. In first person they don't let the player walk through them: a kid
+ * walking into the player steps aside (or waits), and one standing or playing where the player
+ * wants to be makes way.
  */
 class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: Random, val seed: Float) {
     enum class State { IDLE, WALK, PLAY, SIT, QUEUE }
 
     private companion object {
         val NO_PATH = IntArray(0)
+        /** Kids give way to the player inside this distance (world units, centre to centre). */
+        const val GIVE_WAY = Body.RADIUS + HubWorld.KID_RADIUS + 4f
+        /** A kid waiting for the player to pass gives up on where they were going after this long. */
+        const val WAIT_LIMIT = 2f
     }
 
     var yaw = rng.range(0f, 6.28f)
@@ -52,8 +61,14 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
     private var hasEnd = false
     /** How long this kid has been in the café queue; they give up after a while. */
     private var waited = 0f
+    /** How long this kid has been waiting for the player to get out of the way. */
+    private var giveWayT = 0f
 
     fun update(dt: Float, world: HubWorld) {
+        if (world.firstPerson && giveWay(dt, world)) {
+            yaw = turnTowards(yaw, targetYaw, dt * 8f)
+            return
+        }
         when (state) {
             State.IDLE -> {
                 pose = if (holding) Pose.HOLD else Pose.STAND
@@ -260,5 +275,80 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
         // Nowhere to sit: stand about with it for a bit.
         state = State.IDLE
         timer = rng.range(3f, 6f)
+    }
+
+    /**
+     * First person: keeps out of the player's way. Returns true if this step went on stepping
+     * aside (instead of the usual walk). Nobody is ever moved into a solid.
+     */
+    private fun giveWay(dt: Float, world: HubWorld): Boolean {
+        val p = world.player
+        val dx = x - p.x
+        val dy = y - p.y
+        val d2 = dx * dx + dy * dy
+        if (d2 >= GIVE_WAY * GIVE_WAY) {
+            giveWayT = 0f
+            return false
+        }
+        val d = sqrt(d2).coerceAtLeast(1e-3f)
+        val solids = world.map.solids
+        var stepping = false
+        when (state) {
+            // Playing or loitering right where the player wants to be: make way.
+            State.PLAY, State.IDLE -> if (d < GIVE_WAY - 2f) {
+                state = State.IDLE
+                hangout = -1
+                timer = 0f
+            }
+            State.WALK -> {
+                val hx = sin(targetYaw)
+                val hy = cos(targetYaw)
+                // The player is ahead: step aside, away from them, if there's room; else wait.
+                if (-(dx * hx + dy * hy) / d > 0.2f) {
+                    var sx = -hy
+                    var sy = hx
+                    if (sx * dx + sy * dy < 0f) {
+                        sx = -sx
+                        sy = -sy
+                    }
+                    val step = speed * 0.8f * dt
+                    val nx = x + sx * step
+                    val ny = y + sy * step
+                    if (!Collision.blocked(solids, nx, ny)) {
+                        x = nx
+                        y = ny
+                        phase += dt * speed * 0.2f
+                    }
+                    pose = if (holding) Pose.CARRY else Pose.WALK
+                    giveWayT += dt
+                    stepping = giveWayT < WAIT_LIMIT
+                    if (!stepping) {
+                        // Waited long enough: go somewhere else.
+                        giveWayT = 0f
+                        state = State.IDLE
+                        hangout = -1
+                        if (queueSpot >= 0) {
+                            world.cafe.leave(this)
+                            queueSpot = -1
+                        }
+                        timer = 0.5f
+                    }
+                }
+            }
+            // Sitting or queueing: the player goes round.
+            else -> {}
+        }
+        // Bumped into: shuffle out of the way if there's room behind.
+        val minD = Body.RADIUS + HubWorld.KID_RADIUS
+        if (d < minD && state != State.SIT && state != State.QUEUE) {
+            val push = (minD - d) * 0.5f
+            val nx = x + dx / d * push
+            val ny = y + dy / d * push
+            if (!Collision.blocked(solids, nx, ny)) {
+                x = nx
+                y = ny
+            }
+        }
+        return stepping
     }
 }

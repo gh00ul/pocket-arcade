@@ -31,6 +31,10 @@ class HubRenderer {
         private const val FLOOR_REFLECT_MATTE = 0.18f
         private const val WALK_HINT = "DRAG ANYWHERE TO WALK"
         private val FP_HINT = "${ArcadeFont.LEFT} DRAG TO WALK      DRAG TO LOOK ${ArcadeFont.RIGHT}"
+        private const val FP_TAP_HINT = "OR TAP A MACHINE TO WALK THERE"
+        private val STICK_GLOW = listOf(Color.White.copy(alpha = 0.02f), Color.White.copy(alpha = 0.14f))
+        private val KNOB = listOf(Color(0xFFFFB8DD), Color(Pal.PINK), Color(0xFFB02070))
+        private val KNOB_RUN = listOf(Color(0xFFFFF2B0), Color(Pal.GOLD), Color(0xFFC07A10))
     }
 
     private val r = Renderer3D(1, 1)
@@ -65,6 +69,7 @@ class HubRenderer {
         } else if (fp > 0.5f) {
             if (!world.hasWalked || !world.hasLooked) {
                 ArcadeFont.drawCentered(scope, FP_HINT, sw / 2f, sh * 0.8f, px * 1.2f, Color.White, a, tiny = true)
+                ArcadeFont.drawCentered(scope, FP_TAP_HINT, sw / 2f, sh * 0.8f + px * 12f, px * 1.1f, Color.White, a * 0.8f, tiny = true)
             }
         } else if (!world.hasWalked) {
             ArcadeFont.drawCentered(scope, WALK_HINT, sw / 2f, sh * 0.8f, px * 1.2f, Color.White, a, tiny = true)
@@ -72,12 +77,28 @@ class HubRenderer {
         val js = world.joystick
         if (js.active) {
             val rad = js.radius
-            scope.drawCircle(Brush.radialGradient(listOf(Color.White.copy(alpha = 0.02f), Color.White.copy(alpha = 0.14f)), Offset(js.baseX, js.baseY), rad), rad, Offset(js.baseX, js.baseY))
-            scope.drawCircle(Color.White, rad, Offset(js.baseX, js.baseY), alpha = 0.35f, style = Stroke(width = px * 1.2f))
+            val base = Offset(js.baseX, js.baseY)
+            // In first person the busy, bright hall is right behind the stick: give it a dark
+            // backing and a firmer rim so it reads, and a ring where the walk turns into a run.
+            if (fp > 0.01f) {
+                scope.drawCircle(Color.Black, rad * 1.04f, base, alpha = 0.3f * fp)
+                scope.drawCircle(Color.White, rad * Joystick.RUN_FROM, base, alpha = 0.22f * fp, style = Stroke(width = px * 0.8f))
+            }
+            scope.drawCircle(Brush.radialGradient(STICK_GLOW, base, rad), rad, base)
+            scope.drawCircle(Color.White, rad, base, alpha = 0.35f + 0.3f * fp, style = Stroke(width = px * (1.2f + 0.6f * fp)))
             val knob = Offset(js.knobX, js.knobY)
-            scope.drawCircle(Color.Black, rad * 0.44f, knob + Offset(0f, px * 2f), alpha = 0.3f)
-            scope.drawCircle(Brush.radialGradient(listOf(Color(0xFFFFB8DD), Color(Pal.PINK), Color(0xFFB02070)), knob - Offset(rad * 0.12f, rad * 0.15f), rad * 0.6f), rad * 0.42f, knob)
-            scope.drawCircle(Color.White, rad * 0.42f, knob, alpha = 0.35f, style = Stroke(width = px))
+            val kr = rad * 0.42f
+            scope.drawCircle(Color.Black, kr * 1.05f, knob + Offset(0f, px * 2f), alpha = 0.3f)
+            val running = fp > 0.5f && js.run > 0.5f
+            scope.drawCircle(Brush.radialGradient(if (running) KNOB_RUN else KNOB, knob - Offset(rad * 0.12f, rad * 0.15f), rad * 0.6f), kr, knob)
+            scope.drawCircle(Color.White, kr, knob, alpha = 0.35f + 0.25f * fp, style = Stroke(width = px))
+        } else if (fp > 0.5f && world.camera.dive <= 0.01f && !world.route.active) {
+            // First person with no thumb down: a faint ghost of the stick where a left thumb rests.
+            val rad = js.radius
+            val base = Offset(sw * 0.22f, sh - rad - 56f * scope.density)
+            scope.drawCircle(Color.Black, rad, base, alpha = 0.12f * fp)
+            scope.drawCircle(Color.White, rad, base, alpha = 0.16f * fp, style = Stroke(width = px))
+            scope.drawCircle(Color.White, rad * 0.42f, base, alpha = 0.12f * fp)
         }
     }
 

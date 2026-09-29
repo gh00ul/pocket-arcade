@@ -17,19 +17,21 @@ import kotlin.math.tan
  * The hall's 3D camera. Overhead (the default) it looks north and down across the floor from
  * behind the player, far enough back that a whole bank of machines fits across the screen
  * whatever its aspect, trailing the player smoothly with a little look-ahead. In first person
- * it is the player's eyes: a kid's eye height, free yaw, clamped pitch and a slight head-bob
- * while walking. Switching eases between the two poses, and either can dive into a machine for
- * the enter/exit transition.
+ * it is the player's eyes: at a kid's head (so turning on the spot turns the view in place),
+ * free yaw, clamped pitch, a head-bob in step with the feet that grows with the pace, and a
+ * slight widening of the view when running. Switching eases between the two poses, and either
+ * can dive into a machine for the enter/exit transition.
  */
 class HubCamera {
     companion object {
         /** First-person eye height: a little above the kids' heads, so marquees and screens read. */
         const val EYE_HEIGHT = 54f
         /**
-         * How far behind the feet the eye sits (when there's room), so a cabinet you walk right up
-         * to is still a screen in front of you rather than a control panel under your nose.
+         * How far behind the feet the eye sits: at the back of the head, so turning on the spot
+         * turns the view in place. The body's clearance ([Body.RADIUS]) keeps cabinets at a
+         * comfortable distance instead.
          */
-        const val EYE_BACK = 18f
+        const val EYE_BACK = 2f
         /** First-person vertical field of view on screens about as wide as they are tall, degrees. */
         const val FP_FOV_DEG = 70f
         /** On tall portrait screens the vertical view widens (up to this) to keep a sensible width. */
@@ -45,6 +47,8 @@ class HubCamera {
         /** Head-bob while walking: up and down, and side to side, in world units. */
         const val BOB_HEIGHT = 1.2f
         const val BOB_SWAY = 0.5f
+        /** How much wider (degrees) the first-person view gets at a full run. */
+        const val RUN_FOV_KICK_DEG = 4f
         /** Near clipping distances: first person stands right against cabinets. */
         const val OVERHEAD_NEAR = 8f
         const val FP_NEAR = 1.5f
@@ -147,28 +151,23 @@ class HubCamera {
     private var playerX = 304f
     private var playerZ = 600f
     private var walkPhase = 0f
-    /** How much of the head-bob is on: eases to 1 while walking and to exactly 0 at rest. */
+    /**
+     * How much of the head-bob is on: follows the walking pace (1 at walking speed, a little
+     * more running) and eases to exactly 0 at rest.
+     */
     var bobWeight = 0f
         private set
-
-    /** How far behind the feet the eye is now (pulled in when a wall or cabinet is behind). */
-    var eyeBack = EYE_BACK
+    /** Degrees the first-person view is widened by right now (running). */
+    var fovKick = 0f
         private set
-    private var eyeRoom = EYE_BACK
+
+    /** How far behind the feet the eye is. */
+    val eyeBack: Float get() = EYE_BACK
 
     /** The first-person eye as of the last [update], world units. */
     val eyeX: Float get() = playerX - sin(yaw) * eyeBack + sway() * -cos(yaw)
     val eyeY: Float get() = EYE_HEIGHT + bobLift()
     val eyeZ: Float get() = playerZ - cos(yaw) * eyeBack + sway() * sin(yaw)
-
-    /**
-     * How much room there is behind the player for the eye (at most [EYE_BACK]); the eye pulls
-     * in at once when it shrinks and eases back out when it grows.
-     */
-    fun setEyeRoom(room: Float) {
-        eyeRoom = room.coerceIn(0f, EYE_BACK)
-        if (eyeRoom < eyeBack) eyeBack = eyeRoom
-    }
 
     private fun bobLift(): Float = if (bobWeight <= 0f) 0f else BOB_HEIGHT * bobWeight * (abs(sin(walkPhase)) - 0.35f)
     private fun sway(): Float = if (bobWeight <= 0f) 0f else BOB_SWAY * bobWeight * cos(walkPhase)
@@ -189,15 +188,19 @@ class HubCamera {
 
     /**
      * One simulation step: trails the player overhead, tracks the eye, runs the head-bob off the
-     * walk cycle ([phase], [moving]) and eases the overhead/first-person blend.
+     * walk cycle ([phase], [moving], at [gait] times its walking size) and eases the
+     * overhead/first-person blend and the running view ([run], 0..1).
      */
-    fun update(px: Float, pz: Float, vx: Float, vz: Float, moving: Boolean, phase: Float, dt: Float) {
+    fun update(
+        px: Float, pz: Float, vx: Float, vz: Float, moving: Boolean, phase: Float, dt: Float,
+        gait: Float = if (moving) 1f else 0f, run: Float = 0f,
+    ) {
         follow(px, pz, vx, vz, dt)
         playerX = px
         playerZ = pz
         walkPhase = phase
-        bobWeight = approach(bobWeight, if (moving) 1f else 0f, dt * 5f)
-        eyeBack = approach(eyeBack, eyeRoom, dt * 30f)
+        bobWeight = approach(bobWeight, if (moving) gait.coerceIn(0f, 1.5f) else 0f, dt * 5f)
+        fovKick = approach(fovKick, RUN_FOV_KICK_DEG * run.coerceIn(0f, 1f), dt * RUN_FOV_KICK_DEG * 3f)
         fpBlend = approach(fpBlend, if (firstPerson) 1f else 0f, dt / BLEND_TIME)
     }
 
@@ -262,7 +265,7 @@ class HubCamera {
             gx = lerp(gx, lx, s)
             gy = lerp(gy, ly, s)
             gz = lerp(gz, lz, s)
-            fov = lerp(fov, fpFovY(aspect), s)
+            fov = lerp(fov, fpFovY(aspect) + fovKick * DEG, s)
         }
         if (dive > 0f) {
             val t = dive.coerceIn(0f, 1f)

@@ -50,9 +50,9 @@ class FirstPersonTest {
         w.run(0.1f)
         val cam = Camera3D()
         w.camera.apply(cam, W.toInt(), H.toInt())
-        // Over the player, pulled back a little behind the feet (facing +x here).
+        // Over the player, at the back of the head (facing +x here).
         val back = w.camera.eyeBack
-        assertTrue(back > 0f && back <= HubCamera.EYE_BACK)
+        assertTrue(back >= 0f && back <= 3f)
         assertEquals(w.player.x - back, cam.ex, 1e-3f)
         assertEquals(HubCamera.EYE_HEIGHT, cam.ey, 1e-3f)
         assertEquals(w.player.y, cam.ez, 1e-3f)
@@ -119,24 +119,26 @@ class FirstPersonTest {
     fun theEyeNeverEndsUpInsideAWallBehindYou() {
         val w = world()
         w.setFirstPerson(true, animate = false)
-        // Stand against the west wall, facing east: there's no room behind for the eye.
+        // Stand with the feet right against the west wall, facing east.
         val x = HubLayout.WALL + Collision.FEET_HALF_W + 1f
-        // Somewhere along it with open floor to the east, so turning round gives the eye room.
+        // Somewhere along it with open floor to the east.
         val z = (150 until 1000 step 5).map { it.toFloat() }.first { z ->
-            (0..40 step 2).all { d -> (-4..10 step 2).all { dz -> !Collision.blocked(w.map.solids, x + d, z + dz) } }
+            (0..40 step 2).all { d -> (-12..12 step 2).all { dz -> !Collision.blocked(w.map.solids, x + d, z + dz) } }
         }
         w.player.x = x
         w.player.y = z
         w.camera.setLook(PI.toFloat() / 2f, 0f)
         w.update(FIXED_DT)
-        assertTrue("eye not pulled in at ($x, $z): ${w.camera.eyeBack}", w.camera.eyeBack < HubCamera.EYE_BACK)
-        val ex = w.camera.eyeX
-        val ez = w.camera.eyeZ
-        assertFalse("eye inside a solid at ($ex, $ez)", w.map.solids.any { ex > it.left && ex < it.right && ez > it.top && ez < it.bottom })
-        // Turn round to face the wall: the room behind comes back and the eye eases out again.
-        w.camera.setLook(-PI.toFloat() / 2f, 0f)
-        w.run(1f)
-        assertTrue("eye never eased out at ($x, $z): ${w.camera.eyeBack}", w.camera.eyeBack > 0f)
+        // First person's body keeps its clearance: it eases off the wall, without it counting as a walk.
+        assertTrue("body still against the wall at ${w.player.x}", w.player.x >= HubLayout.WALL + Body.RADIUS - 0.01f)
+        assertFalse(w.player.moving)
+        for (yawDeg in 0 until 360 step 15) {
+            w.camera.setLook(yawDeg * DEG, 0f)
+            w.update(FIXED_DT)
+            val ex = w.camera.eyeX
+            val ez = w.camera.eyeZ
+            assertTrue("eye too near a solid at ($ex, $ez)", Body.clear(w.map.solids, ex, ez, Body.RADIUS - HubCamera.EYE_BACK - 0.5f))
+        }
     }
 
     @Test
@@ -193,15 +195,18 @@ class FirstPersonTest {
         w.setFirstPerson(true, animate = false)
         val yaw = 200f * DEG
         w.camera.setLook(yaw, 0f)
+        // Up to walking pace (full walking speed, short of the run at the rim)...
+        w.pointerDown(1, 200f, 1800f)
+        w.pointerMove(1, 200f, 1800f - w.joystick.radius * Joystick.FULL_AT)
+        w.run(0.3f)
+        // ...then a quarter of a second at it.
         val x0 = w.player.x
         val z0 = w.player.y
-        w.pointerDown(1, 200f, 1800f)
-        w.pointerMove(1, 200f, 1800f - w.joystick.radius * 2f)
         w.run(0.25f)
         val dx = w.player.x - x0
         val dz = w.player.y - z0
         assertEquals("heading", yaw, atan2(dx, dz) + 2f * PI.toFloat(), 0.02f)
-        assertEquals("speed", Player.SPEED * 0.25f, kotlin.math.hypot(dx, dz), 1.5f)
+        assertEquals("speed", Player.SPEED * 0.25f, kotlin.math.hypot(dx, dz), 0.5f)
         assertEquals(yaw, HubCamera.wrap(w.player.yaw) + 2f * PI.toFloat(), 1e-4f)
     }
 
@@ -237,11 +242,14 @@ class FirstPersonTest {
         w.pointerMove(1, 200f, 1800f - w.joystick.radius)
         w.pointerMove(2, 800f + 200f, 1200f)
         assertTrue(w.joystick.outY < -0.9f)
+        // The drag is smoothed in over a few hundredths of a second, all of it.
+        w.run(0.1f)
         // 200 px right at 2.75 px/dp and 0.3°/dp: a turn to the right (yaw goes down).
         val expected = 200f / DENSITY * HubWorld.LOOK_DEG_PER_DP * DEG
         assertEquals(PI.toFloat() - expected, w.camera.yaw + if (w.camera.yaw < 0f) 2f * PI.toFloat() else 0f, 1e-4f)
         // Dragging up looks up.
         w.pointerMove(2, 1000f, 1100f)
+        w.run(0.05f)
         assertTrue(w.camera.pitch > 0f)
         // Lifting the look finger leaves the stick alone, and vice versa.
         w.pointerUp(2, 1000f, 1100f)
@@ -268,6 +276,7 @@ class FirstPersonTest {
         w.pointerDown(4, 900f, 1000f)
         w.pointerMove(4, 900f - slop * 2f, 1000f)
         assertTrue(w.lookDragging)
+        w.run(0.1f)
         assertEquals(1f + slop * 2f / DENSITY * HubWorld.LOOK_DEG_PER_DP * DEG, w.camera.yaw, 1e-4f)
     }
 

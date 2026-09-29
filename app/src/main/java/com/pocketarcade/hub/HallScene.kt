@@ -428,6 +428,13 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
             if (visible(n.x - 10f, n.y - 7f, n.x + 10f, n.y + 7f, 1f)) shadowAt(r, n.x, n.y, 1f)
         }
         shadowAt(r, map.clerkX, map.clerkY, 1.1f)
+        // First person's tap-to-walk: a pulsing glow where you're headed.
+        val route = world.route
+        if (route.active && fp > 0.5f) {
+            val s = 1f + 0.12f * sin(t * 7f)
+            r.flat(route.goalX, route.goalY, 0.35f, 26f * s, 26f * s, halo, blend = Blend.ADD, emissive = 1f, alpha = 0.55f * fp, tint = 0xFFFFD84D.toInt())
+            r.flat(route.goalX, route.goalY, 0.4f, 9f, 9f, halo, blend = Blend.ADD, emissive = 1f, alpha = 0.9f * fp, tint = -1)
+        }
         for (i in fixtureProps.indices) {
             val p = fixtureProps[i]
             if (!fixtureVisible(p)) continue
