@@ -133,6 +133,7 @@ class StartupGate(
                     val frameNs = if (last == 0L) 0L else now - last
                     last = now
                     val wanted = urgent()
+                    Startup.urgent = wanted
                     val slice = LoadBudget.sliceNs(wanted, frameNs, vsyncNs())
                     if (slice > 0L) {
                         val before = driver.stepsDone

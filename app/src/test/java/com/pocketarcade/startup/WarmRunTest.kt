@@ -19,7 +19,7 @@ class WarmRunTest {
             sent += i
             Warmup.Ticket().also { tickets += it }
         },
-        stallMs, { clock }, onStall,
+        stallMs, { clock }, onStall, depth = { 1 },
     )
 
     @After
@@ -46,6 +46,64 @@ class WarmRunTest {
         assertTrue(r.poll())
         assertEquals(1f, r.fraction, 0f)
         assertEquals(listOf(0, 1, 2), sent)
+    }
+
+    @Test
+    fun keepsSeveralInFlightWhenLoadingHasTheScreenToItself() {
+        val r = WarmRun(
+            5,
+            { i -> sent += i; Warmup.Ticket().also { tickets += it } },
+            1000, { clock }, {}, depth = { 3 },
+        )
+        assertFalse(r.poll())
+        assertEquals("three out at once", listOf(0, 1, 2), sent)
+        assertFalse(r.poll())
+        assertEquals(listOf(0, 1, 2), sent)
+        tickets[0].done = true
+        assertFalse(r.poll())
+        assertEquals("one came back, one more goes", listOf(0, 1, 2, 3), sent)
+        assertEquals(1 / 5f, r.fraction, 1e-6f)
+        // Answers arrive in the order sent; a later one alone doesn't count until the ones before it are in.
+        tickets[3].done = true
+        assertFalse(r.poll())
+        assertEquals(1 / 5f, r.fraction, 1e-6f)
+        tickets[1].done = true
+        tickets[2].done = true
+        assertFalse(r.poll())
+        assertEquals(listOf(0, 1, 2, 3, 4), sent)
+        tickets[4].done = true
+        assertTrue(r.poll())
+        assertEquals(1f, r.fraction, 0f)
+    }
+
+    @Test
+    fun oneAtATimeWhileTheTitleIsBeingWatched() {
+        var loading = false
+        val r = WarmRun(
+            4,
+            { i -> sent += i; Warmup.Ticket().also { tickets += it } },
+            1000, { clock }, {}, depth = { if (loading) 3 else 1 },
+        )
+        assertFalse(r.poll())
+        assertEquals(listOf(0), sent)
+        loading = true
+        assertFalse(r.poll())
+        assertEquals("the loading screen went up: three in flight", listOf(0, 1, 2), sent)
+    }
+
+    @Test
+    fun theStallClockRunsFromTheLastAnswerEvenWithSeveralOut() {
+        var stalled = 0
+        val r = WarmRun(6, { i -> sent += i; Warmup.Ticket().also { tickets += it } }, 500, { clock }, { stalled++ }, depth = { 3 })
+        r.poll()
+        clock += 400
+        tickets[0].done = true
+        assertFalse(r.poll())
+        clock += 400
+        assertFalse("an answer 400 ms ago is progress", r.poll())
+        clock += 200
+        assertTrue(r.poll())
+        assertEquals(1, stalled)
     }
 
     @Test
@@ -86,7 +144,7 @@ class WarmRunTest {
     fun jobsAnsweredAtOnceRunStraightThrough() {
         // A GPU that is switched off answers every request with a finished ticket.
         val done = ArrayList<Int>()
-        val r = WarmRun(3, { i -> done += i; Warmup.Ticket(done = true) }, 1000, { clock })
+        val r = WarmRun(3, { i -> done += i; Warmup.Ticket(done = true) }, 1000, { clock }, depth = { 1 })
         assertTrue(r.poll())
         assertEquals(listOf(0, 1, 2), done)
     }

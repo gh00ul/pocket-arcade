@@ -75,6 +75,14 @@ object Startup {
         private set
     private var lastFrameNs = 0L
 
+    /**
+     * Whether loading has the screen to itself (a loading screen is up) rather than sharing it with
+     * something being watched (the title): set every frame by the loading gate, read by
+     * [WarmRun] to decide how many warm-up pictures to keep in flight.
+     */
+    @Volatile
+    var urgent = false
+
     /** Called once a frame by whatever drives loading, with the frame's time in nanoseconds. */
     fun tickFrame(frameTimeNs: Long) {
         if (lastFrameNs != 0L) frameClockMs += ((frameTimeNs - lastFrameNs) / 1_000_000L).coerceIn(0L, 100L)
