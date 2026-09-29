@@ -5,6 +5,7 @@ import com.pocketarcade.data.PlushShape
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.r3d.Model
 import com.pocketarcade.engine.r3d.ModelBuilder
+import com.pocketarcade.engine.r3d.Poly
 import com.pocketarcade.engine.r3d.Region
 import com.pocketarcade.engine.r3d.TexPaint
 import com.pocketarcade.engine.r3d.Texture
@@ -12,8 +13,58 @@ import com.pocketarcade.engine.r3d.Xform
 import com.pocketarcade.engine.r3d.mixArgb
 
 /**
+ * How plush toys are shaded and toned. Baked occlusion darkens the underside and the foot of a toy
+ * so a pile reads as soft, weighty forms instead of flat cut-outs, and pale fabric is capped so a
+ * white ghost or a grey cat lit from above sits under the bloom threshold instead of glowing.
+ * Constants, not magic numbers: both only ever darken paint.
+ */
+internal object PlushShade {
+    /** Brightness (of the paint) at the very bottom of a toy, facing down. 1 = no darkening. */
+    const val AO_MIN = 0.72f
+    /** How much of the darkening comes from the surface facing down (the rest is height). */
+    const val AO_NORMAL_SHARE = 0.55f
+    /** Fabric never gets brighter than this (0..1 of a channel): pale plush stays a soft off-white. */
+    const val PALE_CAP = 0.84f
+
+    /** Scales [argb] so that its brightest channel is at most [PALE_CAP]. */
+    fun soften(argb: Int): Int {
+        val r = argb shr 16 and 255
+        val g = argb shr 8 and 255
+        val b = argb and 255
+        val top = maxOf(r, maxOf(g, b)) / 255f
+        if (top <= PALE_CAP) return argb
+        val k = PALE_CAP / top
+        return (argb and -0x1000000) or ((r * k).toInt() shl 16) or ((g * k).toInt() shl 8) or (b * k).toInt()
+    }
+
+    /** Brightness for a vertex at height fraction [h] (0 bottom, 1 top) with normal y [ny]. */
+    fun shadeAt(h: Float, ny: Float): Float {
+        val facing = (ny * 0.5f + 0.5f).coerceIn(0f, 1f)
+        val up = (h * 1.6f).coerceIn(0f, 1f)
+        val k = AO_NORMAL_SHARE * facing + (1f - AO_NORMAL_SHARE) * up
+        return AO_MIN + (1f - AO_MIN) * k
+    }
+
+    /** A copy of [m] with occlusion baked into every polygon that doesn't glow. */
+    fun bake(m: Model): Model {
+        val span = (m.maxY - m.minY).coerceAtLeast(1e-3f)
+        return Model(
+            m.polys.map { p ->
+                if (p.emissive > 0f || p.shade != null) return@map p
+                val sh = FloatArray(p.n) { i ->
+                    val ny = p.vny?.get(i) ?: p.ny
+                    shadeAt((p.ys[i] - m.minY) / span, ny)
+                }
+                Poly(p.region, p.n, p.xs, p.ys, p.zs, p.us, p.vs, p.nx, p.ny, p.nz, p.blend, p.emissive, p.cull, p.tint, p.gloss, p.vnx, p.vny, p.vnz, sh)
+            },
+        )
+    }
+}
+
+/**
  * Soft 3D plush toys built from spheres and capsules, with a painted face. Models are about
  * two units across per unit of [Plush.radius] / 12 and sit on the ground at y = 0, facing +z.
+ * Every toy carries baked occlusion and toned fabric (see [PlushShade]).
  */
 object Plush3D {
     private val models = HashMap<String, Model>()
@@ -21,7 +72,7 @@ object Plush3D {
     private val faces = HashMap<String, Texture>()
 
     /** A plush of size 1 (body radius ~6 units) sitting on y = 0; scale it with an [Xform]. */
-    fun model(p: Plush): Model = models.getOrPut(p.id) { build(p) }
+    fun model(p: Plush): Model = models.getOrPut(p.id) { PlushShade.bake(build(p)) }
 
     private val centred = HashMap<String, Pair<Model, Float>>()
 
@@ -38,7 +89,8 @@ object Plush3D {
     /** Soft fabric: the colour with a gentle fuzz. */
     private fun fabric(color: Int): Region = fabrics.getOrPut(color) {
         val tp = TexPaint(32, 32)
-        tp.vgrad(0f, 0f, 32f, 32f, mixArgb(color, -1, 0.18f), mixArgb(color, 0xFF000000.toInt(), 0.12f))
+        val tone = PlushShade.soften(color)
+        tp.vgrad(0f, 0f, 32f, 32f, PlushShade.soften(mixArgb(tone, -1, 0.14f)), mixArgb(tone, 0xFF000000.toInt(), 0.12f))
         tp.grain(0.08f, color)
         tp.toTexture().also { tp.recycle() }
     }.full
@@ -51,7 +103,8 @@ object Plush3D {
         val w = 256
         val h = 128
         val tp = TexPaint(w, h)
-        tp.vgrad(0f, 0f, w.toFloat(), h.toFloat(), mixArgb(p.main, -1, 0.15f), mixArgb(p.main, 0xFF000000.toInt(), 0.1f))
+        val tone = PlushShade.soften(p.main)
+        tp.vgrad(0f, 0f, w.toFloat(), h.toFloat(), PlushShade.soften(mixArgb(tone, -1, 0.12f)), mixArgb(tone, 0xFF000000.toInt(), 0.1f))
         tp.grain(0.07f, p.main)
         val cx = w * 0.25f
         val cy = h * 0.55f
