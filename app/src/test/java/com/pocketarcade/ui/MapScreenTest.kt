@@ -192,8 +192,8 @@ class MapScreenTest {
         val lu = 1.7f * density
         val n = labelled.size
         // About what the real font measures: 4.4 grid units a character, condensed capitals.
-        val lw = FloatArray(n) { labelled[it].text.length * 4.4f * lu + 10f * density }
         val lh = 5f * lu + 8f * density
+        val lw = FloatArray(n) { labelled[it].text.length * 4.4f * lu + HallMap.labelPad(lh, density) }
         val ax = FloatArray(n) { g.sx(labelled[it].x) }
         val ay = FloatArray(n) { g.sy(labelled[it].z) }
         val ox = FloatArray(n)

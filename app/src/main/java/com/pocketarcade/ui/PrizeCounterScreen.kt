@@ -333,7 +333,7 @@ private fun PreviewStage(save: SaveState, selected: ShopItem?, height: Dp) {
 
 /** A small round badge carrying an icon, in [color]: the mark on a card that says worn or locked. */
 @Composable
-private fun IconBadge(icon: UiIcon, color: Color, modifier: Modifier = Modifier, size: Dp = 18.dp) {
+internal fun IconBadge(icon: UiIcon, color: Color, modifier: Modifier = Modifier, size: Dp = 18.dp) {
     Canvas(modifier.size(size)) {
         val r = this.size.minDimension / 2f
         drawCircle(Color.Black.copy(alpha = 0.4f), r, center + Offset(0f, r * 0.12f))
