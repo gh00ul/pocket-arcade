@@ -44,6 +44,7 @@ import com.pocketarcade.ui.GameHostScreen
 import com.pocketarcade.ui.Hud
 import com.pocketarcade.ui.ArcadeText
 import com.pocketarcade.ui.GlassBox
+import com.pocketarcade.ui.PhotoBoothScreen
 import com.pocketarcade.ui.PrizeCounterScreen
 import com.pocketarcade.ui.ProfileScreen
 import com.pocketarcade.ui.TitleScreen
@@ -83,7 +84,18 @@ class AppSignals {
 }
 
 private enum class Screen { TITLE, HUB, GAME }
-private enum class Overlay { NONE, PRIZES, TOKENS, PROFILE }
+private enum class Overlay {
+    NONE,
+
+    PRIZES,
+
+    TOKENS,
+
+    PROFILE,
+
+    /** The photo booth. */
+    PHOTO,
+}
 
 /**
  * Top-level flow: title → hall ↔ machines, with the camera diving into a cabinet's screen and
@@ -212,19 +224,45 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         enterMachine(index, null)
     }
 
+    /** Opens [which] over the hall (the prize counter, the token machine, the photo booth...). */
+    fun openOverlay(which: Overlay) {
+        world.cancelInput()
+        overlay = which
+        audio.play(Sfx.SELECT)
+    }
+
+    /** The handler of a prop whose feature isn't built yet. */
+    fun comingSoon() {
+        audio.play(Sfx.BLIP, 0.5f, 0.8f)
+        banner = "COMING SOON"
+    }
+
+    /**
+     * What tapping a spot's prompt does, one line per type. To make a prop work, replace its
+     * [comingSoon] line with your own (usually [openOverlay] with a new [Overlay] value and a
+     * screen below); [Spot.prop] says which prop it was. See the README: "Add an interactive prop".
+     */
     fun onSpot(spot: Spot) {
         when (spot.type) {
             SpotType.MACHINE -> enterMachine(spot.machine, spot)
-            SpotType.TOKENS -> {
-                world.cancelInput()
-                overlay = Overlay.TOKENS
-                audio.play(Sfx.SELECT)
-            }
-            SpotType.PRIZES -> {
-                world.cancelInput()
-                overlay = Overlay.PRIZES
-                audio.play(Sfx.SELECT)
-            }
+
+            SpotType.TOKENS -> openOverlay(Overlay.TOKENS)
+
+            SpotType.PRIZES -> openOverlay(Overlay.PRIZES)
+
+            SpotType.PHOTO -> openOverlay(Overlay.PHOTO)
+
+            SpotType.TROPHY -> comingSoon()
+
+            SpotType.TANK -> comingSoon()
+
+            SpotType.CAFE -> comingSoon()
+
+            SpotType.RIDE -> comingSoon()
+
+            SpotType.JUKEBOX -> comingSoon()
+
+            SpotType.VENDING -> comingSoon()
         }
     }
 
@@ -277,8 +315,13 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                 }
                 when (overlay) {
                     Overlay.PRIZES -> PrizeCounterScreen(save, services) { overlay = Overlay.NONE }
+
                     Overlay.TOKENS -> TokenMachineScreen(save, services) { overlay = Overlay.NONE }
+
                     Overlay.PROFILE -> ProfileScreen(save, games) { overlay = Overlay.NONE }
+
+                    Overlay.PHOTO -> PhotoBoothScreen(save, services) { overlay = Overlay.NONE }
+
                     Overlay.NONE -> Unit
                 }
                 BackHandler(enabled = overlay != Overlay.NONE) {

@@ -146,6 +146,58 @@ class HubRenderer {
                 info = "${save.tickets} TICKETS"
                 accent = Pal.PINK
             }
+
+            // The interactive props (README: "Add an interactive prop"). Each type's words are
+            // its own block, so a feature that goes live only edits its own.
+            SpotType.PHOTO -> {
+                title = "PHOTO BOOTH"
+                action = "${ArcadeFont.PLAY} SNAP"
+                val strips = save.stat("photos")
+                info = if (strips > 0L) "$strips STRIPS SNAPPED" else "FOUR SHOTS FREE"
+                accent = Pal.SKY
+            }
+
+            SpotType.TROPHY -> {
+                title = "TROPHY CASE"
+                action = "${ArcadeFont.PLAY} LOOK"
+                info = "COMING SOON"
+                accent = Pal.GOLD
+            }
+
+            SpotType.TANK -> {
+                title = "FISH TANK"
+                action = "${ArcadeFont.PLAY} WATCH"
+                info = "COMING SOON"
+                accent = Pal.CYAN
+            }
+
+            SpotType.CAFE -> {
+                title = "SNACK BAR"
+                action = "${ArcadeFont.PLAY} ORDER"
+                info = "COMING SOON"
+                accent = Pal.GREEN
+            }
+
+            SpotType.RIDE -> {
+                title = if (spot.prop?.variant == 0) "SPACE ROCKET" else "RACE CAR"
+                action = "${ArcadeFont.PLAY} RIDE"
+                info = "COMING SOON"
+                accent = Pal.ORANGE
+            }
+
+            SpotType.JUKEBOX -> {
+                title = "JUKEBOX"
+                action = "${ArcadeFont.PLAY} PICK A SONG"
+                info = "COMING SOON"
+                accent = Pal.HOTPINK
+            }
+
+            SpotType.VENDING -> {
+                title = if (spot.prop?.variant == 0) "COLA MACHINE" else "SNACK MACHINE"
+                action = "${ArcadeFont.PLAY} BUY"
+                info = "COMING SOON"
+                accent = if (spot.prop?.variant == 0) Pal.RED else Pal.BLUE
+            }
         }
         // A dark glass card with an accent edge and a pointer down to the machine.
         val u = 2.3f * scope.density
