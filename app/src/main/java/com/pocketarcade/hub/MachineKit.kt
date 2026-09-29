@@ -475,6 +475,16 @@ object MachineKit {
         }
     }
 
+    /** A long speaker panel (painted at 4x): a dark plate of rows of slots between chrome screws, for backboxes and fascias. */
+    val speakerStrip: Texture by lazy {
+        paintTexture(128, 16, CabinetPaint.PLATE_SCALE) {
+            roundGrad(0f, 0f, 128f, 16f, 3f, 0xFF2C2A34.toInt(), 0xFF121016.toInt())
+            for (row in 0 until 3) for (k in 0 until 26) round(9f + k * 4.4f, 3f + row * 4f, 3.2f, 1.8f, 0.9f, 0xFF050408.toInt())
+            strokeRound(0.8f, 0.8f, 126.4f, 14.4f, 3f, 0.9f, 0xFF6E7282.toInt())
+            for (sx in floatArrayOf(4.5f, 123.5f)) with(CabinetPaint) { screw(sx, 8f, 1.5f) }
+        }
+    }
+
     /** A ticket dispenser's front plate: dark housing, a lit slot, "TICKETS" above it and chevrons pointing down. */
     val ticketPlate: Texture by lazy {
         paintTexture(64, 32, CabinetPaint.PLATE_SCALE) {

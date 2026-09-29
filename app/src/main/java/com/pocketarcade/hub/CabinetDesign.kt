@@ -260,10 +260,10 @@ class CabinetBuild internal constructor(
 
     /**
      * A coin door [w] wide, its bottom at [y0], on a face at depth [z] facing +z: a steel door
-     * with a chrome frame and two coin mechs whose slots glow red, the way real ones are lit, and a
-     * coin return cup under it.
+     * with a chrome frame and two coin mechs whose slots glow red, the way real ones are lit, and (with
+     * [cup]) a coin return cup under it.
      */
-    fun coinDoor(x: Float, y0: Float, z: Float, w: Float = 8f) {
+    fun coinDoor(x: Float, y0: Float, z: Float, w: Float = 8f, cup: Boolean = true) {
         val hgt = w * 1.25f
         val chrome = HallArt.chrome.full
         val metal = HallArt.darkMetal.full
@@ -279,7 +279,7 @@ class CabinetBuild internal constructor(
             b.quad(sx - hw, top, z + 0.36f, sx + hw, top, z + 0.36f, sx + hw, bot, z + 0.36f, sx - hw, bot, z + 0.36f, slot, 0f, 0f, 1f, emissive = SLOT_GLOW)
         }
         // The coin return cup under the door: a dark tray with a chrome lip.
-        b.box(x - w * 0.3f, y0 - 1.8f, z, x + w * 0.3f, y0 - 0.4f, z + 0.8f, BoxFaces(front = metal, top = chrome, left = metal, right = metal, gloss = 0.6f))
+        if (cup) b.box(x - w * 0.3f, y0 - 1.8f, z, x + w * 0.3f, y0 - 0.4f, z + 0.8f, BoxFaces(front = metal, top = chrome, left = metal, right = metal, gloss = 0.6f))
     }
 
     /** A thin lit strip (T-molding, a neon edge) from ([xa], [ya]) to ([xb], [yb]) on a face at depth [z]. */
