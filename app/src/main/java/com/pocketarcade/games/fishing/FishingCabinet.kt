@@ -9,14 +9,18 @@ import com.pocketarcade.hub.CabinetBox
 import com.pocketarcade.hub.CabinetBuild
 import com.pocketarcade.hub.CabinetDesign
 import com.pocketarcade.hub.HallArt
+import com.pocketarcade.hub.MachineKit
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
- * Gone Fishing's hall cabinet: a big round tub of water with fish circling under the surface,
- * a ring of chase bulbs round its padded rim, two rods on chrome posts at the front with their
- * floats bobbing on the water, and a lit sign on a post at the back with the attract screen.
+ * Gone Fishing's hall cabinet: a big round tub of water lit from below by a ring of light in the
+ * wall, with fish circling under the surface, a ring of chase bulbs round its padded rim over a
+ * chrome band, two rods with reels and handles on chrome posts at the front with their floats
+ * bobbing on the water, the coin door and ticket dispenser on the front of the tub, and a lit sign
+ * on a post at the back with the attract screen under glass in a bezel.
  */
 object FishingCabinet : CabinetDesign {
     override val width = 62f
@@ -48,7 +52,13 @@ object FishingCabinet : CabinetDesign {
         b.cylinder(cx, tz, 2.5f, RIM_Y, TUB_R, 32, art.sideArt.full, gloss = 0.35f)
         b.cylinder(cx, tz, FLOOR_Y, RIM_Y, TUB_R - 1.6f, 32, FishingArt.tubTiles, inward = true)
         b.disc(cx, tz, FLOOR_Y, TUB_R - 1.6f, 32, FishingArt.tubFloor)
+        // A ring of light set into the inside of the wall, glowing through the water.
+        b.cylinder(cx, tz, 13.4f, 14.6f, TUB_R - 1.65f, 24, art.glowTex.full, inward = true, emissive = MachineKit.glowFor(art.glow, 0.9f))
         b.torus(cx, RIM_Y, tz, TUB_R - 0.8f, 1.6f, art.trimTex.full, segments = 32, sides = 6, gloss = 0.5f)
+        b.torus(cx, RIM_Y - 1.9f, tz, TUB_R + 0.1f, 0.3f, HallArt.chrome.full, segments = 24, sides = 4, gloss = 0.9f)
+        // The coin door and ticket dispenser, stacked on the front of the tub's wall.
+        c.coinDoor(cx, 5.5f, tz + TUB_R + 0.2f, 4.6f)
+        c.ticketDispenser(cx, 13f, tz + TUB_R + 0.2f, 5.2f)
         b.disc(cx, tz, WATER_Y, TUB_R - 1.6f, 32, FishingArt.tubWater, blend = Blend.ALPHA, gloss = 1f)
         // Lily pads floating on top.
         b.disc(cx - 13f, tz - 9f, WATER_Y + 0.15f, 4f, 10, FishingArt.lilyPad)
@@ -75,6 +85,14 @@ object FishingCabinet : CabinetDesign {
             b.capsule(px, POST_H - 4f, pz, px + (tipX - px) * 0.08f, POST_H - 1f, pz + (tipZ - pz) * 0.08f, 0.8f, FishingArt.cork)
             // The reel, and the line down to the water.
             b.cylinder(px + (tipX - px) * 0.14f, pz + (tipZ - pz) * 0.14f, POST_H - 1.6f, POST_H + 0.2f, 1.3f, 10, HallArt.darkMetal.full, top = HallArt.chrome.full)
+            // The reel's crank handle, off to the side of the reel, with a knob on its end.
+            val rx = px + (tipX - px) * 0.14f
+            val rz = pz + (tipZ - pz) * 0.14f
+            val dl = sqrt((tipX - px) * (tipX - px) + (tipZ - pz) * (tipZ - pz))
+            val hx = -(tipZ - pz) / dl
+            val hz = (tipX - px) / dl
+            b.capsule(rx, POST_H - 0.7f, rz, rx + hx * 2f, POST_H - 0.7f, rz + hz * 2f, 0.18f, HallArt.chrome.full, slices = 4)
+            b.sphere(rx + hx * 2f, POST_H - 0.7f, rz + hz * 2f, 0.45f, art.glowTex.full, slices = 6, stacks = 4, gloss = 0.6f)
             b.capsule(tipX, POST_H + 10f, tipZ, tipX, WATER_Y + 1.5f, tipZ, 0.1f, TexKit.white.full)
         }
         // The sign post at the back: live screen in a bezel, the lit marquee above.
@@ -83,6 +101,10 @@ object FishingCabinet : CabinetDesign {
         b.box(cx - 13f, 32f, postZ - 1.5f, cx + 13f, 51f, postZ + 2.5f, BoxFaces(front = art.bezel.full, left = dark, right = dark, top = dark, back = dark, gloss = 0.5f))
         val live = c.liveScreen()
         b.quad(cx - 10f, 49f, postZ + 2.6f, cx + 10f, 49f, postZ + 2.6f, cx + 10f, 34f, postZ + 2.6f, cx - 10f, 34f, postZ + 2.6f, live.texture.full, 0f, 0f, 1f, emissive = 1.1f)
+        c.screenBezel(cx - 10f, cx + 10f, 34f, 49f, postZ + 2.6f, frame = 1f, depth = 0.5f)
+        c.screenGlass(cx - 10f, cx + 10f, 34f, 49f, postZ + 2.68f)
+        c.tMoulding(cx - 13.15f, cx - 12f, 32f, 51f, postZ + 2.5f)
+        c.tMoulding(cx + 12f, cx + 13.15f, 32f, 51f, postZ + 2.5f)
         c.marqueeBox(cx - 18f, cx + 18f, 51f, 60f, postZ - 2f, postZ + 3f)
         c.rearPanel(cx - 12.5f, cx + 12.5f, 32.5f, 50.5f, postZ - 1.5f)
         // Light: the water glows blue, the sign throws a warm light over the tub.
