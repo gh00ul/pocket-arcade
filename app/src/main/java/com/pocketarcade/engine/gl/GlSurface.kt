@@ -15,8 +15,13 @@ import androidx.compose.ui.viewinterop.AndroidView
  */
 @Composable
 fun GlSurface(modifier: Modifier = Modifier) {
-    val thread = remember { GlThread().also { it.start() } }
+    // Only made here: starting the thread is a side effect, so it waits for the effect below
+    // (a surface that arrives first just waits in the thread's hand-off).
+    val thread = remember { GlThread() }
     DisposableEffect(thread) {
+        // A fresh thread has a fresh restart budget, so it may draw again after an earlier failure.
+        Gfx.failure = null
+        thread.start()
         onDispose { thread.shutdown() }
     }
     AndroidView(
