@@ -72,6 +72,10 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 
 - You start with **20 tokens** and get **10 free every day**.
 - The token machine trades **40 tickets for 1 token**. If you are completely out, you can grab a free spare token every 3 minutes, so tokens never run out for good.
+- A round's tickets, score and prizes are saved even if you leave the moment it ends, and a quick double tap on PLAY AGAIN or EXIT never spends or refunds a token twice.
+- The save can't crash the app. A save file that is damaged is reset (you start afresh) instead of blocking every launch, and a write that fails on disk is logged and treated as "couldn't do it".
+
+`ArcadeRepository` (in `data/`) is the one place that reads and writes the save, and takes its `DataStore<Preferences>` as a constructor argument so tests run it on a temp file. Besides the above it keeps building blocks for later features, saved as plain strings that skip bad parts when read: `spendTickets`, free-form counters (`addStat("plays:racer")`), unlock ids (`unlock`), namespaced collectibles (`addCollectible("fish:trout")`), the arcade's name (`setArcadeName`, A-Z, 0-9 and spaces, up to 14 characters) and a top-5 score table per machine with three-character initials (`recordScoreEntry`, `ScoreTables`). Their on-disk key names are the save format, so never rename one.
 
 ## The 3D engine
 
