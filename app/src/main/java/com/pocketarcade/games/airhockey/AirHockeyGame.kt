@@ -11,15 +11,7 @@ import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.clamp01
 import com.pocketarcade.engine.len
 import com.pocketarcade.engine.lerp
-import com.pocketarcade.engine.r3d.Blend
-import com.pocketarcade.engine.r3d.BoxFaces
-import com.pocketarcade.engine.r3d.Model
-import com.pocketarcade.engine.r3d.ModelBuilder
-import com.pocketarcade.engine.r3d.PointLight
-import com.pocketarcade.engine.r3d.Renderer3D
 import com.pocketarcade.engine.r3d.Stage3D
-import com.pocketarcade.engine.r3d.TexKit
-import com.pocketarcade.engine.r3d.Xform
 import com.pocketarcade.engine.range
 import com.pocketarcade.games.BaseMiniGame
 import com.pocketarcade.games.CabinetLook
@@ -70,21 +62,21 @@ class AirHockeyGame : BaseMiniGame() {
 
     private companion object {
         // Rink, in world units (x across, y from the CPU's end to the player's end).
-        const val RL = 40f
-        const val RR = 320f
-        const val RT = 60f
-        const val RB = 600f
-        const val CX = 180f
-        const val CY = (RT + RB) / 2f
-        const val GOAL_HALF = 62f
-        const val PUCK_R = 13f
-        const val MALLET_R = 22f
-        const val RAIL_H = 12f
+        const val RL = HockeyGeo.RL
+        const val RR = HockeyGeo.RR
+        const val RT = HockeyGeo.RT
+        const val RB = HockeyGeo.RB
+        const val CX = HockeyGeo.CX
+        const val CY = HockeyGeo.CY
+        const val GOAL_HALF = HockeyGeo.GOAL_HALF
+        const val PUCK_R = HockeyGeo.PUCK_R
+        const val MALLET_R = HockeyGeo.MALLET_R
+        const val RAIL_H = HockeyGeo.RAIL_H
         const val SUBSTEPS = 4
         /** Radius of the table's rounded corners, which steer pucks back into play. */
-        const val CORNER_R = 46f
+        const val CORNER_R = HockeyGeo.CORNER_R
         /** Height of the mallet's grip plane, where touches land. */
-        const val MALLET_H = 8f
+        const val MALLET_H = HockeyGeo.MALLET_H
     }
 
     private class Disc {
@@ -115,10 +107,9 @@ class AirHockeyGame : BaseMiniGame() {
     private var cpuThinkT = 0f
     private var hitCooldown = 0f
     private var stuckT = 0f
-    private val trailX = FloatArray(10)
-    private val trailY = FloatArray(10)
-    private var trailN = 0
-    private var trailT = 0f
+
+    /** All the presentation state (glows, the puck's trail); the simulation never reads it. */
+    private val scene = HockeyScene()
 
     override fun reset() {
         me.x = CX; me.y = RB - 60f; me.vx = 0f; me.vy = 0f
@@ -137,10 +128,7 @@ class AirHockeyGame : BaseMiniGame() {
         cpuThinkT = 0f
         hitCooldown = 0f
         stuckT = 0f
-        trailX.fill(0f)
-        trailY.fill(0f)
-        trailN = 0
-        trailT = 0f
+        scene.reset()
         serve(toCpu = false, delay = 0.6f)
     }
 
@@ -201,16 +189,9 @@ class AirHockeyGame : BaseMiniGame() {
         }
         val h = dt / SUBSTEPS
         repeat(SUBSTEPS) { subStep(h) }
-        // A short glowing trail behind a fast puck.
-        trailT -= dt
-        if (trailT <= 0f) {
-            trailT = 0.02f
-            for (i in trailX.size - 1 downTo 1) {
-                trailX[i] = trailX[i - 1]; trailY[i] = trailY[i - 1]
-            }
-            trailX[0] = puck.x; trailY[0] = puck.y
-            trailN = (trailN + 1).coerceAtMost(trailX.size)
-        }
+        // A short glowing trail behind a fast puck (visual only).
+        scene.step(dt)
+        scene.trail(puck.x, puck.y, dt)
     }
 
     private fun subStep(h: Float) {
@@ -327,6 +308,7 @@ class AirHockeyGame : BaseMiniGame() {
                 val power = clamp01(-rel / 900f)
                 play(Sfx.CLINK, 0.4f + power * 0.6f, 0.7f + power * 0.6f)
                 if (m === me) fx.haptics.tick()
+                scene.malletHit(puck.x - nx * PUCK_R, puck.y - ny * PUCK_R, power, m === me)
                 if (power > 0.6f) {
                     shake.add(0.08f)
                     stage.toField(puck.x, MALLET_H, puck.y, pt)
@@ -340,6 +322,7 @@ class AirHockeyGame : BaseMiniGame() {
         if (abs(v) > 120f && hitCooldown <= 0f) {
             hitCooldown = 0.05f
             play(Sfx.BOUNCE, (abs(v) / 1200f).coerceIn(0.15f, 0.6f), 1.6f)
+            scene.wallHit(puck.x, puck.y, clamp01(abs(v) / 1200f))
         }
     }
 
@@ -388,12 +371,13 @@ class AirHockeyGame : BaseMiniGame() {
         puckLive = false
         if (timeUp) {
             // After the buzzer the puck just drops into the slot: no score, no goal flash to wait on.
-            trailN = 0
+            scene.clearTrail()
             return
         }
         goalFlash = 1.2f
         goalByPlayer = byPlayer
-        trailN = 0
+        scene.clearTrail()
+        scene.goal(byPlayer)
         if (byPlayer) {
             playerGoals++
             streak++
@@ -435,144 +419,27 @@ class AirHockeyGame : BaseMiniGame() {
         look(CX, 560f, 800f, CX, 0f, 320f, fovDeg = 50f)
     }
     private val pt = FloatArray(3)
-    private val board = HockeyArt.Scoreboard()
-
-    private val table: Model by lazy {
-        val b = ModelBuilder()
-        b.quad(RL, 0f, RT, RR, 0f, RT, RR, 0f, RB, RL, 0f, RB, HockeyArt.surface((RR - RL).toInt(), (RB - RT).toInt(), GOAL_HALF).full, 0f, 1f, 0f)
-        val rail = HockeyArt.rail.full
-        val body = HockeyArt.body.full
-        // Side rails and the end rails either side of each goal slot.
-        b.box(RL - 16f, 0f, RT - 16f, RL, RAIL_H, RB + 16f, BoxFaces(top = rail, right = rail, front = rail))
-        b.box(RR, 0f, RT - 16f, RR + 16f, RAIL_H, RB + 16f, BoxFaces(top = rail, left = rail, front = rail))
-        for (end in 0..1) {
-            val z0 = if (end == 0) RT - 16f else RB
-            val z1 = z0 + 16f
-            val faces = BoxFaces(top = rail, front = rail)
-            b.box(RL, 0f, z0, CX - GOAL_HALF, RAIL_H, z1, faces)
-            b.box(CX + GOAL_HALF, 0f, z0, RR, RAIL_H, z1, faces)
-            // The goal slot: a dark pocket below the rail.
-            b.quad(CX - GOAL_HALF, -30f, z0, CX + GOAL_HALF, -30f, z0, CX + GOAL_HALF, -30f, z1, CX - GOAL_HALF, -30f, z1, HockeyArt.slot.full, 0f, 1f, 0f)
-            b.box(CX - GOAL_HALF, RAIL_H - 4f, z0, CX + GOAL_HALF, RAIL_H, z1, BoxFaces(top = rail, front = rail))
-        }
-        // Rounded corners: a curved rail filling each corner of the rink.
-        val halfW = (RR - RL) / 2f
-        val halfH = (RB - RT) / 2f
-        for (sx in floatArrayOf(-1f, 1f)) for (sz in floatArrayOf(-1f, 1f)) {
-            val ccx = CX + sx * (halfW - CORNER_R)
-            val ccz = CY + sz * (halfH - CORNER_R)
-            val kx = CX + sx * halfW
-            val kz = CY + sz * halfH
-            val n = 6
-            for (i in 0 until n) {
-                val t0 = i / n.toFloat() * (Math.PI.toFloat() / 2f)
-                val t1 = (i + 1) / n.toFloat() * (Math.PI.toFloat() / 2f)
-                val ax = ccx + sx * cos(t0) * CORNER_R
-                val az = ccz + sz * sin(t0) * CORNER_R
-                val bx = ccx + sx * cos(t1) * CORNER_R
-                val bz = ccz + sz * sin(t1) * CORNER_R
-                b.quad(kx, RAIL_H, kz, kx, RAIL_H, kz, ax, RAIL_H, az, bx, RAIL_H, bz, rail, 0f, 1f, 0f, cull = false)
-                val tm = (t0 + t1) / 2f
-                b.quad(ax, RAIL_H, az, bx, RAIL_H, bz, bx, 0f, bz, ax, 0f, az, rail, -sx * cos(tm), 0f, -sz * sin(tm), cull = false)
-            }
-        }
-        // Table body under the rink, and the base below it.
-        b.box(RL - 16f, -160f, RT - 16f, RR + 16f, 0f, RB + 16f, BoxFaces(front = body, left = body, right = body))
-        // Scoreboard post behind the far goal.
-        val post = HockeyArt.post.full
-        b.box(CX - 6f, 0f, RT - 40f, CX + 6f, 150f, RT - 30f, BoxFaces(front = post, left = post, right = post))
-        b.box(CX - 100f, 150f, RT - 44f, CX + 100f, 220f, RT - 32f, BoxFaces(top = HockeyArt.body.full, left = post, right = post, front = post))
-        b.build()
-    }
-
-    private val puckModel: Model by lazy {
-        ModelBuilder().cylinder(0f, 0f, 0f, 5f, PUCK_R, 14, HockeyArt.puckSide.full, top = HockeyArt.puckTop.full).build()
-    }
-    private fun malletModel(side: Int, top: Int): Model {
-        val s = HockeyArt.malletSide(side).full
-        val t = HockeyArt.malletTop(top).full
-        return ModelBuilder()
-            .cylinder(0f, 0f, 0f, 8f, MALLET_R, 16, s, top = t)
-            .cylinder(0f, 0f, 8f, 20f, 8f, 10, s, top = HockeyArt.knob(side).full)
-            .build()
-    }
-    private val myMallet by lazy { malletModel(Pal.BLUE, Pal.CYAN) }
-    private val cpuMallet by lazy { malletModel(Pal.DARKRED, Pal.PINK) }
-    private val xf = Xform()
-
-    private val lamp = PointLight(CX, 380f, CY, 1f, 0.95f, 0.9f, 640f, 1.05f)
-    private val goalLight = PointLight(CX, 60f, RT, 0.4f, 1f, 1f, 260f, 0f)
 
     override fun render(scope: DrawScope) {
         val r = stage.begin()
-        val l = r.lighting
-        l.ambR = 0.5f; l.ambG = 0.52f; l.ambB = 0.62f
-        l.setDirection(0f, 1f, 0.5f)
-        l.dirR = 0.3f; l.dirG = 0.3f; l.dirB = 0.32f
-        l.points.clear()
-        l.points += lamp
-        if (goalFlash > 0f) {
-            goalLight.z = if (goalByPlayer) RT else RB
-            if (goalByPlayer) {
-                goalLight.r = 0.4f; goalLight.g = 1f; goalLight.b = 1f
-            } else {
-                goalLight.r = 1f; goalLight.g = 0.3f; goalLight.b = 0.3f
-            }
-            goalLight.intensity = clamp01(goalFlash) * 2f
-            l.points += goalLight
-        }
+        scene.light(r, puck.x, puck.y, puckLive, goalFlash, goalByPlayer)
         r.gradient(0xFF040812.toInt(), Pal.shade(Pal.NAVY, 0.7f))
-        table.draw(r)
-        board.paint(playerGoals, cpuGoals, goalFlash > 0f && (time * 8f).toInt() % 2 == 0)
-        r.quad(CX - 94f, 214f, RT - 31.5f, CX + 94f, 214f, RT - 31.5f, CX + 94f, 156f, RT - 31.5f, CX - 94f, 156f, RT - 31.5f, board.tex.full, 0f, 0f, 1f, emissive = 1f)
-        drawNeon(r)
-
-        // Shadows, then the puck and mallets.
-        val sh = TexKit.shadow.full
-        r.flat(puck.x + 3f, puck.y + 4f, 0.4f, PUCK_R * 2.6f, PUCK_R * 2.6f, sh, blend = Blend.ALPHA, alpha = 0.5f)
-        r.flat(me.x + 4f, me.y + 5f, 0.4f, MALLET_R * 2.6f, MALLET_R * 2.6f, sh, blend = Blend.ALPHA, alpha = 0.5f)
-        r.flat(cpu.x + 4f, cpu.y + 5f, 0.4f, MALLET_R * 2.6f, MALLET_R * 2.6f, sh, blend = Blend.ALPHA, alpha = 0.5f)
-        if (puckLive || serveT < 0.9f) {
-            xf.set(puck.x, 0f, puck.y)
-            puckModel.draw(r, xf = xf)
-        }
-        xf.set(cpu.x, 0f, cpu.y)
-        cpuMallet.draw(r, xf = xf)
-        xf.set(me.x, 0f, me.y)
-        myMallet.draw(r, xf = xf)
-
-        val glow = TexKit.glow.full
-        val sp = len(puck.vx, puck.vy)
-        if (puckLive && sp > 300f) {
-            val a = clamp01((sp - 300f) / 700f)
-            for (i in 1 until trailN) {
-                val k = 1f - i / trailN.toFloat()
-                r.flat(trailX[i], trailY[i], 1f, PUCK_R * 3f * k, PUCK_R * 3f * k, glow, blend = Blend.ADD, emissive = 1f, alpha = a * k * 0.6f, tint = Pal.CYAN)
-            }
-        }
-        if (!puckLive && serveT > 0f && !timeUp && !endedEarly) {
-            val blink = 0.5f + 0.5f * sin(time * 12f)
-            r.flat(puck.x, puck.y, 1f, 60f, 60f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.4f * blink, tint = Pal.WHITE)
-        }
+        scene.updateBoard(playerGoals, cpuGoals)
+        scene.drawRoom(r, time, goalFlash, goalByPlayer)
+        scene.drawTable(r, time, goalFlash, goalByPlayer)
+        scene.drawScoreboard(r, time, goalFlash, goalByPlayer)
+        scene.drawPieces(
+            r, time,
+            puck.x, puck.y, puck.vx, puck.vy, puckLive || serveT < 0.9f, puckLive,
+            me.x, me.y, len(me.vx, me.vy), cpu.x, cpu.y, len(cpu.vx, cpu.vy),
+            serveT, !timeUp && !endedEarly,
+        )
+        scene.drawEffects(r)
         stage.present()
 
         if (dragging < 0 && !timeUp && time < 4f) {
             val a = 0.5f + 0.5f * sin(time * 6f)
             ArcadeFont.drawCentered(scope, "DRAG YOUR MALLET", GAME_W / 2f, 612f, 2f, Color.White, a)
-        }
-    }
-
-    private fun drawNeon(r: Renderer3D) {
-        val glow = TexKit.glow.full
-        val pulse = 0.35f + 0.1f * sin(time * 3f)
-        // Neon strips along the table's sides.
-        for (x in floatArrayOf(RL - 17f, RR + 17f)) {
-            r.beam(x, -2f, RT - 16f, x, -2f, RB + 16f, 3f, TexKit.white.full, emissive = 1.3f, tint = Pal.CYAN)
-            r.beam(x, -2f, RT - 16f, x, -2f, RB + 16f, 18f, glow, blend = Blend.ADD, emissive = 1f, alpha = pulse, tint = Pal.CYAN)
-        }
-        if (goalFlash > 0f) {
-            val z = if (goalByPlayer) RT - 8f else RB + 8f
-            r.flat(CX, z, RAIL_H + 1f, GOAL_HALF * 3f, 60f, glow, blend = Blend.ADD, emissive = 1f, alpha = clamp01(goalFlash), tint = if (goalByPlayer) Pal.CYAN else Pal.RED)
         }
     }
 
@@ -602,18 +469,93 @@ class AirHockeyGame : BaseMiniGame() {
 
     // ---------------------------------------------------------------- attract mode
 
+    /** A triangle wave: 0 to 1 and back, once per 2 units of [v]. */
+    private fun tri(v: Float): Float {
+        val m = ((v % 2f) + 2f) % 2f
+        return if (m < 1f) m else 2f - m
+    }
+
+    /**
+     * The table seen from above in miniature: neon markings on a dark surface, a puck with a hot
+     * trail ricocheting between two mallets, and every seven seconds a goal in the far slot with
+     * a flash, a burst and GOAL!, after an "AIR HOCKEY" title card. [w] × [h] is the cabinet's
+     * small screen.
+     */
     override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) {
-        p.fill(0, 0, w, h, Color(Pal.NAVY))
-        p.fill(0f, h / 2f, w.toFloat(), 0.5f, Color(Pal.RED))
-        p.fill(w / 2f - 3f, 0f, 6f, 1f, Color(Pal.BLACK))
-        p.fill(w / 2f - 3f, h - 1f, 6f, 1f, Color(Pal.BLACK))
-        val t = time * 1.7f
-        val px = w / 2f + sin(t * 1.3f) * (w / 2f - 2f)
-        val py = h / 2f + sin(t) * (h / 2f - 2f)
-        p.disc(px, py, 1f, Color.White)
-        val mx = w / 2f + sin(t * 1.3f - 0.4f) * (w / 2f - 4f)
-        p.disc(mx, h - 2.5f, 1.8f, Color(Pal.CYAN))
-        p.disc(w / 2f + cos(t) * 4f, 2.5f, 1.8f, Color(Pal.PINK))
-        if ((time * 1.5f).toInt() % 2 == 0) p.textCentered("GOAL", w / 2f, h / 2f - 6f, Color(Pal.YELLOW), tiny = true)
+        val wf = w.toFloat()
+        val hf = h.toFloat()
+        val cx = wf / 2f
+        val cyc = 7f
+        val tt = time % cyc
+        val goalAt = 5.6f
+        // The table: navy playfield in a glowing frame, a wash of each team's colour, air holes.
+        p.fill(0f, 0f, wf, hf, Color(0xFF071228.toInt()))
+        p.fill(1.2f, 1.2f, wf - 2.4f, hf - 2.4f, Color(0xFF0C1E44.toInt()))
+        p.fill(1.2f, 1.2f, wf - 2.4f, (hf - 2.4f) / 2f, Color(Pal.PINK), 0.07f)
+        p.fill(1.2f, hf / 2f, wf - 2.4f, (hf - 2.4f) / 2f, Color(Pal.CYAN), 0.07f)
+        for (gy in 0 until 6) for (gx in 0 until 8) p.disc(2.4f + gx * 2.7f, 2.4f + gy * 2.6f, 0.16f, Color(0xFF2E5C96.toInt()), 0.8f)
+        p.frame(0.3f, 0.3f, wf - 0.6f, hf - 0.6f, Color(Pal.SKY), 0.85f)
+        // Centre line and ring, and the two goal slots with their team glow.
+        p.fill(1.2f, hf / 2f - 0.25f, wf - 2.4f, 0.5f, Color(0xFFB8F4FF.toInt()), 0.9f)
+        for (k in 0 until 16) {
+            val a = k / 16f * 6.2832f
+            p.disc(cx + cos(a) * 3.4f, hf / 2f + sin(a) * 3.4f, 0.3f, Color(0xFFB8F4FF.toInt()), 0.8f)
+        }
+        p.fill(cx - 3.4f, 0f, 6.8f, 1.3f, Color(0xFF020308.toInt()))
+        p.fill(cx - 3.4f, hf - 1.3f, 6.8f, 1.3f, Color(0xFF020308.toInt()))
+        p.fill(cx - 3.4f, 1.3f, 6.8f, 0.4f, Color(Pal.HOTPINK), 0.9f)
+        p.fill(cx - 3.4f, hf - 1.7f, 6.8f, 0.4f, Color(Pal.CYAN), 0.9f)
+
+        // The puck ricochets round the table; in the goal spell it is driven into the far slot.
+        val px: Float
+        val py: Float
+        fun bounceX(t: Float) = 2.4f + (wf - 4.8f) * tri(t * 0.62f + 0.2f)
+        fun bounceY(t: Float) = 2.8f + (hf - 5.6f) * tri(t * 0.91f + 0.35f)
+        if (tt < goalAt) {
+            px = bounceX(tt)
+            py = bounceY(tt)
+            for (k in 4 downTo 1) {
+                val u = (tt - k * 0.05f).coerceAtLeast(0f)
+                p.disc(bounceX(u), bounceY(u), 0.9f * (1f - k * 0.16f), Color(Pal.ORANGE), 0.5f - k * 0.09f)
+            }
+        } else {
+            val u = clamp01((tt - goalAt) / 0.45f)
+            px = lerp(bounceX(goalAt), cx, u)
+            py = lerp(bounceY(goalAt), -0.8f, u)
+            for (k in 4 downTo 1) {
+                val uu = clamp01((tt - goalAt - k * 0.04f) / 0.45f)
+                p.disc(lerp(bounceX(goalAt), cx, uu), lerp(bounceY(goalAt), -0.8f, uu), 0.9f * (1f - k * 0.16f), Color(Pal.ORANGE), 0.5f - k * 0.09f)
+            }
+        }
+        // Mallets follow it: cyan at the near end, pink at the far.
+        val meX = cx + (bounceX(tt - 0.25f) - cx) * 0.85f
+        val cpuX = cx + (cx - bounceX(tt - 0.1f)) * 0.7f
+        p.disc(meX, hf - 3.1f, 2.3f, Color(Pal.CYAN), 0.22f)
+        p.disc(meX, hf - 3.1f, 1.5f, Color(0xFF29C8E8.toInt()))
+        p.disc(meX - 0.35f, hf - 3.45f, 0.55f, Color(0xFFB8F4FF.toInt()), 0.8f)
+        p.disc(cpuX, 3.1f, 2.3f, Color(Pal.PINK), 0.22f)
+        p.disc(cpuX, 3.1f, 1.5f, Color(0xFFE8408C.toInt()))
+        p.disc(cpuX - 0.35f, 2.75f, 0.55f, Color(0xFFFFD0E8.toInt()), 0.8f)
+        p.disc(px, py, 1.05f, Color(0xFFE0421E.toInt()))
+        p.disc(px, py, 0.5f, Color(0xFFFFE0B0.toInt()))
+
+        // The goal: the far end floods cyan, sparks fly from the slot and GOAL! flashes.
+        val age = tt - goalAt - 0.45f
+        if (age in 0f..1.5f) {
+            val fade = 1f - age / 1.5f
+            p.fill(1.2f, 1.2f, wf - 2.4f, hf * 0.4f, Color(Pal.CYAN), 0.3f * fade)
+            for (i in 0 until 10) {
+                val a = 0.35f + i / 9f * 2.4f
+                val d = age * 9f
+                p.disc(cx + cos(a) * d, 0.6f + sin(a) * d, 0.35f, if (i % 2 == 0) Color.White else Color(Pal.YELLOW), fade)
+            }
+            if ((age * 6f).toInt() % 2 == 0) p.textCentered("GOAL!", cx, hf / 2f - 2.4f, Color(Pal.YELLOW), tiny = true, size = 0.9f)
+        }
+        // Title card at the top of each loop.
+        if (tt < 1.6f) {
+            val a = clamp01(minOf(tt / 0.2f, (1.6f - tt) / 0.4f))
+            p.fill(1.2f, hf / 2f - 3.1f, wf - 2.4f, 6.2f, Color(0xFF020308.toInt()), 0.6f * a)
+            p.textCentered("AIR HOCKEY", cx, hf / 2f - 1.6f, Color(Pal.CYAN), tiny = true, alpha = a, size = 0.62f)
+        }
     }
 }
