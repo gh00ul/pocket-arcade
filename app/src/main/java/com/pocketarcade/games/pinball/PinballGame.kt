@@ -775,12 +775,16 @@ class PinballGame : BaseMiniGame() {
         }
         // A plunge too weak to clear the gate rolls back onto the plunger.
         if (b.x > T.PLAY_W && b.y >= T.LANE_REST_Y - 0.5f && b.vy >= 0f) {
+            // The machine only plunges it if the player can't: another ball is already waiting on
+            // the plunger or is in play. Asked before the ball goes back to the lane, or it would
+            // find itself waiting there and always be plunged for free.
+            val autoPlunge = laneBall() >= 0 || liveBalls() > 1
             b.state = LANE
             b.x = T.LANE_X
             b.y = T.LANE_REST_Y
             b.vx = 0f
             b.vy = 0f
-            b.autoT = if (laneBall() >= 0 || liveBalls() > 1) AUTO_DELAY else -1f
+            b.autoT = if (autoPlunge) AUTO_DELAY else -1f
             return
         }
         // Top rollovers.
