@@ -1,23 +1,23 @@
 package com.pocketarcade.games.pinball
 
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
-import com.pocketarcade.engine.Particles
+import com.pocketarcade.engine.ScreenShake
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.TAU
 import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.approach
+import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.r3d.Blend
 import com.pocketarcade.engine.r3d.PointLight
 import com.pocketarcade.engine.r3d.Renderer3D
 import com.pocketarcade.engine.r3d.Stage3D
 import com.pocketarcade.engine.r3d.TexKit
 import com.pocketarcade.engine.r3d.Xform
+import com.pocketarcade.engine.r3d.mixArgb
 import com.pocketarcade.games.BaseMiniGame
 import com.pocketarcade.games.CabinetLook
 import com.pocketarcade.games.CabinetShape
@@ -148,6 +148,55 @@ class PinballGame : BaseMiniGame() {
         const val AUTO_DELAY = 0.6f
         const val MSG_SECONDS = 1.6f
 
+        // Ball trail: samples kept, seconds between them, and how it looks (it fades in above a
+        // walking pace and is full strength by a fast shot).
+        const val TRAIL_N = 9
+        const val TRAIL_DT = 1f / 90f
+        const val TRAIL_MIN_SPEED = 260f
+        const val TRAIL_FULL_SPEED = 900f
+        const val TRAIL_WIDTH = 11f
+        const val TRAIL_ALPHA = 0.5f
+        const val TRAIL_Y = 6f
+
+        // Look: every number here only changes how the table is lit and drawn.
+        /** The backglass light washing over the table: reach, resting strength and extra on a mood pulse. */
+        const val BACK_LIGHT_R = 330f
+        const val BACK_LIGHT_BASE = 0.45f
+        const val BACK_LIGHT_PULSE = 0.55f
+        /** The flash at the last event on the table (a sling, a target, a lane, the orbit). */
+        const val EVENT_LIGHT_R = 130f
+        const val EVENT_LIGHT_I = 1.1f
+        /** The light riding each ball: height, reach and strength. */
+        const val BALL_LIGHT_Y = 26f
+        const val BALL_LIGHT_R = 78f
+        const val BALL_LIGHT_I = 0.42f
+        /** Rail strips and side stripes: resting brightness, the breathing swing and the extra on a mood pulse. */
+        const val RAIL_GLOW_BASE = 0.6f
+        const val RAIL_GLOW_SWING = 0.12f
+        const val RAIL_GLOW_PULSE = 0.9f
+        /** The dot-matrix quad's emissive strength (its brightest dot is what reaches the bloom). */
+        const val DMD_GLOW = 1.25f
+        /** Backglass rays: turning speed (radians a second), radius and centre height in table units, and strength. */
+        const val RAY_SPIN = 0.22f
+        const val RAY_R = 76f
+        const val RAY_CY = 130f
+        const val RAY_ALPHA = 0.22f
+        /** The shimmer band that crosses the glass: how often, how long, how wide and how strong. */
+        const val SHIMMER_PERIOD = 9f
+        const val SHIMMER_SECONDS = 1.7f
+        const val SHIMMER_W = 92f
+        const val SHIMMER_ALPHA = 0.32f
+        /** Full-glass wash in the mood colour, at full pulse. */
+        const val WASH_ALPHA = 0.22f
+        /** Frame bulbs: chase speed (steps a second) normally and in a big moment, and the unlit level. */
+        const val BULB_SLOW = 5f
+        const val BULB_FAST = 11f
+        const val BULB_DIM = 0.16f
+        /** Bumper shock wave: how far it grows past the bumper and how bright it starts. */
+        const val SHOCK_GROW = 84f
+        const val SHOCK_ALPHA = 0.8f
+        const val SLING_BEAM_W = 7f
+
         val BUMPER_COLORS = intArrayOf(Pal.HOTPINK, Pal.CYAN, Pal.YELLOW)
         val HIT_PINK = intArrayOf(Pal.HOTPINK, Pal.PINK, Pal.WHITE)
         val HIT_CYAN = intArrayOf(Pal.CYAN, Pal.SKY, Pal.WHITE)
@@ -262,6 +311,21 @@ class PinballGame : BaseMiniGame() {
     private var lastLaunchSpeed = 0f
     private var launches = 0
 
+    // Presentation only: read by render(), written by the step's timers and event hooks, and
+    // never looked at by the rules or the physics (nor do they touch the game's random numbers).
+    private val trailX = FloatArray(MAX_BALLS * TRAIL_N)
+    private val trailY = FloatArray(MAX_BALLS * TRAIL_N)
+    private val trailCount = IntArray(MAX_BALLS)
+    private var trailAcc = 0f
+    /** The colour the table's lamps and backglass lean towards, and how strongly right now (0..1, decaying). */
+    private var moodColor = Pal.HOTPINK
+    private var moodPulse = 0f
+    /** A short-lived light at the last event on the table (a sling kick, a target, a lane, the orbit). */
+    private var evtX = 0f
+    private var evtZ = 0f
+    private var evtColor = Pal.WHITE
+    private var evtT = 0f
+
     private val labels = arrayOfNulls<String>(4096)
 
     override fun reset() {
@@ -297,6 +361,10 @@ class PinballGame : BaseMiniGame() {
         spinSpeed = 0f
         spinScored = 0f
         jackpotFlash = 0f
+        trailCount.fill(0)
+        trailAcc = 0f
+        moodPulse = 0f
+        evtT = 0f
         drains = 0
         failsafeTrips = 0
         searchKicksTotal = 0
@@ -555,6 +623,30 @@ class PinballGame : BaseMiniGame() {
             collideBalls()
         }
         for (b in balls) if (b.state == PLAY) afterStep(b, dt)
+        stepTrails(dt)
+    }
+
+    /** Records where each ball was, a few dozen times a second, for the light trail it drags. */
+    private fun stepTrails(dt: Float) {
+        trailAcc += dt
+        if (trailAcc < TRAIL_DT) return
+        trailAcc = if (trailAcc > 2f * TRAIL_DT) 0f else trailAcc - TRAIL_DT
+        for (i in 0 until MAX_BALLS) {
+            val b = balls[i]
+            if (b.state != PLAY) {
+                trailCount[i] = 0
+                continue
+            }
+            val o = i * TRAIL_N
+            val n = minOf(trailCount[i] + 1, TRAIL_N)
+            for (k in n - 1 downTo 1) {
+                trailX[o + k] = trailX[o + k - 1]
+                trailY[o + k] = trailY[o + k - 1]
+            }
+            trailX[o] = b.x
+            trailY[o] = b.y
+            trailCount[i] = n
+        }
     }
 
     private fun stepTimers(dt: Float) {
@@ -570,6 +662,8 @@ class PinballGame : BaseMiniGame() {
             slingCool[i] -= dt
         }
         jackpotFlash = (jackpotFlash - dt * 1.5f).coerceAtLeast(0f)
+        moodPulse = (moodPulse - dt * 1.1f).coerceAtLeast(0f)
+        evtT = (evtT - dt * 4.5f).coerceAtLeast(0f)
         messageT -= dt
         if (ballSaveT > 0f) ballSaveT -= dt
         tiltMeter = (tiltMeter - PinballTuning.TILT_DECAY * dt).coerceAtLeast(0f)
@@ -866,6 +960,26 @@ class PinballGame : BaseMiniGame() {
     private fun show(m: Int) {
         message = m
         messageT = MSG_SECONDS
+        when (m) {
+            M_MULTIBALL -> pulseMood(Pal.CYAN, 1f)
+            M_JACKPOT, M_BANK -> pulseMood(Pal.GOLD, 1f)
+            M_SAVED -> pulseMood(Pal.LIME, 0.8f)
+            M_TILT -> pulseMood(Pal.RED, 1f)
+            M_LANES, M_ORBIT -> pulseMood(Pal.SKY, 0.7f)
+            M_NONE -> {}
+            else -> pulseMood(Pal.HOTPINK, 0.5f)
+        }
+    }
+
+    /** Tints the backglass, rails and table wash towards [color] for a moment. */
+    private fun pulseMood(color: Int, amount: Float) {
+        moodColor = color
+        moodPulse = maxOf(moodPulse, amount)
+    }
+
+    /** A flash of light at ([x], [z]) on the table, fading in about a fifth of a second. */
+    private fun eventLight(x: Float, z: Float, color: Int) {
+        evtX = x; evtZ = z; evtColor = color; evtT = 1f
     }
 
     private fun bumper(b: Ball, i: Int) {
@@ -896,6 +1010,7 @@ class PinballGame : BaseMiniGame() {
         val sx = if (i == 0) (T.SLING_AX + T.SLING_CX) / 2f else T.PLAY_W - (T.SLING_AX + T.SLING_CX) / 2f
         val sy = (T.SLING_AY + T.SLING_CY) / 2f
         award(PinballTuning.SLING_POINTS, sx, sy, Pal.LIME, popup = false)
+        eventLight(sx, sy, Pal.LIME)
         play(Sfx.SLINGSHOT, 0.8f, 0.95f + i * 0.1f)
         fx.haptics.tick()
         shake.add(0.05f)
@@ -908,6 +1023,7 @@ class PinballGame : BaseMiniGame() {
         dropFlash[i] = 1f
         val ty = T.DROP_Y0[i] + T.DROP_LEN / 2f
         award(PinballTuning.DROP_POINTS, T.DROP_X, ty, Pal.ORANGE, popup = true)
+        eventLight(T.DROP_X - 14f, ty, DROP_COLORS[i])
         play(Sfx.THUD, 0.7f, 1.4f)
         fx.haptics.hit()
         burstAt(T.DROP_X, ty, 10, HIT_GOLD, 150f)
@@ -934,6 +1050,7 @@ class PinballGame : BaseMiniGame() {
     private fun rollover(i: Int) {
         if (tilted || timeUp) return
         laneFlash[i] = 1f
+        eventLight(T.ROLLOVER_X[i], T.ROLLOVER_Y + 22f, Pal.SKY)
         if (laneLit[i]) {
             award(PinballTuning.LANE_REPEAT_POINTS, T.ROLLOVER_X[i], T.ROLLOVER_Y, Pal.SKY, popup = false)
             play(Sfx.BLIP, 0.4f, 0.9f)
@@ -955,6 +1072,7 @@ class PinballGame : BaseMiniGame() {
         if (multiball) {
             jackpots++
             jackpotFlash = 1f
+            eventLight(24f, T.SPINNER_Y, Pal.GOLD)
             award(PinballTuning.JACKPOT_POINTS, 60f, 260f, Pal.GOLD, popup = true)
             show(M_JACKPOT)
             play(Sfx.JACKPOT)
@@ -964,6 +1082,7 @@ class PinballGame : BaseMiniGame() {
             burstAt(20f, T.SPINNER_Y, 30, HIT_GOLD, 260f)
         } else {
             award(PinballTuning.ORBIT_POINTS, 40f, T.SPINNER_Y, Pal.CYAN, popup = true)
+            eventLight(24f, T.SPINNER_Y, Pal.CYAN)
             show(M_ORBIT)
         }
     }
@@ -978,30 +1097,40 @@ class PinballGame : BaseMiniGame() {
     private val upperLight = PointLight(T.CX, 150f, 150f, 1f, 0.85f, 0.95f, 420f, 0.9f)
     private val lowerLight = PointLight(T.CX, 140f, 470f, 0.85f, 0.9f, 1f, 380f, 0.8f)
     private val hitLight = PointLight(T.CX, 40f, 200f, 1f, 1f, 1f, 170f, 0f)
+
+    /** The backglass glow washing down over the top of the table, tinted by the mood. */
+    private val backLight = PointLight(T.CX + 14f, 90f, -6f, 1f, 0.5f, 0.8f, BACK_LIGHT_R, 0.5f)
+    private val eventPoint = PointLight(T.CX, 26f, 200f, 1f, 1f, 1f, EVENT_LIGHT_R, 0f)
+
+    /** A soft light riding each ball, so the felt and rails near it pick up its glint. */
+    private val ballLights = Array(MAX_BALLS) { PointLight(0f, BALL_LIGHT_Y, 0f, 0.78f, 0.86f, 1f, BALL_LIGHT_R, 0f) }
     private val xf = Xform()
 
-    /** Where the backbox's score display sits on the field (computed once from the camera). */
-    private val dmd = FloatArray(4).also {
-        stage.toField(40f, PinballArt.DMD_TOP, PinballArt.BACKBOX_Z, pt)
-        it[0] = pt[0]; it[1] = pt[1]
-        stage.toField(260f, PinballArt.DMD_BOTTOM, PinballArt.BACKBOX_Z, pt)
-        it[2] = pt[0]; it[3] = pt[1]
-    }
+    /** The backbox display: a dot-matrix painted lazily on the first frame (never in a headless test). */
+    private val dmd by lazy { PinballDmd() }
     private var scoreShown = -1
     private var scoreText = "0"
+
+    /** Reduce motion turns flashes down to a third of their strength (persistent glow is unchanged). */
+    private val fxK: Float get() = 0.35f + 0.65f * ScreenShake.intensity
 
     override fun render(scope: DrawScope) {
         val r = stage.begin()
         light(r)
         r.gradient(0xFF05030C.toInt(), Pal.NIGHT)
         PinballArt.table.draw(r)
+        drawRailGlow(r)
+        drawBackbox(r)
+        drawTableWash(r)
         drawBumpers(r)
         drawSlings(r)
         drawTargets(r)
         drawSpinner(r)
+        drawFlipperShadows(r)
         drawFlippers(r)
         drawPlunger(r)
         drawLamps(r)
+        drawTrails(r)
         for (b in balls) if (b.state != OFF) drawBall(r, b)
         // The playfield glass: the room reflected in it, then a faint sheen of streaks.
         r.quad(
@@ -1013,8 +1142,23 @@ class PinballGame : BaseMiniGame() {
             PinballArt.glassStreaks.full, 0f, 1f, 0f, blend = Blend.ADD, emissive = 1f, alpha = 0.16f, cull = false,
         )
         stage.present()
-        drawDmd(scope)
         drawHints(scope)
+    }
+
+    /** The colour the backglass and rails are giving off now: pink at rest, leaning to the last event's colour, cycling in multiball. */
+    private fun moodNow(): Int {
+        val base = when {
+            tilted -> Pal.RED
+            multiball -> Pal.mix(Pal.PINK, Pal.CYAN, 0.5f + 0.5f * sin(time * 3f))
+            else -> Pal.HOTPINK
+        }
+        return Pal.mix(base, moodColor, moodPulse)
+    }
+
+    private fun PointLight.rgb(argb: Int) {
+        r = (argb shr 16 and 255) / 255f
+        g = (argb shr 8 and 255) / 255f
+        b = (argb and 255) / 255f
     }
 
     private fun light(r: Renderer3D) {
@@ -1025,21 +1169,167 @@ class PinballGame : BaseMiniGame() {
         l.points.clear()
         l.points += upperLight
         l.points += lowerLight
+        backLight.rgb(moodNow())
+        backLight.intensity = BACK_LIGHT_BASE + BACK_LIGHT_PULSE * moodPulse * fxK + (if (multiball) 0.12f else 0f)
+        l.points += backLight
         var hot = -1
         for (i in 0 until 3) if (bumperFlash[i] > 0f && (hot < 0 || bumperFlash[i] > bumperFlash[hot])) hot = i
         if (hot >= 0) {
-            val c = BUMPER_COLORS[hot]
             hitLight.x = T.BUMPER_X[hot]; hitLight.z = T.BUMPER_Y[hot]
-            hitLight.r = (c shr 16 and 255) / 255f
-            hitLight.g = (c shr 8 and 255) / 255f
-            hitLight.b = (c and 255) / 255f
+            hitLight.rgb(BUMPER_COLORS[hot])
             hitLight.intensity = bumperFlash[hot] * 1.4f
             l.points += hitLight
         }
+        if (evtT > 0f) {
+            eventPoint.x = evtX; eventPoint.z = evtZ
+            eventPoint.rgb(evtColor)
+            eventPoint.intensity = evtT * EVENT_LIGHT_I * fxK
+            l.points += eventPoint
+        }
+        for (i in 0 until MAX_BALLS) {
+            val b = balls[i]
+            if (b.state != PLAY) continue
+            val bl = ballLights[i]
+            bl.x = b.x; bl.z = b.y
+            bl.intensity = BALL_LIGHT_I
+            l.points += bl
+        }
+    }
+
+    /** The floor strips along the outer rails and the racing stripes on the side walls, breathing with the mood. */
+    private fun drawRailGlow(r: Renderer3D) {
+        val breathe = RAIL_GLOW_BASE + RAIL_GLOW_SWING * sin(time * 2.2f) + RAIL_GLOW_PULSE * moodPulse * fxK + (if (multiball) 0.2f else 0f)
+        val tint = if (moodPulse > 0.05f) mixArgb(-1, moodColor, moodPulse * 0.75f) else -1
+        PinballArt.railGlow.draw(r, emissiveBoost = breathe, tint = tint)
+    }
+
+    /**
+     * The backbox's moving light: rays turning behind the title, a shimmer crossing the glass now
+     * and then, a wash in the mood colour when something happens, the dot-matrix display itself
+     * and the bulbs chasing round its frame. Each is one or two quads.
+     */
+    private fun drawBackbox(r: Renderer3D) {
+        val z = PinballArt.BACKBOX_Z
+        val mood = moodNow()
+        val cx = (PinballArt.GLASS_X0 + PinballArt.GLASS_X1) / 2f
+        // Rays: a square of the ray texture turning about the middle of the title.
+        val a = time * RAY_SPIN
+        val rc = cos(a) * RAY_R
+        val rs = sin(a) * RAY_R
+        val ry = RAY_CY
+        val rayTex = PinballArt.rays.full
+        r.quad(
+            cx + (-rc - rs), ry + (-rs + rc), z + 0.35f, cx + (rc - rs), ry + (rs + rc), z + 0.35f,
+            cx + (rc + rs), ry + (rs - rc), z + 0.35f, cx + (-rc + rs), ry + (-rs - rc), z + 0.35f,
+            rayTex, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1f,
+            alpha = RAY_ALPHA + 0.06f * sin(time * 1.7f) + 0.2f * moodPulse * fxK, cull = false, tint = mood, depthBias = 1.02f,
+        )
+        // Shimmer: a soft vertical band that crosses the glass, clipped to it, every few seconds.
+        val ph = (time % SHIMMER_PERIOD) / SHIMMER_SECONDS
+        if (ph < 1f) {
+            val bw = SHIMMER_W
+            val bc = PinballArt.GLASS_X0 - bw * 0.5f + ph * (PinballArt.GLASS_X1 - PinballArt.GLASS_X0 + bw)
+            val x0 = maxOf(bc - bw / 2f, PinballArt.GLASS_X0)
+            val x1 = minOf(bc + bw / 2f, PinballArt.GLASS_X1)
+            if (x1 > x0) {
+                val tex = PinballArt.shimmer.full
+                val u0 = (x0 - (bc - bw / 2f)) / bw * tex.w
+                val u1 = (x1 - (bc - bw / 2f)) / bw * tex.w
+                r.quad(
+                    x0, PinballArt.GLASS_Y1, z + 0.4f, x1, PinballArt.GLASS_Y1, z + 0.4f,
+                    x1, PinballArt.GLASS_Y0, z + 0.4f, x0, PinballArt.GLASS_Y0, z + 0.4f,
+                    tex, 0f, 0f, 1f, u0 = u0, v0 = 0f, u1 = u1, v1 = tex.h.toFloat(),
+                    blend = Blend.ADD, emissive = 1f, alpha = SHIMMER_ALPHA, cull = false, tint = 0xFFFFE8FF.toInt(), depthBias = 1.02f,
+                )
+            }
+        }
+        // A wash over the whole glass when the mood is up.
+        if (moodPulse > 0.02f) {
+            r.quad(
+                PinballArt.GLASS_X0, PinballArt.GLASS_Y1, z + 0.45f, PinballArt.GLASS_X1, PinballArt.GLASS_Y1, z + 0.45f,
+                PinballArt.GLASS_X1, PinballArt.GLASS_Y0, z + 0.45f, PinballArt.GLASS_X0, PinballArt.GLASS_Y0, z + 0.45f,
+                TexKit.white.full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1f, alpha = WASH_ALPHA * moodPulse * fxK,
+                cull = false, tint = moodColor, depthBias = 1.02f,
+            )
+        }
+        drawDmd(r, z)
+        drawBulbs(r, z, mood)
+    }
+
+    private fun drawDmd(r: Renderer3D, z: Float) {
+        if (score != scoreShown) {
+            scoreShown = score
+            scoreText = groupDigits(score)
+        }
+        val showing = messageT > 0f && message != M_NONE
+        dmd.update(
+            time, scoreText, BALL_TEXT[ballNumber.coerceIn(1, 5)], MULT_TEXT[multiplier],
+            if (showing) MESSAGES[message] else null, MSG_SECONDS - messageT, MSG_SECONDS,
+            if (!showing) 0 else if (message == M_JACKPOT) 2 else if (message == M_MULTIBALL) 1 else 0,
+            multiball, ballSaveT > 0f && !multiball, tilted,
+        )
+        val tex = dmd.matrix.texture.full
+        r.quad(
+            PinballArt.DMD_X0, PinballArt.DMD_TOP, z + 0.6f, PinballArt.DMD_X1, PinballArt.DMD_TOP, z + 0.6f,
+            PinballArt.DMD_X1, PinballArt.DMD_BOTTOM, z + 0.6f, PinballArt.DMD_X0, PinballArt.DMD_BOTTOM, z + 0.6f,
+            tex, 0f, 0f, 1f, emissive = DMD_GLOW, cull = false, depthBias = 1.03f,
+        )
+    }
+
+    /** The score with commas ("12,340"): built only when it changes. */
+    private fun groupDigits(v: Int): String {
+        val raw = v.toString()
+        if (raw.length <= 3) return raw
+        val sb = StringBuilder()
+        for (i in raw.indices) {
+            if (i > 0 && (raw.length - i) % 3 == 0) sb.append(',')
+            sb.append(raw[i])
+        }
+        return sb.toString()
+    }
+
+    /** Bulbs round the backglass frame: a row along the top and a column down each side, chasing. */
+    private fun drawBulbs(r: Renderer3D, z: Float, mood: Int) {
+        val dot = TexKit.dot.full
+        val glow = TexKit.glow.full
+        val fast = multiball || jackpotFlash > 0f
+        val step = (time * (if (fast) BULB_FAST else BULB_SLOW)).toInt()
+        val bz = z + 2.4f
+        val top = PinballArt.GLASS_Y1 + 4f
+        var idx = 0
+        fun bulb(x: Float, y: Float) {
+            val on = (idx + step) % 3 == 0
+            val col = if (jackpotFlash > 0f) Pal.GOLD else when (idx % 3) {
+                0 -> Pal.HOTPINK
+                1 -> Pal.CYAN
+                else -> Pal.YELLOW
+            }
+            val a = if (on) 1f else BULB_DIM
+            r.sprite(x, y, bz, 7f, 7f, dot, blend = Blend.ADD, emissive = 1f, alpha = a, depthBias = 1.03f, tint = col)
+            if (on) r.sprite(x, y, bz, 19f, 19f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.55f, depthBias = 1.03f, tint = col)
+            idx++
+        }
+        val n = 14
+        for (i in 0 until n) bulb(PinballArt.GLASS_X0 - 8f + (PinballArt.GLASS_X1 - PinballArt.GLASS_X0 + 16f) * i / (n - 1f), top)
+        for (i in 0 until 6) {
+            val y = PinballArt.GLASS_Y1 - 14f - i * 27f
+            bulb(PinballArt.GLASS_X0 - 8f, y)
+            bulb(PinballArt.GLASS_X1 + 8f, y)
+        }
+        // A pool of the mood colour on the top of the table, as though the glass were lighting it.
+        r.flat(T.CX + 14f, 56f, 0.4f, 320f, 130f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.06f + 0.10f * moodPulse * fxK, tint = mood)
+    }
+
+    /** A faint colour over the whole upper playfield in multiball and after a jackpot, like the room lights swinging. */
+    private fun drawTableWash(r: Renderer3D) {
+        if (!multiball && jackpotFlash <= 0f) return
+        val col = if (jackpotFlash > 0f) Pal.GOLD else Pal.mix(Pal.PINK, Pal.CYAN, 0.5f + 0.5f * sin(time * 3f))
+        r.flat(T.CX, 200f, 0.45f, 300f, 420f, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = (0.05f + 0.07f * jackpotFlash) * fxK, tint = col)
     }
 
     private fun drawBumpers(r: Renderer3D) {
         val glow = TexKit.glow.full
+        val ring = PinballArt.ringGlow.full
         for (i in 0 until 3) {
             val x = T.BUMPER_X[i]
             val z = T.BUMPER_Y[i]
@@ -1051,6 +1341,12 @@ class PinballGame : BaseMiniGame() {
             PinballArt.bumperCap.draw(r, xf = xf, tint = BUMPER_COLORS[i], emissiveBoost = 1.35f + 0.15f * sin(time * 4f + i * 2f) + f * 1.5f)
             val a = 0.18f + 0.1f * sin(time * 3f + i) + f * 0.7f
             r.flat(x, z, 1f, 70f, 70f, glow, blend = Blend.ADD, emissive = 1f, alpha = a, tint = BUMPER_COLORS[i])
+            // A shock wave leaves the bumper on every hit: a ring that swells and fades.
+            if (f > 0.02f) {
+                val e = 1f - f
+                val d = 2f * (T.BUMPER_R + 4f) + e * SHOCK_GROW
+                r.flat(x, z, 1.3f, d, d, ring, blend = Blend.ADD, emissive = 1f, alpha = f * SHOCK_ALPHA, tint = BUMPER_COLORS[i])
+            }
         }
     }
 
@@ -1061,6 +1357,12 @@ class PinballGame : BaseMiniGame() {
             val sx = if (i == 0) (T.SLING_AX + T.SLING_CX) / 2f else T.PLAY_W - (T.SLING_AX + T.SLING_CX) / 2f
             val sy = (T.SLING_AY + T.SLING_CY) / 2f
             r.flat(sx, sy, 12.5f, 40f, 70f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.25f + f * 0.75f, tint = Pal.LIME)
+            // The kicking face flares along its length when it fires.
+            if (f > 0.02f) {
+                val ax = if (i == 0) T.SLING_AX else T.PLAY_W - T.SLING_AX
+                val cx = if (i == 0) T.SLING_CX else T.PLAY_W - T.SLING_CX
+                r.beam(cx, 12.6f, T.SLING_CY, ax, 12.6f, T.SLING_AY, SLING_BEAM_W, glow, blend = Blend.ADD, emissive = 1f, alpha = f, tint = Pal.LIME)
+            }
         }
     }
 
@@ -1093,6 +1395,21 @@ class PinballGame : BaseMiniGame() {
             tex, 0f, -s, c, cull = false, gloss = 0.8f,
         )
         r.beam(0f, y, T.SPINNER_Y, T.ORBIT_X, y, T.SPINNER_Y, 1.4f, TexKit.white.full, tint = Pal.LIGHTGRAY)
+        // A blur of light while it spins fast.
+        if (spinSpeed > 6f) {
+            r.flat(T.ORBIT_X / 2f, T.SPINNER_Y, y, T.ORBIT_X - 2f, 16f, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = (spinSpeed / 40f).coerceAtMost(0.5f), tint = Pal.CYAN)
+        }
+    }
+
+    /** A soft shadow under each flipper, turning with it (the light is high and a little behind). */
+    private fun drawFlipperShadows(r: Renderer3D) {
+        val shadow = TexKit.shadow.full
+        for (s in 0..1) {
+            val a = flipAng[s]
+            val mx = T.flipX(s) + cos(a) * T.FLIP_LEN / 2f + 3f
+            val mz = T.FLIP_Y + sin(a) * T.FLIP_LEN / 2f + 5f
+            r.flat(mx, mz, 0.3f, T.FLIP_LEN + 26f, 28f, shadow, angle = a, blend = Blend.ALPHA, alpha = 0.5f)
+        }
     }
 
     private fun drawFlippers(r: Renderer3D) {
@@ -1131,6 +1448,31 @@ class PinballGame : BaseMiniGame() {
         r.flat(T.CX, 568f, 0.6f, 34f, 34f, glow, blend = Blend.ADD, emissive = 1f, alpha = if (saveOn) 0.9f else 0.06f, tint = Pal.RED)
     }
 
+    /** The light a fast ball drags behind it: a tapering ribbon over the last few hundredths of a second. */
+    private fun drawTrails(r: Renderer3D) {
+        val glow = TexKit.glow.full
+        for (i in 0 until MAX_BALLS) {
+            val b = balls[i]
+            if (b.state != PLAY) continue
+            val speed = sqrt(b.vx * b.vx + b.vy * b.vy)
+            val k = ((speed - TRAIL_MIN_SPEED) / TRAIL_FULL_SPEED).coerceIn(0f, 1f)
+            if (k <= 0f) continue
+            val n = trailCount[i]
+            val o = i * TRAIL_N
+            val col = if (multiball) (if (i % 2 == 0) Pal.HOTPINK else Pal.CYAN) else 0xFFCFE0FF.toInt()
+            var px = b.x
+            var pz = b.y
+            for (j in 0 until n) {
+                val tx = trailX[o + j]
+                val tz = trailY[o + j]
+                val t = 1f - j / n.toFloat()
+                r.beam(px, TRAIL_Y, pz, tx, TRAIL_Y, tz, TRAIL_WIDTH * t, glow, blend = Blend.ADD, emissive = 1f, alpha = TRAIL_ALPHA * k * t, tint = col)
+                px = tx
+                pz = tz
+            }
+        }
+    }
+
     private fun drawBall(r: Renderer3D, b: Ball) {
         // A draining ball drops under the apron.
         val sink = if (b.y > T.APRON_Y) (b.y - T.APRON_Y) * 0.6f else 0f
@@ -1139,38 +1481,6 @@ class PinballGame : BaseMiniGame() {
         xf.set(b.x, y, b.y)
         PinballArt.ball.draw(r, xf = xf)
         r.sprite(b.x - 2.5f, y + 4f, b.y - 1f, 7f, 7f, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = 0.9f)
-    }
-
-    private fun drawDmd(scope: DrawScope) {
-        val x0 = dmd[0]
-        val y0 = dmd[1]
-        val x1 = dmd[2]
-        val y1 = dmd[3]
-        val w = x1 - x0
-        val h = y1 - y0
-        if (w <= 0f || h <= 0f) return
-        val amber = Color(0xFFFF8A1C.toInt())
-        scope.drawRect(Color(0xFF120600.toInt()), Offset(x0, y0), Size(w, h))
-        if (score != scoreShown) {
-            scoreShown = score
-            scoreText = score.toString()
-        }
-        val cx = (x0 + x1) / 2f
-        if (messageT > 0f && message != M_NONE) {
-            val on = message != M_TILT || (time * 5f).toInt() % 2 == 0
-            if (on) ArcadeFont.drawCentered(scope, MESSAGES[message], cx, y0 + h * 0.25f, h / 16f, amber, shadow = false)
-            if (message == M_BALL) ArcadeFont.drawCentered(scope, BALL_TEXT[ballNumber.coerceIn(1, 5)], cx, y0 + h * 0.62f, h / 26f, amber, shadow = false)
-        } else {
-            ArcadeFont.drawCentered(scope, scoreText, cx, y0 + h * 0.18f, h / 13f, amber, shadow = false)
-            ArcadeFont.draw(scope, BALL_TEXT[ballNumber.coerceIn(1, 5)], x0 + 6f, y0 + h * 0.72f, h / 30f, amber)
-            ArcadeFont.draw(scope, MULT_TEXT[multiplier], x1 - 22f, y0 + h * 0.72f, h / 30f, amber)
-        }
-        // Dot-matrix grille.
-        var gy = y0 + 1.5f
-        while (gy < y1) {
-            scope.drawRect(Color.Black, Offset(x0, gy), Size(w, 0.7f), alpha = 0.45f)
-            gy += 2.2f
-        }
     }
 
     private fun drawHints(scope: DrawScope) {
@@ -1219,6 +1529,8 @@ class PinballGame : BaseMiniGame() {
     internal val botDropsUp: Int get() = (if (dropUp[0]) 1 else 0) + (if (dropUp[1]) 1 else 0) + (if (dropUp[2]) 1 else 0)
     internal fun botLaneLit(i: Int): Boolean = laneLit[i]
     internal val botEndedEarly: Boolean get() = endedEarly
+    /** Every string the backbox display can be asked to show (its messages, ball and multiplier texts), for the font test. */
+    internal fun botDmdStrings(): List<String> = MESSAGES.filter { it.isNotEmpty() } + BALL_TEXT.toList() + MULT_TEXT.filter { it.isNotEmpty() }
 
     /** Puts ball [i] in play at ([x], [y]) moving at ([vx], [vy]), bypassing the plunger. */
     internal fun botPlace(i: Int, x: Float, y: Float, vx: Float, vy: Float) {
@@ -1252,33 +1564,80 @@ class PinballGame : BaseMiniGame() {
     // ---------------------------------------------------------------- attract mode
 
     override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) {
-        // The backglass's dot-matrix display: the title over a ball weaving among flashing
-        // bumpers, then a flashing "multiball" as the loop comes round.
-        p.fill(0, 0, w, h, Color(0xFF0A0402.toInt()))
+        // The backglass's screen: a night sky over a neon horizon, the title card (then a
+        // flashing "multiball", then "insert token") and, underneath, a ball zig-zagging among
+        // three bumpers that flare when it passes, with a light trail behind it.
+        val u = h / 30f
+        val wf = w.toFloat()
+        val hf = h.toFloat()
         val amber = Color(0xFFFF8A1C.toInt())
         val dim = Color(0xFF4A2206.toInt())
-        val u = h / 30f
-        val phase = time % 8f
-        if (phase < 5.5f) {
-            p.textCentered("STAR", w / 2f, 1.5f * u, amber, size = 0.85f * u)
-            p.textCentered("FLIPPER", w / 2f, 8.5f * u, amber, size = 0.7f * u)
-            val lit = (time * 3f).toInt() % 3
-            val by = 19f * u
-            p.disc(w * 0.3f, by, 2.2f * u, if (lit == 0) amber else dim)
-            p.disc(w * 0.7f, by, 2.2f * u, if (lit == 1) amber else dim)
-            p.disc(w * 0.5f, by + 4.5f * u, 2.2f * u, if (lit == 2) amber else dim)
-            val a = time * 2.6f
-            p.disc(w / 2f + sin(a) * w * 0.42f, 21f * u + cos(a * 1.7f) * 5f * u, 1f * u, Color.White)
-        } else {
-            val on = (time * 4f).toInt() % 2 == 0
-            p.textCentered("MULTI", w / 2f, 3f * u, if (on) amber else dim, size = 1.1f * u)
-            p.textCentered("BALL!", w / 2f, 13f * u, if (on) dim else amber, size = 1.1f * u)
+        p.fill(0f, 0f, wf, hf, Color(0xFF0A041C.toInt()))
+        p.fill(0f, hf * 0.22f, wf, hf * 0.20f, Color(0xFF160A34.toInt()))
+        p.fill(0f, hf * 0.42f, wf, hf * 0.16f, Color(0xFF26104A.toInt()))
+        p.fill(0f, hf * 0.58f, wf, hf * 0.42f, Color(0xFF130727.toInt()))
+        // The horizon's glow, and a neon line along it.
+        p.disc(wf / 2f, hf * 0.62f, wf * 0.55f, Color(Pal.PINK), 0.08f)
+        p.disc(wf / 2f, hf * 0.62f, wf * 0.34f, Color(Pal.PINK), 0.10f)
+        p.fill(0f, hf * 0.585f, wf, 0.35f * u, Color(Pal.HOTPINK), 0.75f)
+        // Twinkling stars in the sky.
+        for (i in 0 until 16) {
+            val sx = hash01(i, 11) * wf
+            val sy = hash01(i, 12) * hf * 0.55f
+            val tw = 0.35f + 0.65f * abs(sin(time * (0.9f + hash01(i, 13)) + i * 1.7f))
+            p.px(sx, sy, Color(Pal.CREAM), tw)
         }
-        // Chase lamps along the bottom edge.
+        val phase = time % 10f
+        val cx = wf / 2f
+        if (phase < 6f) {
+            // Title card: each word with a dark extrusion behind it.
+            p.textCentered("STAR", cx + 0.55f * u, 1.3f * u + 0.5f * u, Color(0xFF7A1F63.toInt()), size = 0.85f * u)
+            p.textCentered("STAR", cx, 1.3f * u, Color(Pal.YELLOW), size = 0.85f * u)
+            p.textCentered("FLIPPER", cx + 0.45f * u, 8.2f * u + 0.4f * u, Color(0xFF1A6A78.toInt()), size = 0.7f * u)
+            p.textCentered("FLIPPER", cx, 8.2f * u, Color(Pal.CREAM), size = 0.7f * u)
+            // A gleam sweeping across the underline.
+            val gx = ((time * 0.7f) % 1.4f - 0.2f) * wf
+            p.fill(cx - 12f * u, 13.2f * u, 24f * u, 0.3f * u, Color(Pal.CYAN), 0.35f)
+            p.fill((gx - 2.5f * u).coerceIn(cx - 12f * u, cx + 12f * u), 13.2f * u, 5f * u, 0.3f * u, Color(Pal.WHITE), 0.9f)
+        } else if (phase < 8f) {
+            val on = (time * 4f).toInt() % 2 == 0
+            p.textCentered("MULTI", cx, 2.2f * u, if (on) Color(Pal.HOTPINK) else Color(Pal.CYAN), size = 1.1f * u)
+            p.textCentered("BALL!", cx, 10.6f * u, if (on) Color(Pal.CYAN) else Color(Pal.HOTPINK), size = 1.1f * u)
+        } else {
+            val on = (time * 2.5f).toInt() % 2 == 0
+            p.textCentered("INSERT", cx, 2.6f * u, Color(Pal.CREAM), size = 0.95f * u)
+            p.textCentered("TOKEN", cx, 10.6f * u, if (on) Color(Pal.GOLD) else amber, size = 0.95f * u)
+        }
+        // Three bumpers; the ball's path decides when each one flares.
+        val bxs = floatArrayOf(wf * 0.26f, wf * 0.74f, wf * 0.5f)
+        val bys = floatArrayOf(19f * u, 19f * u, 24f * u)
+        val cols = arrayOf(Color(Pal.HOTPINK), Color(Pal.CYAN), Color(Pal.YELLOW))
+        val a = time * 2.4f
+        val ballX = cx + sin(a) * wf * 0.40f
+        val ballY = 21.6f * u + cos(a * 1.7f) * 4.8f * u
+        for (i in 0 until 3) {
+            val d = sqrt((ballX - bxs[i]) * (ballX - bxs[i]) + (ballY - bys[i]) * (ballY - bys[i]))
+            val flare = (1f - (d - 2.4f * u) / (3.6f * u)).coerceIn(0f, 1f)
+            p.disc(bxs[i], bys[i], (3.6f + flare * 1.8f) * u, cols[i], 0.14f + flare * 0.45f)
+            p.disc(bxs[i], bys[i], 2.5f * u, Color(0xFF2A2436.toInt()))
+            p.disc(bxs[i], bys[i], 1.9f * u, cols[i], 0.55f + flare * 0.45f)
+            p.disc(bxs[i], bys[i], 0.8f * u, Color(Pal.WHITE), 0.5f + flare * 0.5f)
+        }
+        for (k in 5 downTo 1) {
+            val ta = (time - k * 0.045f) * 2.4f
+            val tx = cx + sin(ta) * wf * 0.40f
+            val ty = 21.6f * u + cos(ta * 1.7f) * 4.8f * u
+            p.disc(tx, ty, (1.05f - k * 0.1f) * u, Color(0xFFCFE0FF.toInt()), 0.5f * (1f - k / 6f))
+        }
+        p.disc(ballX, ballY, 1.05f * u, Color(0xFFDDE4F8.toInt()))
+        p.disc(ballX - 0.3f * u, ballY - 0.35f * u, 0.35f * u, Color.White)
+        // Chase lamps along the top and bottom edges, running in opposite directions.
         val n = 10
         for (k in 0 until n) {
-            val on = ((time * 8f).toInt() + k) % 4 == 0
-            p.disc(w * (k + 0.5f) / n, h - 1.4f * u, 0.7f * u, if (on) amber else dim)
+            val onB = ((time * 8f).toInt() + k) % 4 == 0
+            val onT = ((time * 8f).toInt() - k + 40) % 4 == 0
+            p.disc(wf * (k + 0.5f) / n, hf - 1.0f * u, 0.65f * u, if (onB) amber else dim)
+            p.disc(wf * (k + 0.5f) / n, 0.9f * u, 0.5f * u, if (onT) amber else dim, 0.7f)
         }
     }
 }
