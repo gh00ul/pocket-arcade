@@ -45,6 +45,9 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 - **First person.** The eye button next to the trophy switches between the overhead camera and a kid's-eye view, easing between the two. In first person the left thumb walks (forward, back and strafe), the right thumb drags to look, and your choice is remembered. Up close the hall is finished on every side: closed cabinet backs with service panels, a ceiling of acoustic tiles, light panels, ducts and sprinklers, and a glass shopfront onto the street.
 - Collision against walls, cabinets and furniture, with sliding along edges.
 - Walk up to a machine and a **▶ PLAY (1 token)** prompt pops up. Tap it and the camera flies into the screen of the cabinet you're standing at. Exiting flies you back out to exactly where you stood (in first person, facing the machine).
+- **The prize wall shows what you've won.** The plushies on the shelves behind the counter are in colour once you've won them from the claw machine, and dark silhouettes until then.
+- **The photo booth** by the doors opens from its own prompt: your kid in their current hat and outfit, a 3-2-1 countdown, then four shots in four poses (idle, cheer, sit, cheers with a drink). The strip is composed under your arcade's name and the date, saved in the app's own storage (the last four are kept) and can be sent through the Android share sheet. It asks for no storage permission.
+- The photo booth, kiddie rides, vending machines, café counter and bought trophy case, fish tank and jukebox all show a prompt when you stand at them. Only the photo booth does anything yet; the rest say COMING SOON (see "Add an interactive prop").
 - An ambient arcade soundscape: mains hum, crowd murmur and distant machine bleeps.
 
 **Eleven machines**, each a full 3D game that pays out tickets:
@@ -194,7 +197,7 @@ Machines aren't the only thing in the hall that can be used. The photo booth, ki
 3. **Say what tapping it does.** `ArcadeApp.onSpot` has one line per type. Replace your `comingSoon()` with your own handler; most open a full-screen panel with `openOverlay(Overlay.MINE)` (add a value to `Overlay` and a screen in the `when (overlay)` below). `ArcadePanel`, `ArcadeButton` and `GlassBox` in `ui/Widgets.kt` give it the arcade's look, and `Thumb` (`ui/Thumbs.kt`) photographs 3D scenes into it. Saves go through `services.persist { services.repo.addStat("mine") }`, so leaving the screen can't drop them.
 4. **The tests come free.** `InteractivePropsTest` checks every interactive prop, decor included, for exactly one spot in front of it that overlaps nothing, stays out of the main aisle, is reachable from the doors on the kids' walk grid, has room for the first-person body and is found by tap-to-walk.
 
-The photo booth is the first one built: `ui/PhotoBoothScreen.kt`.
+The photo booth is the first one built (`ui/PhotoBoothScreen.kt`, with its pure timing in `ui/PhotoBoothPlan.kt` and the strip's geometry, saving and sharing in `share/`), and a fair example of the recipe: an overlay that photographs 3D scenes with `Thumbs`, counts a stat with `services.persist` and shares a file through a `FileProvider` (declared in the manifest, `res/xml/file_paths.xml`).
 
 ## Project layout
 
@@ -213,8 +216,9 @@ app/src/main/java/com/pocketarcade/
 │   ├── airhockey/  racer/  stacker/
 │   └── shooter/  pinball/  fishing/
 ├── data/                  DataStore repository, save state, prize catalog
-└── ui/                    HUD, title, prize counter, token machine, profile, game host, widgets,
-                           and the thumbnail studio
+├── share/                 photo strips: layout and painting, keeping the last four, the share sheet
+└── ui/                    HUD, title, prize counter, token machine, profile, photo booth, game host,
+                           widgets, and the thumbnail studio
 ```
 
 Tuning knobs for every game (difficulty and payouts) are grouped at the top of each game file in a `*Tuning` object: `ClawTuning`, `SkeeTuning`, `WhackTuning`, `PusherTuning`, `HoopsTuning`, `HockeyTuning`, `RacerTuning`, `StackerTuning`, `ShooterTuning`, `PinballTuning` and `FishingTuning`.
