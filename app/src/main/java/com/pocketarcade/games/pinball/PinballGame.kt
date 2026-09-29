@@ -999,7 +999,11 @@ class PinballGame : BaseMiniGame() {
         drawPlunger(r)
         drawLamps(r)
         for (b in balls) if (b.state != OFF) drawBall(r, b)
-        // The playfield glass: a faint sheen between the player and the table.
+        // The playfield glass: the room reflected in it, then a faint sheen of streaks.
+        r.quad(
+            -4f, 30f, -6f, T.W + 4f, 30f, -6f, T.W + 4f, 30f, 650f, -4f, 30f, 650f,
+            TexKit.white.full, 0f, 1f, 0f, blend = Blend.ALPHA, alpha = 0.02f, cull = false, gloss = 1f,
+        )
         r.quad(
             -4f, 30f, -6f, T.W + 4f, 30f, -6f, T.W + 4f, 30f, 650f, -4f, 30f, 650f,
             PinballArt.glassStreaks.full, 0f, 1f, 0f, blend = Blend.ADD, emissive = 1f, alpha = 0.16f, cull = false,

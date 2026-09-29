@@ -618,7 +618,7 @@ class ClawMachineGame : BaseMiniGame() {
         // Gantry rails the trolley runs on.
         val metal = ClawArt.metal.full
         for (z in floatArrayOf(-RAIL_Z, RAIL_Z)) {
-            b.box(BOX_LEFT, wy(RAIL_Y) - 3f, z - 3f, BOX_RIGHT, wy(RAIL_Y) + 3f, z + 3f, BoxFaces(front = metal, top = metal, left = metal, right = metal))
+            b.box(BOX_LEFT, wy(RAIL_Y) - 3f, z - 3f, BOX_RIGHT, wy(RAIL_Y) + 3f, z + 3f, BoxFaces(front = metal, top = metal, left = metal, right = metal, gloss = 0.9f))
         }
         // Cabinet frame around the glass.
         b.box(-20f, -200f, BOX_D, BOX_LEFT, top + 40f, BOX_D + 12f, BoxFaces(front = cab, right = cab, top = cab))
@@ -642,15 +642,15 @@ class ClawMachineGame : BaseMiniGame() {
     private fun hubModel(gold: Boolean): Model {
         val side = if (gold) ClawArt.goldMetal.full else ClawArt.metal.full
         return ModelBuilder()
-            .cylinder(0f, 0f, -8f, 8f, 13f, 10, side, top = side, bottom = side)
-            .cylinder(0f, 0f, 8f, 16f, 13f, 10, side, top = side, topRadius = 4f)
+            .cylinder(0f, 0f, -8f, 8f, 13f, 10, side, top = side, bottom = side, gloss = 0.9f)
+            .cylinder(0f, 0f, 8f, 16f, 13f, 10, side, top = side, topRadius = 4f, gloss = 0.9f)
             .build()
     }
     private val hubSilver by lazy { hubModel(false) }
     private val hubGold by lazy { hubModel(true) }
     private fun prongModel(gold: Boolean, length: Float, thick: Float): Model {
         val t = if (gold) ClawArt.goldMetal.full else ClawArt.metal.full
-        val f = BoxFaces(front = t, back = t, left = t, right = t, top = t)
+        val f = BoxFaces(front = t, back = t, left = t, right = t, top = t, gloss = 0.9f)
         return ModelBuilder().box(-thick, -length, -thick, thick, 0f, thick, f).build()
     }
     private val prongSilver by lazy { prongModel(false, 24f, 2.5f) }
@@ -723,7 +723,7 @@ class ClawMachineGame : BaseMiniGame() {
         val neonA = 0.7f + 0.3f * sin(time * 6f)
         r.quad(BOX_LEFT, wy(BOX_TOP) + 58f, BOX_D - 2f, BOX_RIGHT, wy(BOX_TOP) + 58f, BOX_D - 2f, BOX_RIGHT, wy(BOX_TOP) + 52f, BOX_D - 2f, BOX_LEFT, wy(BOX_TOP) + 52f, BOX_D - 2f, ClawArt.neon.full, 0f, 0f, 1f, emissive = 1.3f * neonA)
         r.quad(BOX_LEFT, wy(BOX_TOP) + 70f, BOX_D - 1f, BOX_RIGHT, wy(BOX_TOP) + 70f, BOX_D - 1f, BOX_RIGHT, wy(BOX_TOP) + 30f, BOX_D - 1f, BOX_LEFT, wy(BOX_TOP) + 30f, BOX_D - 1f, glow, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1f, alpha = 0.25f * neonA, tint = Pal.HOTPINK)
-        r.quad(BOX_LEFT, wy(BOX_TOP) + 60f, BOX_D, BOX_RIGHT, wy(BOX_TOP) + 60f, BOX_D, BOX_RIGHT, 0f, BOX_D, BOX_LEFT, 0f, BOX_D, ClawArt.glass.full, 0f, 0f, 1f, blend = Blend.ALPHA)
+        r.quad(BOX_LEFT, wy(BOX_TOP) + 60f, BOX_D, BOX_RIGHT, wy(BOX_TOP) + 60f, BOX_D, BOX_RIGHT, 0f, BOX_D, BOX_LEFT, 0f, BOX_D, ClawArt.glass.full, 0f, 0f, 1f, blend = Blend.ALPHA, gloss = 1f)
         r.quad(BOX_LEFT, wy(BOX_TOP) + 60f, BOX_D + 0.5f, BOX_RIGHT, wy(BOX_TOP) + 60f, BOX_D + 0.5f, BOX_RIGHT, 0f, BOX_D + 0.5f, BOX_LEFT, 0f, BOX_D + 0.5f, ClawArt.glare.full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1f, alpha = 0.3f)
         stage.present()
 
