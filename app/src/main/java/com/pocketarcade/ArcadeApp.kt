@@ -24,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -50,11 +51,15 @@ import com.pocketarcade.hub.HubWorld
 import com.pocketarcade.hub.PhotoWall
 import com.pocketarcade.hub.Spot
 import com.pocketarcade.hub.SpotType
+import com.pocketarcade.hub.TitleUnits
+import com.pocketarcade.startup.LoadPlan
 import com.pocketarcade.startup.Startup
+import com.pocketarcade.startup.StartupGate
 import com.pocketarcade.ui.GameHostScreen
 import com.pocketarcade.ui.Hud
 import com.pocketarcade.ui.HudExtras
 import com.pocketarcade.ui.HudExtrasReach
+import com.pocketarcade.ui.LoadingScreen
 import com.pocketarcade.ui.ArcadeText
 import com.pocketarcade.ui.GlassBox
 import com.pocketarcade.ui.MapScreen
@@ -126,10 +131,19 @@ private enum class Overlay {
 fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     val context = LocalContext.current
     val save by services.repo.state.collectAsState(initial = SaveState())
-    remember { Startup.mark("ArcadeApp first composition") }
-    val games = remember { GameRegistry.createAll().also { Startup.mark("games created") } }
+    val games = remember {
+        Startup.mark("ArcadeApp first composition")
+        GameRegistry.createAll().also { Startup.mark("games created") }
+    }
     val world = remember { HubWorld(games, services.audio, services.haptics).also { Startup.mark("hub world created") } }
     var screen by remember { mutableStateOf(Screen.TITLE) }
+    // The loading gate: what the title needs, then the hall, built a few milliseconds a frame.
+    val gate = remember {
+        StartupGate(
+            bootPlan = LoadPlan(TitleUnits.plan(games).steps + TitleUnits.gpuStep(games)),
+            hallPlan = { world.stage.plan() },
+        )
+    }
     var overlay by remember { mutableStateOf(Overlay.NONE) }
     var activeGame by remember { mutableIntStateOf(-1) }
     var busy by remember { mutableStateOf(false) }
@@ -180,6 +194,15 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     LaunchedEffect(Unit) {
         settings = settingsStore.settings.first()
         applySettings(settings)
+    }
+    // The hall is wanted now once the player has tapped the title (busy) or is already in it.
+    LaunchedEffect(gate) { gate.run(urgent = { screen == Screen.HUB || (screen == Screen.TITLE && busy) }) }
+    LaunchedEffect(gate.bootDone) {
+        if (gate.bootDone) {
+            withFrameNanos { }
+            withFrameNanos { }
+            Startup.mark("title on screen")
+        }
     }
 
     LaunchedEffect(save.hat, save.outfit) { world.setPlayerLook(save.playerLook()) }
@@ -340,7 +363,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         // Every 3D picture is drawn by the GPU on this surface, under the interface.
         GlSurface(Modifier.fillMaxSize())
         when (screen) {
-            Screen.TITLE -> TitleScreen(save, games) {
+            Screen.TITLE -> if (gate.bootDone) TitleScreen(save, games) {
                 if (!busy) {
                     scope.launch {
                         busy = true
@@ -354,7 +377,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                     }
                 }
             }
-            Screen.HUB -> {
+            Screen.HUB -> if (gate.hallReady) {
                 HubScreen(
                     world = world,
                     save = save,
@@ -445,6 +468,15 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                 }
             }
         }
+
+        // Loading covers whatever the screen isn't ready to show: the title until its showroom is
+        // built, the hall until it is built and on the GPU.
+        LoadingScreen(
+            active = !gate.bootDone || (screen == Screen.HUB && !gate.hallReady),
+            progress = gate.progress,
+            label = gate.label,
+            reduceMotion = settings.reduceMotion,
+        )
 
         if (fade.value > 0.001f) {
             Canvas(Modifier.fillMaxSize()) {

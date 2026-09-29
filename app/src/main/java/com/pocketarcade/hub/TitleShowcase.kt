@@ -15,19 +15,27 @@ import kotlin.math.sin
 class TitleShowcase(private val games: List<MiniGame>) {
     companion object {
         const val SLOT = "title"
+        private const val SPACING = 58f
+
+        /**
+         * Game [i]'s cabinet in the showroom's row. Built a game at a time behind the loading
+         * screen ([TitleUnits]); the showcase takes them from there, or builds them itself.
+         */
+        internal fun buildUnit(games: List<MiniGame>, i: Int): MachineUnit {
+            val g = games[i]
+            val (w, d, h) = HubLayout.cabinetSize(g)
+            val cx = i * SPACING - SPACING * (games.size - 1) / 2f
+            // Long machines sit further back so every front lines up.
+            val front = 20f
+            val prop = Prop(PropKind.MACHINE, cx - w / 2f, front - d, cx + w / 2f, front, h, machine = i, shape = g.look.shape, variant = i)
+            return MachineUnit(prop, g, MachineArts.of(g))
+        }
     }
 
     private val r = Renderer3D(1, 1)
-    private val spacing = 58f
+    private val spacing = SPACING
     private val rowWidth = spacing * (games.size - 1)
-    private val units: List<MachineUnit> = games.mapIndexed { i, g ->
-        val (w, d, h) = HubLayout.cabinetSize(g)
-        val cx = i * spacing - rowWidth / 2f
-        // Long machines sit further back so every front lines up.
-        val front = 20f
-        val prop = Prop(PropKind.MACHINE, cx - w / 2f, front - d, cx + w / 2f, front, h, machine = i, shape = g.look.shape, variant = i)
-        MachineUnit(prop, g, MachineArt(g))
-    }
+    private val units: List<MachineUnit> = TitleUnits.of(games).completeAll()
     private val spots = units.map { u ->
         PointLight(u.prop.centerX, 110f, 40f, 1f, 0.95f, 0.88f, 150f, 0.9f)
     }

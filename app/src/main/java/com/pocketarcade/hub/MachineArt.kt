@@ -294,6 +294,19 @@ class LiveScreen(private val art: MachineArt, private val seed: Int) {
     private var bestText = ""
     private var bestShown = -1
 
+    /**
+     * Paints the first picture now (a loading step), so the painter, the texture and whatever
+     * the game's attract loop paints on first use are ready before the cabinet is first in view,
+     * rather than one after another as the camera pans over the hall. Keeps the alternate-frame
+     * stagger the seed set.
+     */
+    fun warm(best: Int) {
+        val keep = frame
+        frame = 1
+        paint(best, 0f)
+        frame = keep
+    }
+
     fun paint(best: Int, t: Float) {
         // Screens refresh at 30 fps; that's plenty for attract loops.
         frame++

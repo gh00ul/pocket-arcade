@@ -17,7 +17,9 @@ sealed class LoadStep(val name: String, val weight: Float) {
      * A wait for something outside the driver, the GPU for one: [start] runs once when the step is
      * reached (to send off the request), then [ready] is polled every slice until it says yes.
      * After [timeoutMs] the step gives up waiting, calls [onTimeout] and counts as finished, so a
-     * GPU that never answers can't hold the loading screen up for good.
+     * GPU that never answers can't hold the loading screen up for good. A wait that is really a
+     * queue of requests can say how far along it is with [fraction] (0 to 1), so the bar moves
+     * while it waits.
      */
     class Wait(
         name: String,
@@ -25,6 +27,7 @@ sealed class LoadStep(val name: String, val weight: Float) {
         val timeoutMs: Long,
         val start: () -> Unit = {},
         val onTimeout: () -> Unit = {},
+        val fraction: () -> Float = { 0f },
         val ready: () -> Boolean,
     ) : LoadStep(name, weight)
 }
@@ -97,9 +100,20 @@ class LoadDriver(
         private set
     val failures = ArrayList<Exception>()
 
-    /** The share of the plan's weight that has finished, 0 to 1. Never goes down. */
+    private var peak = 0f
+
+    /**
+     * The share of the plan's weight that has finished, 0 to 1 (a wait that reports its own
+     * [LoadStep.Wait.fraction] counts that part of its weight). Never goes down.
+     */
     val progress: Float
-        get() = if (plan.totalWeight <= 0f) 1f else (doneWeight / plan.totalWeight).toFloat().coerceIn(0f, 1f)
+        get() {
+            if (plan.totalWeight <= 0f) return 1f
+            val waiting = (steps.getOrNull(index) as? LoadStep.Wait)?.let { it.weight * it.fraction().coerceIn(0f, 1f) } ?: 0f
+            val p = ((doneWeight + waiting) / plan.totalWeight).toFloat().coerceIn(0f, 1f)
+            if (p > peak) peak = p
+            return peak
+        }
 
     /** What the loading screen should call the current stage: the step about to run, else the last one. */
     val label: String

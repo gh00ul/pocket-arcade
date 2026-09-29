@@ -527,8 +527,13 @@ object HallArt {
         tp.toTexture().also { tp.recycle() }
     }
 
-    /** A framed poster for the walls, one of a few designs. */
-    fun poster(kind: Int): Texture {
+    /**
+     * A framed poster for the walls, one of four designs. Painted once per design and shared: the
+     * nine wall spots used to paint nine textures for four pictures.
+     */
+    fun poster(kind: Int): Texture = memo("poster|${kind and 3}") { paintPoster(kind) }
+
+    private fun paintPoster(kind: Int): Texture {
         val tp = TexPaint(160, 240)
         val palettes = arrayOf(
             intArrayOf(0xFF2A0F5C.toInt(), 0xFFFF4FA8.toInt(), 0xFFFFD84D.toInt()),
@@ -570,9 +575,18 @@ object HallArt {
 
     // ------------------------------------------------------------------ materials
 
-    // Identical requests share one texture, so models built from them group into fewer draws.
+    // Identical requests share one texture, so models built from them group into fewer draws (and
+    // are painted and uploaded once, not once per scene or per prop).
     private val solids = HashMap<Int, Texture>()
     private val paints = HashMap<Long, Texture>()
+    private val memos = HashMap<String, Texture>()
+
+    /** The texture painted by [build] for [key], painted the first time it is asked for and never again. */
+    private inline fun memo(key: String, build: () -> Texture): Texture {
+        synchronized(memos) { memos[key]?.let { return it } }
+        val t = build()
+        return synchronized(memos) { memos.getOrPut(key) { t } }
+    }
 
     fun solid(color: Int): Texture = synchronized(solids) {
         solids.getOrPut(color) { Texture(4, 4, IntArray(16) { color }) }
@@ -609,8 +623,10 @@ object HallArt {
         tp.toTexture().also { tp.recycle() }
     }
 
-    /** Light wood (counters, skee-ball lanes, benches). */
-    fun wood(base: Int = 0xFFC9884A.toInt(), planks: Int = 6): Texture {
+    /** Light wood (counters, skee-ball lanes, benches). One texture per colour and plank count, shared by whoever asks. */
+    fun wood(base: Int = 0xFFC9884A.toInt(), planks: Int = 6): Texture = memo("wood|$base|$planks") { paintWood(base, planks) }
+
+    private fun paintWood(base: Int, planks: Int): Texture {
         val tp = TexPaint(256, 256)
         val pw = 256f / planks
         for (i in 0 until planks) {
@@ -685,7 +701,10 @@ object HallArt {
      * A neon sign: glowing tube lettering on a transparent background (drawn additively, so
      * the bloom makes it bleed light like the real thing).
      */
-    fun neon(text: String, color: Int, w: Int = 512, h: Int = 128, size: Float = 86f): Texture {
+    fun neon(text: String, color: Int, w: Int = 512, h: Int = 128, size: Float = 86f): Texture =
+        memo("neon|$text|$color|$w|$h|$size") { paintNeon(text, color, w, h, size) }
+
+    private fun paintNeon(text: String, color: Int, w: Int, h: Int, size: Float): Texture {
         val tp = TexPaint(w, h)
         tp.clear(0)
         tp.glow(18f, alpha(color, 0.55f)) { text(text, w / 2f, h / 2f + size * 0.36f, size, -1, Fonts.display, spacing = 0.06f) }
@@ -706,7 +725,10 @@ object HallArt {
     }
 
     /** A lit box sign: coloured panel with bold lettering. */
-    fun lightbox(text: String, bg: Int, fg: Int, w: Int = 512, h: Int = 128, size: Float = 70f): Texture {
+    fun lightbox(text: String, bg: Int, fg: Int, w: Int = 512, h: Int = 128, size: Float = 70f): Texture =
+        memo("box|$text|$bg|$fg|$w|$h|$size") { paintLightbox(text, bg, fg, w, h, size) }
+
+    private fun paintLightbox(text: String, bg: Int, fg: Int, w: Int, h: Int, size: Float): Texture {
         val tp = TexPaint(w, h)
         tp.vgrad(0f, 0f, w.toFloat(), h.toFloat(), lift(bg, 0.25f), dim(bg, 0.75f))
         tp.strokeRound(4f, 4f, w - 8f, h - 8f, 10f, 5f, alpha(-1, 0.5f))
@@ -717,7 +739,9 @@ object HallArt {
     // ------------------------------------------------------------------ prizes
 
     /** Printed packaging for the boxed prizes on the prize wall. */
-    fun prizeBox(seed: Int): Texture {
+    fun prizeBox(seed: Int): Texture = memo("prize|$seed") { paintPrizeBox(seed) }
+
+    private fun paintPrizeBox(seed: Int): Texture {
         val tp = TexPaint(128, 128)
         val colors = intArrayOf(0xFFE8394A.toInt(), 0xFF2F6BFF.toInt(), 0xFF22C06A.toInt(), 0xFFFFB020.toInt(), 0xFF9B4DFF.toInt(), 0xFF00C2D8.toInt())
         val c = colors[seed % colors.size]

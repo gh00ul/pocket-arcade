@@ -351,6 +351,12 @@ internal class HallRig(private val map: HubMap, private val games: List<MiniGame
             .build()
     }
 
+    /** Draws every model the rig has, whether or not the camera could see it (a warm-up hands them to the GPU). */
+    fun warm(r: Renderer3D) {
+        model.draw(r)
+        indoor.draw(r)
+    }
+
     /** The start lights (red one by one, then green) and the entrance chase bulbs. */
     fun drawOpaque(r: Renderer3D, t: Float, minX: Float, maxX: Float, minZ: Float, maxZ: Float) {
         if (r.camera.ey < HubLayout.CEILING) indoor.draw(r, Blend.OPAQUE)

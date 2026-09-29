@@ -40,7 +40,6 @@ class HubRenderer {
     }
 
     private val r = Renderer3D(1, 1)
-    private var scene: HallScene? = null
     private val proj = FloatArray(3)
 
     fun draw(scope: DrawScope, world: HubWorld, save: SaveState) {
@@ -49,13 +48,8 @@ class HubRenderer {
         if (sw < 2f || sh < 2f) return
         val w = sw.toInt()
         val h = sh.toInt()
-        val sc = scene?.takeIf { it.map === world.map } ?: run {
-            Startup.begin("HallScene built inline")
-            HallScene(world.map, world.games).also {
-                scene = it
-                Startup.end("HallScene built inline")
-            }
-        }
+        // The scene outlives this renderer's screen: it is built by the loading plan, not here.
+        val sc = world.stage.current()
 
         r.startFrame()
         r.resize(w, h)

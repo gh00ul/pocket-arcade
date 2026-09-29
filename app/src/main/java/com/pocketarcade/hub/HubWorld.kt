@@ -83,6 +83,8 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
     /** What the first-person body walks among: the map's solids with the play spots' fronts kept clear. */
     var bodySolids: List<Box> = Body.solidsFor(map)
         private set
+    /** The hall's built 3D scene and its renderer, kept as long as the world is (see [HallStage]). */
+    val stage = HallStage(this)
     val player = Player()
     val npcs = ArrayList<Npc>()
     /** The café queue and the barista. */
@@ -215,6 +217,8 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
         ownedDecor = owned
         map = HubLayout.build(games, owned)
         bodySolids = Body.solidsFor(map)
+        // The scene takes the new decorations now, not in the next frame drawn.
+        stage.mapChanged()
         route.clear()
         // If a new decoration landed on the player, nudge them to the nearest free spot.
         if (Collision.blocked(map.solids, player.x, player.y)) {
@@ -230,7 +234,11 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
         }
     }
 
-    fun setPlayerLook(look: CharacterLook) = player.setLook(look)
+    fun setPlayerLook(look: CharacterLook) {
+        if (look == player.look) return
+        player.setLook(look)
+        stage.lookChanged(look)
+    }
 
     /** Takes the player's options: the controls, the view and the comfort settings. */
     fun applySettings(s: GameSettings) {

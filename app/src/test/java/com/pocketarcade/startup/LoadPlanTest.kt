@@ -266,6 +266,26 @@ class LoadPlanTest {
     }
 
     @Test
+    fun aWaitThatReportsItsFractionMovesTheBarButNeverBackwards() {
+        val clock = FakeClock()
+        var frac = 0f
+        val steps = listOf(
+            LoadStep.Work("a", 1f) { clock.spendMs(1.0) },
+            LoadStep.Wait("gpu", 3f, timeoutMs = 1000, fraction = { frac }, ready = { false }),
+        )
+        val driver = LoadDriver(LoadPlan(steps), clock::read)
+        driver.advance(5 * ms)
+        assertEquals(0.25f, driver.progress, 1e-6f)
+        frac = 0.5f
+        assertEquals(0.25f + 0.375f, driver.progress, 1e-6f)
+        val seen = driver.progress
+        frac = 0.2f
+        assertEquals("a wait that reports less than before doesn't pull the bar back", seen, driver.progress, 0f)
+        frac = 5f
+        assertTrue("a fraction past 1 is clamped", driver.progress <= 1f)
+    }
+
+    @Test
     fun plansJoinInOrder() {
         val a = LoadPlan(listOf(LoadStep.Work("a", 1f) {}))
         val b = LoadPlan(listOf(LoadStep.Work("b", 2f) {}))
