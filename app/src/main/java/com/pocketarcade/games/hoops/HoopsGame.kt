@@ -14,12 +14,9 @@ import com.pocketarcade.engine.TouchType
 import com.pocketarcade.engine.Vec2
 import com.pocketarcade.engine.clamp01
 import com.pocketarcade.engine.damp
+import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.lerp
 import com.pocketarcade.engine.r3d.Blend
-import com.pocketarcade.engine.r3d.BoxFaces
-import com.pocketarcade.engine.r3d.Model
-import com.pocketarcade.engine.r3d.ModelBuilder
-import com.pocketarcade.engine.r3d.PointLight
 import com.pocketarcade.engine.r3d.Renderer3D
 import com.pocketarcade.engine.r3d.Stage3D
 import com.pocketarcade.engine.r3d.TexKit
@@ -76,26 +73,29 @@ class HoopsGame : BaseMiniGame() {
     override val roundSeconds = HoopsTuning.ROUND_SECONDS
 
     private companion object {
-        const val G = 9.8f
-        const val CAM_Y = 1.7f
-        const val CAM_Z = -1.2f
-        const val F = 420f
-        const val CX = 180f
-        const val HORIZON = 258f
-        const val BALL_R = 0.12f
-        const val RIM_R = 0.23f
-        const val RIM_Y = 2.3f
-        const val HOOP_Z = 2.6f
-        const val BOARD_Z = 2.87f
-        const val BOARD_HALF_W = 0.6f
-        const val BOARD_BOTTOM = 2.15f
-        const val BOARD_TOP = 3.0f
-        const val START_Y = 0.7f
-        const val START_Z = 0.2f
-        const val CAGE_HALF_W = 1.0f
-        const val BACK_Z = 3.2f
+        const val G = HoopsGeo.G
+        const val CAM_Y = HoopsGeo.CAM_Y
+        const val CAM_Z = HoopsGeo.CAM_Z
+        const val F = HoopsGeo.F
+        const val CX = HoopsGeo.CX
+        const val HORIZON = HoopsGeo.HORIZON
+        const val BALL_R = HoopsGeo.BALL_R
+        const val RIM_R = HoopsGeo.RIM_R
+        const val RIM_Y = HoopsGeo.RIM_Y
+        const val HOOP_Z = HoopsGeo.HOOP_Z
+        const val BOARD_Z = HoopsGeo.BOARD_Z
+        const val BOARD_HALF_W = HoopsGeo.BOARD_HALF_W
+        const val BOARD_BOTTOM = HoopsGeo.BOARD_BOTTOM
+        const val BOARD_TOP = HoopsGeo.BOARD_TOP
+        const val START_Y = HoopsGeo.START_Y
+        const val START_Z = HoopsGeo.START_Z
+        const val CAGE_HALF_W = HoopsGeo.CAGE_HALF_W
+        const val BACK_Z = HoopsGeo.BACK_Z
         /** World units (centimetres) per simulation metre. */
-        const val S = 100f
+        const val S = HoopsGeo.S
+
+        /** Colours of the sparks a rim hit throws. */
+        val SPARK_COLORS = intArrayOf(Pal.WHITE, Pal.ORANGE, Pal.YELLOW)
     }
 
     private class Ball {
@@ -133,6 +133,9 @@ class HoopsGame : BaseMiniGame() {
     private var makes = 0
     private var shots = 0
 
+    /** All the presentation state (glows, trails, shockwaves); the simulation never reads it. */
+    private val scene = HoopsScene()
+
     private val idealPower: Float by lazy {
         val th = HoopsTuning.LAUNCH_ANGLE_DEG * (Math.PI.toFloat() / 180f)
         val dz = HOOP_Z - START_Z
@@ -157,6 +160,7 @@ class HoopsGame : BaseMiniGame() {
         shots = 0
         readySquash.snap(1f)
         multSpring.snap(1f)
+        scene.reset()
     }
 
     override fun ticketsFor(score: Int): Int = HoopsTuning.BASE_TICKETS + score / HoopsTuning.POINTS_PER_TICKET
@@ -237,6 +241,7 @@ class HoopsGame : BaseMiniGame() {
         multSpring.update(dt)
         netSwish = (netSwish - dt * 2.2f).coerceAtLeast(0f)
         rimShake = (rimShake - dt * 5f).coerceAtLeast(0f)
+        scene.step(dt)
 
         val half = roundSeconds / 2f
         if (!moving && time >= half) {
@@ -263,6 +268,11 @@ class HoopsGame : BaseMiniGame() {
         }
 
         for (b in balls) if (b.active) stepBall(b, dt)
+        // Balls in the air leave a glowing trail (visual only).
+        for (i in balls.indices) {
+            val b = balls[i]
+            if (b.active && !b.onFloor) scene.trail(i, b.x * S, b.y * S, -b.z * S)
+        }
 
         // The hoop catches fire at the max multiplier.
         if (streak >= HoopsTuning.MAX_MULTIPLIER && rng.nextFloat() < 0.5f) {
@@ -317,6 +327,8 @@ class HoopsGame : BaseMiniGame() {
                         rimShake = 1f
                         play(Sfx.RIM, 0.8f, rng.range(0.9f, 1.1f))
                         fx.haptics.tick()
+                        scene.rimHit(px * S, RIM_Y * S, -pz * S)
+                        particles.burst(sx(px, pz), sy(RIM_Y, pz), 7, 50f, 170f, SPARK_COLORS, 0.35f, 3f, kind = Particles.SPARKLE)
                     }
                 }
             }
@@ -331,6 +343,7 @@ class HoopsGame : BaseMiniGame() {
             b.vx += hoopVX * 0.3f
             play(Sfx.THUD, 0.7f, 1.1f)
             shake.add(0.06f)
+            scene.boardHit(hoopX, (b.x - hoopX) * S, b.y * S)
         }
         // Back wall of the cage.
         if (b.z + BALL_R > BACK_Z && b.vz > 0f) {
@@ -364,7 +377,10 @@ class HoopsGame : BaseMiniGame() {
             b.y = BALL_R
             if (b.vy < 0f) {
                 b.vy = -b.vy * 0.45f
-                if (abs(b.vy) > 0.6f) play(Sfx.BOUNCE, 0.5f)
+                if (abs(b.vy) > 0.6f) {
+                    play(Sfx.BOUNCE, 0.5f)
+                    scene.floorHit(b.x * S, -b.z * S, clamp01(abs(b.vy) / 3f))
+                }
             }
             if (!b.onFloor) {
                 b.onFloor = true
@@ -400,6 +416,7 @@ class HoopsGame : BaseMiniGame() {
         addScore(points, rx, ry + 40f, Color(Pal.YELLOW))
         netSwish = 1f
         multSpring.snap(1.6f)
+        scene.made(hoopX, swish, streak)
         if (swish) popups.add("SWISH!", CX, 110f, Color(Pal.CYAN), size = 4f)
         when {
             streak >= HoopsTuning.MAX_MULTIPLIER -> {
@@ -438,147 +455,37 @@ class HoopsGame : BaseMiniGame() {
         look(0f, CAM_Y * S, -CAM_Z * S, 0f, CAM_Y * S, -CAM_Z * S - 1000f, fovDeg = fov, centerYFrac = HORIZON / GAME_H)
     }
 
-    private val court: Model by lazy {
-        val b = ModelBuilder()
-        val w = CAGE_HALF_W * S
-        val back = -BACK_Z * S
-        b.quad(-w, 0f, back, w, 0f, back, w, 0f, 60f, -w, 0f, 60f, HoopsArt.floor.full, 0f, 1f, 0f)
-        b.quad(-w - 60f, 420f, back, w + 60f, 420f, back, w + 60f, 0f, back, -w - 60f, 0f, back, HoopsArt.backWall.full, 0f, 0f, 1f)
-        // Outside the cage: dark carpet and cabinet sides.
-        val side = HoopsArt.cabinet.full
-        b.box(-w - 60f, 0f, back, -w - 4f, 60f, 60f, BoxFaces(top = side, right = side))
-        b.box(w + 4f, 0f, back, w + 60f, 60f, 60f, BoxFaces(top = side, left = side))
-        // Cage posts.
-        val post = HoopsArt.post.full
-        for (sx in floatArrayOf(-w, w)) for (z in floatArrayOf(back + 4f, -100f)) {
-            b.box(sx - 3f, 0f, z - 3f, sx + 3f, 420f, z + 3f, BoxFaces(front = post, left = post, right = post, top = post))
-        }
-        b.box(-w, 414f, -104f, w, 420f, -96f, BoxFaces(front = post, top = post))
-        b.build()
-    }
-
-    /** Backboard, bracket and pole, centred on the hoop (moved each frame). */
-    private val board: Model by lazy {
-        val b = ModelBuilder()
-        val hw = BOARD_HALF_W * S
-        val bz = -BOARD_Z * S
-        val top = BOARD_TOP * S
-        val bottom = BOARD_BOTTOM * S
-        val edge = HoopsArt.boardEdge.full
-        b.quad(-hw, top, bz, hw, top, bz, hw, bottom, bz, -hw, bottom, bz, HoopsArt.board.full, 0f, 0f, 1f)
-        b.box(-hw, bottom, bz - 5f, hw, top, bz, BoxFaces(top = edge, left = edge, right = edge))
-        val pole = HoopsArt.post.full
-        b.box(-6f, 0f, bz - 30f, 6f, top - 20f, bz - 18f, BoxFaces(front = pole, left = pole, right = pole))
-        b.box(-6f, top - 40f, bz - 30f, 6f, top - 28f, bz - 5f, BoxFaces(front = pole, top = pole, left = pole, right = pole))
-        // Bracket from the board to the rim.
-        val rimY = RIM_Y * S
-        b.box(-4f, rimY - 6f, -(HOOP_Z + RIM_R) * S, 4f, rimY, bz, BoxFaces(top = pole, left = pole, right = pole))
-        b.build()
-    }
-
-    private val rim: Model by lazy {
-        val b = ModelBuilder()
-        val r = RIM_R * S
-        val t = HoopsArt.rim.full
-        b.cylinder(0f, 0f, -1.6f, 1.6f, r + 1.2f, 18, t)
-        b.cylinder(0f, 0f, -1.6f, 1.6f, r - 1.2f, 18, t, inward = true)
-        b.annulus(0f, 0f, 1.6f, r - 1.2f, r + 1.2f, 18, t)
-        b.build()
-    }
-
-    private val boardXf = Xform()
-    private val rimXf = Xform()
-    private val gymLight = PointLight(0f, 380f, -200f, 1f, 0.95f, 0.85f, 520f, 1f)
-    private val fireLight = PointLight(0f, RIM_Y * S, -HOOP_Z * S, 1f, 0.5f, 0.15f, 220f, 0f)
-
     override fun render(scope: DrawScope) {
         val r = stage.begin()
-        val l = r.lighting
-        l.ambR = 0.55f; l.ambG = 0.52f; l.ambB = 0.62f
-        l.setDirection(0f, 1f, 0.6f)
-        l.dirR = 0.35f; l.dirG = 0.33f; l.dirB = 0.3f
-        l.points.clear()
-        l.points += gymLight
-        if (streak >= HoopsTuning.MAX_MULTIPLIER) {
-            fireLight.x = hoopX * S
-            fireLight.intensity = 1.2f + 0.4f * sin(time * 14f)
-            l.points += fireLight
-        }
+        scene.light(r, hoopX, streak, time)
         r.gradient(0xFF06030C.toInt(), Pal.NIGHT)
-        court.draw(r)
-        boardXf.set(hoopX * S, 0f, 0f)
-        board.draw(r, xf = boardXf)
+        scene.updateReadouts(makes, shots, streak)
+        scene.drawBackdrop(r, time, streak, multSpring.value)
+        scene.drawPools(r, hoopX, streak)
+        scene.drawBoard(r, hoopX, time, streak)
         val wob = sin(time * 60f) * rimShake * 1.5f
-        rimXf.set(hoopX * S, RIM_Y * S + wob, -HOOP_Z * S)
-        rim.draw(r, xf = rimXf)
-        drawBackLights(r)
-        for (b in balls) if (b.active) drawBall(r, b.x, b.y, b.z, b.spin, 1f, 1f)
+        val rimY = RIM_Y * S + wob
+        scene.rimXf.set(hoopX * S, rimY, -HOOP_Z * S)
+        scene.rimModel.draw(r, xf = scene.rimXf)
+        // A ball passing down through the net makes it bulge round it.
+        var netBallY = -1f
+        for (b in balls) {
+            if (!b.active) continue
+            drawBall(r, b.x, b.y, b.z, b.spin, 1f, 1f)
+            if (b.scored && b.y < RIM_Y + BALL_R && b.y > RIM_Y - 0.55f) netBallY = b.y * S
+        }
         if (hasReady) {
             val s = readySquash.value
             drawBall(r, readyX, START_Y, START_Z, 0f, 2f - s, s)
         }
-        drawNet(r, wob)
-        drawSideNets(r)
+        scene.drawNet(r, hoopX, rimY, time, netSwish, netBallY)
+        scene.drawEffects(r, hoopX, rimY, time, streak, BALL_R * 2f * S)
+        scene.drawCage(r)
         stage.present()
 
         if (hasReady && dragging < 0 && !timeUp) {
             ArcadeFont.drawCentered(scope, "FLICK ${ArcadeFont.UP}", CX, 610f, 2f, Color.White, 0.5f + 0.5f * sin(time * 6f))
         }
-        // Multiplier display.
-        val m = multiplier
-        val label = if (streak >= 1) "x$m" else "x1"
-        val c = when {
-            streak >= HoopsTuning.MAX_MULTIPLIER -> Pal.ORANGE
-            streak >= 2 -> Pal.PINK
-            else -> Pal.GRAY
-        }
-        ArcadeFont.drawCentered(scope, label, 318f, 26f, 4f * multSpring.value, Color(c))
-        ArcadeFont.drawCentered(scope, "MULT", 318f, 62f, 2f, Color(Pal.LIGHTGRAY))
-        ArcadeFont.drawCentered(scope, "$makes/$shots", 42f, 34f, 2f, Color(Pal.LIGHTGRAY))
-    }
-
-    private fun drawBackLights(r: Renderer3D) {
-        val white = TexKit.white.full
-        val glow = TexKit.glow.full
-        val z = -BACK_Z * S + 1f
-        for (i in 0 until 10) {
-            val on = ((time * 6f).toInt() + i) % 3 != 0
-            val x = (-0.9f + i * 0.2f) * S
-            r.sprite(x, 370f, z, 8f, 8f, TexKit.dot.full, emissive = 1.2f, tint = if (on) Pal.RED else Pal.DARKRED)
-            if (on) r.sprite(x, 370f, z + 1f, 30f, 30f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.45f, tint = Pal.RED)
-        }
-    }
-
-    private fun drawNet(r: Renderer3D, wob: Float) {
-        val tex = TexKit.white.full
-        val n = 12
-        val rimR = RIM_R * S
-        val drop = (0.36f + netSwish * 0.1f) * S
-        val bottomR = rimR * (0.6f - netSwish * 0.15f)
-        val sway = sin(time * 20f) * netSwish * 3f
-        val cx = hoopX * S
-        val cz = -HOOP_Z * S
-        val top = RIM_Y * S + wob - 1f
-        for (i in 0 until n) {
-            val a = i / n.toFloat() * TAU
-            val tx = cx + cos(a) * rimR
-            val tz = cz + sin(a) * rimR
-            for (d in intArrayOf(-1, 1)) {
-                val a2 = a + d * 0.3f
-                val bx = cx + cos(a2) * bottomR + sway
-                val bz = cz + sin(a2) * bottomR
-                r.beam(tx, top, tz, bx, top - drop, bz, 1.4f, tex, blend = Blend.ALPHA, alpha = 0.85f)
-            }
-        }
-    }
-
-    private fun drawSideNets(r: Renderer3D) {
-        val w = CAGE_HALF_W * S
-        val net = HoopsArt.net.full
-        for (x in floatArrayOf(-w, w)) {
-            r.quad(x, 420f, -BACK_Z * S, x, 420f, -100f, x, 0f, -100f, x, 0f, -BACK_Z * S, net, if (x < 0f) 1f else -1f, 0f, 0f, blend = Blend.ALPHA, cull = false)
-        }
-        r.quad(-w, 420f, -100f, w, 420f, -100f, w, 420f, -BACK_Z * S, -w, 420f, -BACK_Z * S, net, 0f, -1f, 0f, blend = Blend.ALPHA, cull = false)
     }
 
     private val ballModel by lazy { HoopsArt.ball(BALL_R * S) }
@@ -602,18 +509,105 @@ class HoopsGame : BaseMiniGame() {
 
     // ---------------------------------------------------------------- attract mode
 
+    /**
+     * A night court in miniature: crowd flashes, a lit backboard and a neon title, and a ball
+     * that arcs up, swishes through the net (which kicks, with a glint and a "+13") and drops
+     * away, every few seconds from a different spot. [w] × [h] is the cabinet's small screen.
+     */
     override fun drawAttract(p: Painter, w: Int, h: Int, time: Float) {
-        p.fill(0, 0, w, h, Color(Pal.PLUM))
-        val bx = w / 2f + sin(time * 1.1f) * (w / 5f)
-        p.fill(bx - 5f, 1f, 10f, 5f, Color.White)
-        p.frame(bx - 5f, 1f, 10f, 5f, Color(Pal.RED))
-        p.fill(bx - 3f, 6f, 6f, 1f, Color(Pal.ORANGE))
-        p.fill(bx - 2f, 7f, 1f, 2f, Color.White)
-        p.fill(bx + 1f, 7f, 1f, 2f, Color.White)
-        val t = (time % 1.6f) / 1.6f
-        val ballX = lerp(w / 2f, bx, t)
-        val ballY = lerp(h - 2f, 5f, t) - sin(t * Math.PI.toFloat()) * 3f
-        p.disc(ballX, ballY, 1.6f, Color(Pal.ORANGE))
-        p.fill(0, h - 1, w, 1, Color(Pal.WOOD))
+        val wf = w.toFloat()
+        val hf = h.toFloat()
+        val cx = wf / 2f
+        // Night sky and arena, in bands.
+        val bands = 6
+        val skyH = hf * 0.66f
+        for (i in 0 until bands) {
+            p.fill(0f, i * skyH / bands, wf, skyH / bands + 0.3f, Color(Pal.mix(0xFF07040F.toInt(), 0xFF2A1750.toInt(), i / (bands - 1f))))
+        }
+        // The crowd, two rows of heads bobbing, with camera flashes.
+        for (row in 0..1) {
+            val y = hf * (0.52f + row * 0.09f)
+            val shade = if (row == 0) 0xFF150C2C else 0xFF23164A
+            for (i in 0 until 13) {
+                val x = i * (wf / 12f) + row * 0.9f - 0.4f
+                val bob = sin(time * 2.6f + i * 1.7f + row) * 0.25f
+                p.disc(x, y + bob, 1.05f, Color(shade.toInt()))
+                p.fill(x - 1.1f, y + 0.9f + bob, 2.2f, hf, Color(shade.toInt()))
+            }
+        }
+        for (i in 0 until 3) {
+            val u = (time * 1.3f + i * 0.7f) % 2.4f
+            if (u < 0.12f) p.disc(1.5f + hash01(i, (time * 1.3f + i * 0.7f).toInt()) * (wf - 3f), hf * (0.5f + i * 0.04f), 0.55f, Color.White, 1f - u / 0.12f)
+        }
+        // The court and its key.
+        val floorY = hf * 0.72f
+        p.fill(0f, floorY, wf, hf - floorY, Color(0xFF6B4524.toInt()))
+        p.fill(0f, floorY, wf, 0.5f, Color(0xFF2A1A0C.toInt()))
+        p.fill(cx - 3.2f, floorY + 0.6f, 6.4f, hf - floorY, Color(0xFF8E2A38.toInt()), 0.6f)
+        p.fill(cx - 3.2f, floorY + 0.6f, 0.4f, hf - floorY, Color(0xFFDCCFAE.toInt()))
+        p.fill(cx + 2.8f, floorY + 0.6f, 0.4f, hf - floorY, Color(0xFFDCCFAE.toInt()))
+
+        // Backboard, rim and net.
+        val cycle = 3.4f
+        val n = (time / cycle).toInt()
+        val t = time % cycle
+        val boardTop = hf * 0.06f
+        p.fill(cx - 4.4f, boardTop, 8.8f, 5.2f, Color(0xFF16224A.toInt()))
+        p.frame(cx - 4.4f, boardTop, 8.8f, 5.2f, Color(Pal.RED))
+        p.frame(cx - 1.8f, boardTop + 1.8f, 3.6f, 2.6f, Color(Pal.RED), 0.8f)
+        val rimY = boardTop + 5.2f
+        val swish = if (t in 1.3f..1.9f) 1f - (t - 1.3f) / 0.6f else 0f
+        // Net: five strands narrowing, kicking sideways after a make.
+        for (k in -2..2) {
+            val top = cx + k * 0.75f
+            val foot = cx + k * 0.42f + sin(time * 22f) * swish * 0.5f
+            var px = top
+            var py = rimY
+            for (seg in 1..3) {
+                val u = seg / 3f
+                val nx = lerp(top, foot, u)
+                val ny = rimY + 2.6f * u * (1f + swish * 0.2f)
+                p.fill(minOf(px, nx), py, maxOf(abs(nx - px), 0.35f), maxOf(ny - py, 0.35f), Color(0xFFE4E0F0.toInt()), 0.8f)
+                px = nx; py = ny
+            }
+        }
+        p.fill(cx - 2.5f, rimY - 0.2f, 5f, 0.6f, Color(Pal.ORANGE))
+        p.disc(cx - 2.5f, rimY + 0.1f, 0.55f, Color(Pal.ORANGE))
+        p.disc(cx + 2.5f, rimY + 0.1f, 0.55f, Color(Pal.ORANGE))
+        if (swish > 0f) {
+            // The rim flares and a ring runs out from it.
+            p.disc(cx, rimY + 0.4f, 1.6f + (1f - swish) * 4f, Color(Pal.YELLOW), swish * 0.25f)
+            p.frame(cx - 2.5f - (1f - swish) * 3f, rimY - 0.7f, 5f + (1f - swish) * 6f, 1.4f, Color(Pal.WHITE), swish * 0.7f)
+        }
+
+        // The shot: an arc from a different spot each time, a trail behind it, then down through the net.
+        val startX = cx + (hash01(n, 7) - 0.5f) * 12f
+        val flight = 1.05f
+        val u = (t - 0.35f) / flight
+        if (u in 0f..1f) {
+            for (k in 4 downTo 0) {
+                val uu = (u - k * 0.035f).coerceAtLeast(0f)
+                p.disc(shotX(startX, cx, uu), shotY(hf, rimY, uu), 1.35f * (1f - k * 0.13f), Color(Pal.ORANGE), 0.9f - k * 0.17f)
+            }
+            p.disc(shotX(startX, cx, u) - 0.4f, shotY(hf, rimY, u) - 0.4f, 0.5f, Color.White, 0.6f)
+        } else if (t in 0.35f + flight..1.9f + flight) {
+            val fall = (t - 0.35f - flight) / 0.55f
+            val by = rimY + 0.3f + fall * fall * (hf - rimY)
+            p.disc(cx, by, 1.35f, Color(Pal.ORANGE))
+        }
+        if (t in 1.5f..2.5f) {
+            val rise = (t - 1.5f) / 1.0f
+            p.textCentered("+13", cx, boardTop - 0.3f - rise * 2f, Color(Pal.YELLOW), tiny = true, alpha = 1f - rise, size = 0.6f)
+        }
+
+        // Neon title, pulsing.
+        val pulse = 0.75f + 0.25f * sin(time * 4f)
+        p.textCentered("HOOP SHOT", cx, hf - 3.6f, Color(Pal.ORANGE), tiny = true, alpha = 0.5f * pulse, size = 0.66f)
+        p.textCentered("HOOP SHOT", cx, hf - 3.6f, Color(Pal.CREAM), tiny = true, alpha = pulse, size = 0.62f)
     }
+
+    /** The shot's path across the little screen: [u] runs 0 to 1 from the shooter's spot to the rim. */
+    private fun shotX(startX: Float, cx: Float, u: Float): Float = lerp(startX, cx, u)
+
+    private fun shotY(h: Float, rimY: Float, u: Float): Float = lerp(h - 2f, rimY - 0.4f, u) - sin(u * Math.PI.toFloat()) * (h * 0.36f)
 }
