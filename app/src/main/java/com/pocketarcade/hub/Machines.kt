@@ -371,39 +371,70 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         c.light(cx, 44f, boardZ + 20f, 0xFFFFE8C8.toInt(), 60f, 0.9f)
     }
 
-    /** Basketball alley: court ramp, net cage, backboard with rim and net. */
+    /**
+     * Basketball alley: printed side walls with chrome caps, a court ramp, a net cage with a
+     * chrome frame, and at the end a backboard with an LED border, a rim and net, and a framed
+     * score display; the coin door, a credits display and a ticket dispenser on the console.
+     */
     private fun hoops(c: CabinetBuild) {
         val b = c.b
-        val side = art.sideArt.full
+        val side = art.sideArtLong.full
         val inner = art.bodyPaint.full
         val dark = art.darkPaint.full
+        val chrome = HallArt.chrome.full
+        val black = HallArt.solid(0xFF14121A.toInt()).full
         val wallH = 30f
-        b.beveledBox(x0, 0f, z0 + 4f, x0 + 2f, wallH, z1, BoxFaces(left = side, right = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
-        b.beveledBox(x1 - 2f, 0f, z0 + 4f, x1, wallH, z1, BoxFaces(right = side, left = inner, top = art.trimTex.full, front = art.trimTex.full, frontEmissive = 0.8f, gloss = 0.4f))
-        b.beveledBox(x0 + 2f, 0f, z1 - 12f, x1 - 2f, 20f, z1, BoxFaces(front = art.kick.full, top = HallArt.solid(0xFF14121A.toInt()).full, gloss = 0.3f))
-        c.coinDoor(cx, 4f, z1, 7f)
+        for (s in intArrayOf(-1, 1)) {
+            val xa = if (s < 0) x0 else x1 - 2f
+            val faces = if (s < 0) BoxFaces(left = side, right = inner, top = dark, front = dark, gloss = 0.4f) else BoxFaces(right = side, left = inner, top = dark, front = dark, gloss = 0.4f)
+            b.beveledBox(xa, 0f, z0 + 4f, xa + 2f, wallH, z1, faces)
+            b.box(xa - 0.15f, wallH, z0 + 4f, xa + 2.15f, wallH + 0.6f, z1, BoxFaces(top = chrome, front = chrome, left = chrome, right = chrome, gloss = 0.9f))
+            c.tMoulding(xa - 0.15f, xa + 2.15f, 0f, wallH, z1)
+        }
+        b.beveledBox(x0 + 2f, 0f, z1 - 12f, x1 - 2f, 20f, z1, BoxFaces(front = art.kick.full, top = black, gloss = 0.3f))
+        c.coinDoor(cx - 4f, 4f, z1, 7f)
+        c.ticketDispenser(cx + 6f, 5f, z1 + 0.5f, 6.5f)
+        c.display(cx - 6f, cx + 6f, 14.8f, 18.2f, z1 + 0.05f)
+        c.screenBezel(cx - 6f, cx + 6f, 14.8f, 18.2f, z1 + 0.05f, frame = 0.6f, depth = 0.4f)
+        // A chrome-lipped rack for the balls on the console.
+        val tray = BoxFaces(top = chrome, front = chrome, left = chrome, right = chrome, gloss = 0.85f)
+        b.box(x0 + 3f, 20f, z1 - 1.5f, x1 - 3f, 21.4f, z1 - 0.8f, tray)
+        b.box(x0 + 3f, 20f, z1 - 10f, x0 + 3.8f, 21.4f, z1 - 1.5f, tray)
+        b.box(x1 - 3.8f, 20f, z1 - 10f, x1 - 3f, 21.4f, z1 - 1.5f, tray)
         b.quad(x0 + 2f, 28f, z0 + 4f, x1 - 2f, 28f, z0 + 4f, x1 - 2f, 20f, z1 - 12f, x0 + 2f, 20f, z1 - 12f, MachineKit.court.full, 0f, 0.99f, 0.1f, gloss = 0.45f)
-        // Backboard frame, board, rim and net.
+        // Backboard frame, board, an LED border round it, rim and net.
         b.beveledBox(x0, 0f, z0, x1, h - 10f, z0 + 4f, BoxFaces(front = dark, left = dark, right = dark, top = dark, back = dark))
         c.rearPanel(x0, x1, 1f, h - 10f)
         b.quad(cx - 13f, h - 13f, z0 + 4.2f, cx + 13f, h - 13f, z0 + 4.2f, cx + 13f, h - 31f, z0 + 4.2f, cx - 13f, h - 31f, z0 + 4.2f, MachineKit.hoopBoard.full, 0f, 0f, 1f, gloss = 0.9f, emissive = 0.4f)
+        val lz = z0 + 4.25f
+        c.ledStrip(cx - 13.7f, h - 13f, cx + 13.7f, h - 12.3f, lz)
+        c.ledStrip(cx - 13.7f, h - 31.7f, cx + 13.7f, h - 31f, lz)
+        c.ledStrip(cx - 13.7f, h - 31f, cx - 13f, h - 13f, lz)
+        c.ledStrip(cx + 13f, h - 31f, cx + 13.7f, h - 13f, lz)
         val rimY = h - 29f
         val rimZ = z0 + 10f
         val orange = HallArt.paint(0xFFFF7A1A.toInt(), 0.3f, 0.8f).full
-        b.torus(cx, rimY, rimZ, 4.6f, 0.45f, orange, segments = 18, sides = 6, gloss = 0.7f)
+        b.torus(cx, rimY, rimZ, 4.6f, 0.45f, orange, segments = 16, sides = 6, gloss = 0.7f)
         b.box(cx - 0.6f, rimY - 0.5f, z0 + 4f, cx + 0.6f, rimY + 0.3f, rimZ - 4.4f, BoxFaces(top = orange, left = orange, right = orange, front = orange))
         val netRegion = MachineKit.net.region(wrap = true)
         b.cylinder(cx, rimZ, rimY - 7f, rimY, 3f, 12, netRegion, topRadius = 4.5f)
         b.cylinder(cx, rimZ, rimY - 7f, rimY, 3f, 12, netRegion, topRadius = 4.5f, inward = true)
         c.display(cx - 8f, cx + 8f, h - 38f, h - 33f, z0 + 4.1f)
+        c.screenBezel(cx - 8f, cx + 8f, h - 38f, h - 33f, z0 + 4.1f, frame = 0.8f, depth = 0.45f)
         c.marqueeBox(x0 - 1f, x1 + 1f, h - 10f, h, z0, z0 + 6f)
-        // Net cage over the alley.
+        // Net cage over the alley, on a chrome frame.
         val net = MachineKit.net.region(wrap = true)
         val cageEnd = z1 - 14f
         val top = h - 12f
         b.quad(x0, top, z0 + 4f, x1, top, z0 + 4f, x1, top, cageEnd, x0, top, cageEnd, net, 0f, -1f, 0f, u1 = 80f, v1 = 160f, blend = Blend.ALPHA, cull = false)
         b.quad(x0 + 0.3f, top, z0 + 4f, x0 + 0.3f, top, cageEnd, x0 + 0.3f, wallH, cageEnd, x0 + 0.3f, wallH, z0 + 4f, net, 1f, 0f, 0f, u1 = 160f, v1 = 90f, blend = Blend.ALPHA, cull = false)
         b.quad(x1 - 0.3f, top, cageEnd, x1 - 0.3f, top, z0 + 4f, x1 - 0.3f, wallH, z0 + 4f, x1 - 0.3f, wallH, cageEnd, net, -1f, 0f, 0f, u1 = 160f, v1 = 90f, blend = Blend.ALPHA, cull = false)
+        val frame = BoxFaces(front = chrome, top = chrome, left = chrome, right = chrome, back = chrome, gloss = 0.9f)
+        b.box(x0, top - 0.5f, z0 + 4f, x0 + 1f, top + 0.5f, cageEnd, frame)
+        b.box(x1 - 1f, top - 0.5f, z0 + 4f, x1, top + 0.5f, cageEnd, frame)
+        b.box(x0, top - 0.5f, cageEnd - 1f, x1, top + 0.5f, cageEnd, frame)
+        b.box(x0, wallH, cageEnd - 1f, x0 + 1f, top, cageEnd, frame)
+        b.box(x1 - 1f, wallH, cageEnd - 1f, x1, top, cageEnd, frame)
         for (k in 0 until 3) b.add(MachineKit.basketball, xf.set(cx - 7f + k * 7f, 23.2f, z1 - 6f, yaw = k * 1.3f, scale = 3.2f))
         c.light(cx, h - 16f, z0 + 20f, 0xFFFFE8C8.toInt(), 70f, 0.9f)
     }
@@ -451,23 +482,33 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         c.light(cx, glassTop - 5f, (z0 + z1) / 2f, 0xFFFFD27A.toInt(), 44f, 1.1f)
     }
 
-    /** Air hockey (or a generic table with a screen): table on legs, glowing surface, overhead scoreboard. */
+    /**
+     * Air hockey (or a generic table with a screen): a table on legs with levelling feet, a glowing
+     * air-hole surface, padded rails lit along their inner edge with glowing goal mouths, the coin
+     * door and a ticket dispenser on the front, and an overhead scoreboard on a post.
+     */
     private fun table(c: CabinetBuild, hockey: Boolean) {
         val b = c.b
         val top = 22f
-        val side = art.sideArt.full
+        val side = art.sideArtLong.full
         val dark = art.darkPaint.full
         val metal = HallArt.darkMetal.full
+        val chrome = HallArt.chrome.full
         val leg = BoxFaces(front = metal, left = metal, right = metal, back = metal)
         for ((lx, lz) in listOf(x0 + 1f to z0 + 7f, x1 - 3f to z0 + 7f, x0 + 1f to z1 - 3f, x1 - 3f to z1 - 3f)) {
-            b.box(lx, 0f, lz, lx + 2f, 9f, lz + 2f, leg)
+            b.box(lx, 0.5f, lz, lx + 2f, 9f, lz + 2f, leg)
+            b.box(lx - 0.3f, 0f, lz - 0.3f, lx + 2.3f, 0.5f, lz + 2.3f, BoxFaces.all(dark))
         }
         b.beveledBox(x0 + 0.5f, 9f, z0 + 6f, x1 - 0.5f, top, z1, BoxFaces(front = art.kick.full, left = side, right = side, back = dark, gloss = 0.3f))
+        c.tMoulding(x0 + 0.35f, x0 + 2.1f, 9f, top, z1)
+        c.tMoulding(x1 - 2.1f, x1 - 0.35f, 9f, top, z1)
         c.rearPanel(x0 + 0.5f, x1 - 0.5f, 9.5f, top, z0 + 6f)
-        c.coinDoor(cx, 10.5f, z1, 7.5f)
+        c.coinDoor(cx - 6f, 10.5f, z1, 7.5f)
+        c.ticketDispenser(cx + 8f, 11f, z1 + 0.5f, 6f)
         val surface = if (hockey) MachineKit.hockeySurface.full else dark
         b.quad(x0 + 2f, top + 0.3f, z0 + 7.5f, x1 - 2f, top + 0.3f, z0 + 7.5f, x1 - 2f, top + 0.3f, z1 - 1.5f, x0 + 2f, top + 0.3f, z1 - 1.5f, surface, 0f, 1f, 0f, emissive = 0.55f, gloss = 0.8f)
-        val rail = art.trimTex.full
+        // Padded rails, their tops shaded from the trim colour.
+        val rail = HallArt.paint(art.trim, 0f, 0.55f).full
         val rf = BoxFaces(front = rail, top = rail, left = rail, right = rail, back = rail, gloss = 0.6f)
         b.box(x0, top, z0 + 6f, x0 + 2f, top + 3f, z1, rf)
         b.box(x1 - 2f, top, z0 + 6f, x1, top + 3f, z1, rf)
@@ -475,18 +516,41 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         b.box(cx + 6f, top, z1 - 1.5f, x1, top + 3f, z1, rf)
         b.box(x0, top, z0 + 6f, cx - 6f, top + 3f, z0 + 7.5f, rf)
         b.box(cx + 6f, top, z0 + 6f, x1, top + 3f, z0 + 7.5f, rf)
-        // Overhead scoreboard on a post.
-        b.box(cx - 1.5f, top, z0 + 1f, cx + 1.5f, h - 12f, z0 + 4f, leg)
+        // The rails' inner faces carry a strip of light (the table's rim light) and the goal mouths glow.
+        val glowTex = art.glowTex.full
+        val rimE = MachineKit.glowFor(art.glow, 1.1f)
+        val ry0 = top + 0.9f
+        val ry1 = top + 1.7f
+        b.quad(x0 + 2.02f, ry1, z0 + 7.5f, x0 + 2.02f, ry1, z1 - 1.5f, x0 + 2.02f, ry0, z1 - 1.5f, x0 + 2.02f, ry0, z0 + 7.5f, glowTex, 1f, 0f, 0f, emissive = rimE)
+        b.quad(x1 - 2.02f, ry1, z1 - 1.5f, x1 - 2.02f, ry1, z0 + 7.5f, x1 - 2.02f, ry0, z0 + 7.5f, x1 - 2.02f, ry0, z1 - 1.5f, glowTex, -1f, 0f, 0f, emissive = rimE)
+        for ((xa, xb) in listOf((x0 + 2f) to (cx - 6f), (cx + 6f) to (x1 - 2f))) {
+            b.quad(xa, ry1, z0 + 7.52f, xb, ry1, z0 + 7.52f, xb, ry0, z0 + 7.52f, xa, ry0, z0 + 7.52f, glowTex, 0f, 0f, 1f, emissive = rimE)
+            b.quad(xb, ry1, z1 - 1.52f, xa, ry1, z1 - 1.52f, xa, ry0, z1 - 1.52f, xb, ry0, z1 - 1.52f, glowTex, 0f, 0f, -1f, emissive = rimE)
+        }
         if (hockey) {
-            b.box(x0 - 3f, h - 14f, z0, x1 + 3f, h, z0 + 4f, BoxFaces(front = art.marquee.full, top = dark, left = dark, right = dark, back = dark, frontEmissive = 1.25f))
+            val redGoal = HallArt.solid(0xFFE8323C.toInt()).full
+            val blueGoal = HallArt.solid(0xFF2F5BE0.toInt()).full
+            b.quad(cx - 6f, top + 2.6f, z0 + 7.52f, cx + 6f, top + 2.6f, z0 + 7.52f, cx + 6f, top + 0.4f, z0 + 7.52f, cx - 6f, top + 0.4f, z0 + 7.52f, redGoal, 0f, 0f, 1f, emissive = 1f)
+            b.quad(cx + 6f, top + 2.6f, z1 - 1.52f, cx - 6f, top + 2.6f, z1 - 1.52f, cx - 6f, top + 0.4f, z1 - 1.52f, cx + 6f, top + 0.4f, z1 - 1.52f, blueGoal, 0f, 0f, -1f, emissive = 1f)
+        }
+        // Overhead scoreboard on a post, framed in dark metal.
+        b.box(cx - 1.5f, top, z0 + 1f, cx + 1.5f, h - 12f, z0 + 4f, leg)
+        val frame = BoxFaces(front = metal, top = metal, left = metal, right = metal, back = metal, gloss = 0.7f)
+        if (hockey) {
+            b.box(x0 - 3f, h - 14f, z0, x1 + 3f, h, z0 + 4f, BoxFaces(front = art.marquee.full, top = dark, left = dark, right = dark, back = dark, frontEmissive = CabinetBuild.MARQUEE_GLOW))
+            b.box(x0 - 3f, h - 14.6f, z0, x1 + 3f, h - 13.8f, z0 + 4.2f, frame)
+            b.box(x0 - 3f, h - 0.1f, z0, x1 + 3f, h + 0.5f, z0 + 4.2f, frame)
             c.underside(x0 - 3f, x1 + 3f, z0, z0 + 4f, h - 14f)
             c.display(cx - 8f, cx + 8f, h - 20f, h - 15f, z0 + 4.2f)
-            b.quad(cx - 8f, h - 15f, z0 + 4.1f, cx + 8f, h - 15f, z0 + 4.1f, cx + 8f, h - 20f, z0 + 4.1f, cx - 8f, h - 20f, z0 + 4.1f, dark, 0f, 0f, 1f)
+            c.screenBezel(cx - 8f, cx + 8f, h - 20f, h - 15f, z0 + 4.2f, frame = 0.8f, depth = 0.45f)
         } else {
             val live = c.liveScreen()
             b.box(x0 - 3f, h - 22f, z0, x1 + 3f, h, z0 + 4f, BoxFaces(front = art.bezel.full, top = dark, left = dark, right = dark, back = dark))
+            b.box(x0 - 3f, h - 22.6f, z0, x1 + 3f, h - 21.8f, z0 + 4.2f, frame)
+            b.box(x0 - 3f, h - 0.1f, z0, x1 + 3f, h + 0.5f, z0 + 4.2f, frame)
             c.underside(x0 - 3f, x1 + 3f, z0, z0 + 4f, h - 22f)
-            b.quad(x0 - 1f, h - 2f, z0 + 4.15f, x1 + 1f, h - 2f, z0 + 4.15f, x1 + 1f, h - 20f, z0 + 4.15f, x0 - 1f, h - 20f, z0 + 4.15f, live.texture.full, 0f, 0f, 1f, emissive = 1.1f)
+            b.quad(x0 - 1f, h - 2f, z0 + 4.15f, x1 + 1f, h - 2f, z0 + 4.15f, x1 + 1f, h - 20f, z0 + 4.15f, x0 - 1f, h - 20f, z0 + 4.15f, live.texture.full, 0f, 0f, 1f, emissive = SCREEN_GLOW)
+            c.screenBezel(x0 - 1f, x1 + 1f, h - 20f, h - 2f, z0 + 4.15f, frame = 1f, depth = 0.5f)
         }
         c.bulbRow(x0 - 2f, x1 + 2f, h + 0.6f, z0 + 3.4f, 10)
         c.light(cx, top + 26f, (z0 + z1) / 2f, lift(art.glow, 0.4f), 60f, 0.9f)

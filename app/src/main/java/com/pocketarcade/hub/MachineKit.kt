@@ -98,21 +98,27 @@ object MachineKit {
         tp.toTexture().also { tp.recycle() }
     }
 
+    /**
+     * The air-hockey surface (painted at 3x): pale ice-blue with a grid of air holes, the red
+     * centre line and circle, blue goal arcs and creases, and dark goal slots at both ends.
+     */
     val hockeySurface: Texture by lazy {
-        val w = 128
-        val h = 256
-        val tp = TexPaint(w, h)
-        tp.vgrad(0f, 0f, w.toFloat(), h.toFloat(), 0xFFF2F8FF.toInt(), 0xFFD8E8FA.toInt())
-        for (y in 6 until h step 10) for (x in 6 until w step 10) tp.circle(x.toFloat(), y.toFloat(), 1f, 0xFF9DB4D0.toInt())
-        tp.rect(0f, h / 2f - 2f, w.toFloat(), 4f, 0xFFE8323C.toInt())
-        tp.ring(w / 2f, h / 2f, 22f, 3f, 0xFFE8323C.toInt())
-        tp.ring(w / 2f, 0f, 30f, 3f, 0xFF2F5BE0.toInt())
-        tp.ring(w / 2f, h.toFloat(), 30f, 3f, 0xFF2F5BE0.toInt())
-        tp.rect(0f, h * 0.25f, w.toFloat(), 3f, 0xFF2F5BE0.toInt())
-        tp.rect(0f, h * 0.75f, w.toFloat(), 3f, 0xFF2F5BE0.toInt())
-        tp.rect(w / 2f - 22f, 0f, 44f, 5f, 0xFF101018.toInt())
-        tp.rect(w / 2f - 22f, h - 5f, 44f, 5f, 0xFF101018.toInt())
-        tp.toTexture().also { tp.recycle() }
+        paintTexture(128, 256, 3) {
+            val w = 128f
+            val h = 256f
+            vgrad(0f, 0f, w, h, 0xFFF2F8FF.toInt(), 0xFFD8E8FA.toInt())
+            for (y in 6 until 256 step 10) for (x in 6 until 128 step 10) circle(x.toFloat(), y.toFloat(), 1.1f, 0xFF9DB4D0.toInt())
+            rect(0f, h / 2f - 2f, w, 4f, 0xFFE8323C.toInt())
+            ring(w / 2f, h / 2f, 22f, 3f, 0xFFE8323C.toInt())
+            circle(w / 2f, h / 2f, 3f, 0xFFE8323C.toInt())
+            ring(w / 2f, 0f, 30f, 3f, 0xFF2F5BE0.toInt())
+            ring(w / 2f, h, 30f, 3f, 0xFF2F5BE0.toInt())
+            rect(0f, h * 0.25f, w, 3f, 0xFF2F5BE0.toInt())
+            rect(0f, h * 0.75f, w, 3f, 0xFF2F5BE0.toInt())
+            round(w / 2f - 22f, -2f, 44f, 7f, 3f, 0xFF101018.toInt())
+            round(w / 2f - 22f, h - 5f, 44f, 7f, 3f, 0xFF101018.toInt())
+            grain(0.02f, 9)
+        }
     }
 
     /** Hole positions for the whack-a-mole table top (fractions of width and depth). */
@@ -289,7 +295,7 @@ object MachineKit {
         for (x in intArrayOf(0, 32, 64, 96)) tp.rect(x.toFloat(), 0f, 2.5f, 64f, 0xFF3A1A08.toInt())
         tp.rect(0f, 31f, 128f, 2.5f, 0xFF3A1A08.toInt())
         val tex = tp.toTexture().also { tp.recycle() }
-        ModelBuilder().sphere(0f, 0f, 0f, 1f, tex.full, slices = 16, stacks = 10, gloss = 0.25f).build()
+        ModelBuilder().sphere(0f, 0f, 0f, 1f, tex.full, slices = 12, stacks = 8, gloss = 0.3f).build()
     }
 
     val coin: Model by lazy {
