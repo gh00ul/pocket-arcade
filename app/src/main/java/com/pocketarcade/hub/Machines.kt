@@ -417,9 +417,13 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         }
     }
 
-    /** Glass and netting, drawn after every solid thing. */
+    /**
+     * Glass and netting, drawn after every solid thing, then the additive glows (halos, light
+     * pools under the cabinet, neon edges) over them.
+     */
     fun drawTransparent(r: Renderer3D) {
-        if (model.hasAlpha || model.hasAdd) model.draw(r, Blend.ALPHA)
+        if (model.hasAlpha) model.draw(r, Blend.ALPHA)
+        if (model.hasAdd) model.draw(r, Blend.ADD)
     }
 
     /** Chasing marquee bulbs, with a soft halo each. */
