@@ -394,6 +394,126 @@ object HallArt {
         tp.toTexture().also { tp.recycle() }
     }
 
+    // ------------------------------------------------------------------ overhead, seen from the floor
+
+    /** Dark acoustic ceiling tiles in a grid of thin metal runners; tiles both ways. */
+    val ceilingTiles: Texture by lazy {
+        val n = 128
+        val tp = TexPaint(n, n)
+        tp.fill(0xFF0B0913.toInt())
+        for (y in 0 until 2) for (x in 0 until 2) {
+            val px = x * 64f
+            val py = y * 64f
+            tp.vgrad(px + 2f, py + 2f, 60f, 60f, 0xFF15121F.toInt(), 0xFF100D18.toInt())
+            // The fissured acoustic surface.
+            for (k in 0 until 26) {
+                val fx = px + 4f + hash01(k + x * 31, y + 5) * 56f
+                val fy = py + 4f + hash01(k + y * 17, x + 9) * 56f
+                tp.rect(fx, fy, 2f + hash01(k, 3) * 3f, 1f, 0xFF0A0810.toInt())
+            }
+        }
+        for (k in 0..2) {
+            tp.rect(k * 64f - 1f, 0f, 2f, n.toFloat(), 0xFF2A2634.toInt())
+            tp.rect(0f, k * 64f - 1f, n.toFloat(), 2f, 0xFF2A2634.toInt())
+        }
+        tp.grain(0.04f, 23)
+        tp.toTexture().also { it.repeat = true; tp.recycle() }
+    }
+
+    /** A recessed light panel: a warm diffuser in a slim frame, with a louvred grid. */
+    val troffer: Texture by lazy {
+        val tp = TexPaint(64, 64)
+        tp.fill(0xFF3A3642.toInt())
+        tp.radial(32f, 32f, 34f, 0xFFFFF4DC.toInt(), 0xFFE8D2A8.toInt())
+        tp.rect(0f, 0f, 64f, 4f, 0xFF3A3642.toInt())
+        tp.rect(0f, 60f, 64f, 4f, 0xFF3A3642.toInt())
+        tp.rect(0f, 0f, 4f, 64f, 0xFF3A3642.toInt())
+        tp.rect(60f, 0f, 4f, 64f, 0xFF3A3642.toInt())
+        for (k in 1 until 4) {
+            tp.rect(4f + k * 14f - 1f, 4f, 2f, 56f, 0x55A08A6A)
+            tp.rect(4f, 4f + k * 14f - 1f, 56f, 2f, 0x55A08A6A)
+        }
+        tp.toTexture().also { tp.recycle() }
+    }
+
+    /** Galvanised duct: dull metal with seams every so often; wraps round and along. */
+    val duct: Texture by lazy {
+        val tp = TexPaint(64, 128)
+        tp.vgrad(0f, 0f, 64f, 128f, 0xFF3A3A44.toInt(), 0xFF24242C.toInt())
+        for (y in 0 until 128 step 32) {
+            tp.rect(0f, y.toFloat(), 64f, 3f, 0xFF52525E.toInt())
+            tp.rect(0f, y + 3f, 64f, 1f, 0xFF18181E.toInt())
+        }
+        tp.grain(0.05f, 29)
+        tp.toTexture().also { it.repeat = true; tp.recycle() }
+    }
+
+    /**
+     * The street across from the entrance at night, seen through the shopfront glass: a dusky
+     * sky, a row of shops and flats with lit windows, a diner's neon and the glow of the street
+     * lamps. Painted wide so it fills the glass from anywhere inside.
+     */
+    val streetBackdrop: Texture by lazy {
+        val w = 1024
+        val h = 320
+        val tp = TexPaint(w, h)
+        val fw = w.toFloat()
+        val fh = h.toFloat()
+        tp.vgrad(0f, 0f, fw, fh, 0xFF05040E.toInt(), 0xFF140C2E.toInt(), 0xFF3A1A4A.toInt())
+        for (i in 0 until 90) tp.circle(hash01(i, 91) * fw, hash01(i, 92) * fh * 0.4f, 0.6f + hash01(i, 93) * 0.8f, 0x99FFFFFF.toInt())
+        tp.radial(fw * 0.83f, fh * 0.16f, 40f, 0x44FFF0D0, 0)
+        tp.circle(fw * 0.83f, fh * 0.16f, 14f, 0xFFFFF4DC.toInt())
+        // Far skyline.
+        var x = 0f
+        var k = 0
+        while (x < fw) {
+            val bw = 30f + hash01(k, 94) * 50f
+            val bh = 90f + hash01(k, 95) * 120f
+            tp.rect(x, fh - bh, bw, bh, 0xFF0E0A1C.toInt())
+            var wy = fh - bh + 8f
+            while (wy < fh - 30f) {
+                var wx = x + 5f
+                while (wx < x + bw - 6f) {
+                    if (hash01((wx * 3 + wy).toInt(), k + 7) > 0.72f) tp.rect(wx, wy, 3f, 4f, 0xAAFFD890.toInt())
+                    wx += 8f
+                }
+                wy += 11f
+            }
+            x += bw + 2f
+            k++
+        }
+        // The near row of shops across the street: flat fronts, awnings, lit windows.
+        val shopColors = intArrayOf(0xFF2A1E3A.toInt(), 0xFF1E2A3A.toInt(), 0xFF3A2424.toInt(), 0xFF24322A.toInt())
+        val awnings = intArrayOf(0xFFE8323C.toInt(), 0xFF39A0E6.toInt(), 0xFFFFC83D.toInt(), 0xFF5CC08A.toInt())
+        val names = arrayOf("DINER", "COMICS", "PIZZA", "TOYS", "BOWL", "DONUTS")
+        x = -20f
+        k = 0
+        while (x < fw) {
+            val bw = 120f + hash01(k, 96) * 60f
+            val bh = 110f + hash01(k, 97) * 40f
+            val top = fh - bh
+            tp.rect(x, top, bw - 4f, bh, shopColors[k % shopColors.size])
+            tp.rect(x, top, bw - 4f, 4f, dim(shopColors[k % shopColors.size], 0.6f))
+            // Upstairs windows.
+            for (c in 0 until 3) {
+                val lit = hash01(k * 3 + c, 98) > 0.35f
+                tp.rect(x + 12f + c * (bw - 28f) / 3f, top + 14f, (bw - 40f) / 3f, 22f, if (lit) 0xFFFFD890.toInt() else 0xFF120E1C.toInt())
+            }
+            // Shop window and awning, the name in neon.
+            val sy = fh - 56f
+            tp.rect(x + 8f, sy, bw - 20f, 44f, alpha(lift(awnings[k % awnings.size], 0.55f), 0.85f))
+            tp.rect(x + 8f, sy - 12f, bw - 20f, 12f, awnings[k % awnings.size])
+            for (st in 0 until ((bw - 20f) / 12f).toInt() step 2) tp.rect(x + 8f + st * 12f, sy - 12f, 12f, 12f, alpha(-1, 0.25f))
+            tp.glowText(names[k % names.size], x + bw / 2f - 6f, top + 62f, 24f, -1, awnings[(k + 1) % awnings.size], 7f, Fonts.display)
+            x += bw
+            k++
+        }
+        // The far kerb and a line of light where the street lamps pool on it.
+        tp.rect(0f, fh - 10f, fw, 10f, 0xFF3A3642.toInt())
+        for (i in 0 until 6) tp.radial(fw * (0.08f + i * 0.17f), fh - 8f, 60f, 0x55FFD8A0, 0)
+        tp.toTexture().also { tp.recycle() }
+    }
+
     /** A fan of coloured light thrown up a wall by a floor-level fixture (additive, white). */
     val washer: Texture by lazy {
         val tp = TexPaint(64, 256)
