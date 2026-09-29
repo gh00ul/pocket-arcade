@@ -204,6 +204,66 @@ class HubMapTest {
         }
     }
 
+    @Test
+    fun theCafeIsFurnished() {
+        for ((name, map) in maps) {
+            fun count(kind: PropKind) = map.props.count { it.kind == kind }
+            assertTrue("$name: the café needs one counter and one back bar", count(PropKind.CAFE_COUNTER) == 1 && count(PropKind.CAFE_BAR) == 1)
+            assertTrue("$name: the café wants 4 to 6 tables", count(PropKind.CAFE_TABLE) in 4..6)
+            assertTrue("$name: the café wants a booth", count(PropKind.BOOTH) >= 1)
+            assertTrue("$name: the café has too few seats", map.hangouts.count { it.cafe } >= 8)
+            assertTrue("$name: the café queue is too short", map.cafeQueue.size >= 3)
+        }
+    }
+
+    @Test
+    fun theCafeQueueIsReachableAndClear() {
+        for ((name, map) in maps) {
+            val seen = reachable(map)
+            for (q in map.cafeQueue) {
+                assertTrue("$name: kids can't reach the queue spot at (${q.x}, ${q.z})", map.tileWalkable(q.tileX, q.tileY) && seen[q.tileY * map.cols + q.tileX])
+                val far = hypot(q.tileX * HubLayout.TILE + HubLayout.TILE / 2f - q.x, q.tileY * HubLayout.TILE + HubLayout.TILE / 2f - q.z)
+                assertTrue("$name: the queue spot at (${q.x}, ${q.z}) is $far from its tile", far < 2f * HubLayout.TILE)
+                assertFalse("$name: the queue spot at (${q.x}, ${q.z}) is inside something", Collision.blocked(map.solids, q.x, q.z))
+            }
+            // Café seats are entered from a walkable tile close by.
+            for (h in map.hangouts) if (h.cafe) {
+                assertTrue("$name: the café seat at (${h.x}, ${h.z}) has no way in", map.tileWalkable(h.tileX, h.tileY) && seen[h.tileY * map.cols + h.tileX])
+            }
+        }
+    }
+
+    @Test
+    fun theBaristaLaneIsClosedToTheCrowd() {
+        for ((name, map) in maps) {
+            val counter = map.props.single { it.kind == PropKind.CAFE_COUNTER }.foot!!
+            var x = CafeLayout.LANE_X0
+            while (x <= CafeLayout.LANE_X1) {
+                assertTrue("$name: the barista's lane at x $x isn't behind the counter", counter.contains(x, CafeLayout.LANE_Z))
+                val tx = (x / HubLayout.TILE).toInt()
+                val ty = (CafeLayout.LANE_Z / HubLayout.TILE).toInt()
+                assertFalse("$name: kids can wander behind the counter at x $x", map.tileWalkable(tx, ty))
+                x += 8f
+            }
+        }
+    }
+
+    @Test
+    fun theCafeKeepsToItsLightBudgetAndLeavesTheSpareBanksFree() {
+        val lights = ArrayList<com.pocketarcade.engine.r3d.PointLight>()
+        CafeLayout.lights(lights)
+        for ((name, map) in maps) {
+            val vending = map.props.count { it.kind == PropKind.VENDING }
+            assertTrue("$name: the café brings ${lights.size + vending} point lights (keep it to 4)", lights.size + vending <= 4)
+            val cafeKinds = setOf(PropKind.CAFE_BAR, PropKind.CAFE_COUNTER, PropKind.CAFE_TABLE, PropKind.BOOTH, PropKind.CHAIR, PropKind.VENDING)
+            for (slot in HubLayout.slots) for (p in map.props) {
+                if (p.kind !in cafeKinds) continue
+                val box = Box(p.x0, p.z0, p.x1, p.z1)
+                assertFalse("$name: café ${p.kind} at ${box.str()} is in a bank's floor ${slot.area.str()}", overlaps(box, slot.area))
+            }
+        }
+    }
+
     /** A do-nothing machine for probing the floor plan's limits. */
     private class Probe(shape: CabinetShape, private val design: CabinetDesign? = null) : MiniGame {
         override val id = "probe"
