@@ -58,7 +58,7 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 4. **Coin pusher**: tap to drop coins onto a packed deck while the shelf sweeps back and forth. Coins that spill over the lip land in the win tray. Gems, big coins, ticket bundles and coin-shower stars are mixed in, and five spills in quick succession trigger an avalanche bonus.
 5. **Hoop shot**: flick to shoot at a real 3D rim, net and backboard, with rim bounces and banks. Makes in a row multiply your points up to ×5, and the hoop starts moving in the second half.
 6. **Air hockey**: drag your mallet and smash the puck past the CPU on an air table with rounded corners. The CPU speeds up as you pull ahead. Goals in a row score more, and the first to 7 wins.
-7. **Turbo racer**: a three-lap synthwave race against seven rivals on a closed circuit. Start from the grid under the start lights, drag to steer through the bends and over the hills, and hold a second finger to drift through corners and charge a turbo. Rivals take racing lines, overtake and bump. A live position and lap counter tracks the race, and you're paid for your finishing place, clean passes and time left.
+7. **Turbo racer**: a three-lap synthwave race against seven rivals on a closed circuit. Start from the grid under the start lights, drag to steer through the bends and over the hills, and hold the DRIFT button (low on the right, or a second finger anywhere) to drift through corners and charge a turbo. It can also be steered by tilting the phone (`RacerGame.tiltSteering`, off by default): the phone's level is taken at the start of the race and after a pause, and any held finger then drifts. Rivals take racing lines, overtake and bump. A live position and lap counter tracks the race, and you're paid for your finishing place, clean passes and time left.
 8. **Stacker**: tap to drop each sliding slab onto the tower. Any overhang is cut off and tumbles away. Line one up perfectly to keep it whole and build a combo. You get three misses.
 9. **Shootout** (new): a light-gun cabinet with two mounted pistols. Tap to shoot exactly where you tap. Targets pop out of cover and fly in: red-ringed gunmen fire back, gold drones are rare and pay big, and hands-up civilians must not be shot. Six shots, then tap the reload bar. Hits in a row build a combo, accuracy pays a bonus, and the round ends with a boss.
 10. **Star Flipper** (new): a pinball table seen down the glass. Hold the left or right half of the screen to flip, pull the plunger down and let go to launch, and nudge with a swipe up (don't tilt). Pop bumpers, slingshots, drop targets for a multiplier and three top lanes that light multiball.
@@ -67,7 +67,9 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 **Game feel**
 - Screen shake, particles, squash and stretch, popping score text and a 3-2-1-GO countdown.
 - Ticket strips print out of each machine with a counter ticking up; tap to skip.
-- Haptics on hits, wins and jackpots.
+- Haptics on hits, wins and jackpots, built from the phone's haptic-engine primitives (click, tick, thud) where it has them and plain buzzes where not, and played as touch feedback from Android 13 so the system's setting applies. `Haptics.strength` scales them all. The hall gives a soft tick when a play prompt appears and a bump when you walk into a wall or a kid, fishing clicks its reel under your thumb, the pinball flippers thud, and the racer hums faintly through the phone, firmer over the kerbs and grass.
+- Touch that keeps up: every batched touch sample reaches the game, each with its own time (so a flick's speed is read from all of them), and a round's touches arrive unbuffered. The lower left and right screen edges are excluded from the system's Back gesture (Android honours about 200 dp of height per edge), so a thumb resting on a flipper or a steering drag can't pause the game or leave the hall.
+- Buttons and the painted text carry content descriptions, so TalkBack reads them; the close buttons are 48 dp.
 - A high score for every machine, shown on the cabinet screens in the hall. Beating one sets off confetti and a fanfare.
 - Smooth type with vector icons for tokens, tickets and stars, glossy arcade buttons, and one bright palette across the whole app.
 - The prize counter shows each prize as a 3D model on a turntable, photographed by the GPU.
@@ -196,7 +198,7 @@ app/src/main/java/com/pocketarcade/
 ├── MainActivity.kt        single activity: immersive, portrait, audio lifecycle, launch shortcut
 ├── ArcadeApp.kt           title → hall ↔ machine flow and the camera dive transitions
 ├── engine/                fixed-step loop, touch/flick tracking, circle physics, audio synth,
-│   │                      particles, shake/springs, haptics, the game's type and icons
+│   │                      particles, shake/springs, haptics, tilt steering, the game's type and icons
 │   ├── r3d/               scene recorder, camera, lighting, models, painted textures, Stage3D
 │   └── gl/                OpenGL ES 3 thread, renderer, shaders and the render surface
 ├── hub/                   hall floor plan and banks, scene, cabinets and the CabinetDesign seam,

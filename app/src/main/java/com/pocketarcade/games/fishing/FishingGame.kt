@@ -688,6 +688,8 @@ class FishingGame : BaseMiniGame() {
             val busy = phase == CastPhase.WAIT || phase == CastPhase.FIGHT
             val speed = (abs(crank.rate) / FishingTuning.CRANK_REF).coerceAtMost(2f)
             play(Sfx.REEL, if (busy) 0.45f else 0.25f, 0.7f + speed * 0.45f)
+            // The click under your thumb, while a lure is out (a spinning empty reel stays quiet).
+            if (busy) fx.haptics.soft()
         }
     }
 

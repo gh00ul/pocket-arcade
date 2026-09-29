@@ -23,6 +23,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
 import com.pocketarcade.data.Catalog
 import com.pocketarcade.data.SaveState
@@ -65,7 +67,9 @@ fun Hud(
                 .clip(pill)
                 .background(Brush.verticalGradient(listOf(Color(0xE6261C44), Color(0xE6120C22))))
                 .border(1.5.dp, Brush.verticalGradient(listOf(Color(0x66FFFFFF), Color(0x14FFFFFF))), pill)
-                .padding(start = 10.dp, end = 16.dp, top = 7.dp, bottom = 7.dp),
+                .padding(start = 10.dp, end = 16.dp, top = 7.dp, bottom = 7.dp)
+                // The counters are numbers beside icons: say what they are, once, with the real totals.
+                .clearAndSetSemantics { contentDescription = "${save.tokens} tokens, ${save.tickets} tickets" },
         ) {
             CurrencyRow(tokens, tickets, unit = 2.6.dp)
         }
