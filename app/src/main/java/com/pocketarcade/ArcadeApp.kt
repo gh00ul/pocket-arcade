@@ -344,7 +344,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                 Modifier
                     .align(Alignment.TopCenter)
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(top = 84.dp, start = 12.dp, end = 12.dp),
+                    // Under both rows of HUD buttons.
+                    .padding(top = 132.dp, start = 12.dp, end = 12.dp),
             ) {
                 GlassBox(Modifier.background(Color(0xE6120C22), RoundedCornerShape(16.dp)), highlight = Color(Pal.YELLOW)) {
                     ArcadeText(text, unit = 2.2.dp, color = Color(Pal.YELLOW), centered = true)

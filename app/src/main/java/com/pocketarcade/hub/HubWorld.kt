@@ -54,7 +54,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         const val KID_PUSH = 0.35f
         /** Tap-to-walk stops this far in front of a machine's (or counter's) front. */
         const val STAND_DEPTH = Body.RADIUS + Body.FRONT_GAP + 1f
-        /** Tap-to-walk ignores floor taps further away than this. */
+        /** First-person tap-to-walk ignores floor taps further away than this (the horizon is a long way off). */
         const val TAP_REACH = 700f
 
         private const val DEG = PI.toFloat() / 180f
