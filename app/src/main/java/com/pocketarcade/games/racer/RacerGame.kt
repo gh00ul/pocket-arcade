@@ -9,6 +9,7 @@ import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Painter
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.engine.Particles
+import com.pocketarcade.engine.ScreenShake
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.TiltControlled
 import com.pocketarcade.engine.TiltMath
@@ -18,14 +19,10 @@ import com.pocketarcade.engine.clamp01
 import com.pocketarcade.engine.damp
 import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.r3d.Blend
-import com.pocketarcade.engine.r3d.BoxFaces
-import com.pocketarcade.engine.r3d.Model
-import com.pocketarcade.engine.r3d.ModelBuilder
 import com.pocketarcade.engine.r3d.PointLight
 import com.pocketarcade.engine.r3d.Renderer3D
 import com.pocketarcade.engine.r3d.Stage3D
 import com.pocketarcade.engine.r3d.TexKit
-import com.pocketarcade.engine.r3d.Xform
 import com.pocketarcade.engine.range
 import com.pocketarcade.games.BaseMiniGame
 import com.pocketarcade.games.CabinetLook
@@ -34,6 +31,7 @@ import com.pocketarcade.games.GAME_H
 import com.pocketarcade.games.GAME_W
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.sin
 
@@ -183,6 +181,16 @@ class RacerGame : BaseMiniGame(), TiltControlled {
         const val LAPS = RacerTuning.LAPS
         /** Where the how-to-play hints centre: left of the DRIFT button. */
         const val HINT_X = 136f
+        /** Segments ahead of the car (past [BEHIND]) after which the ground is drawn in pairs. */
+        const val FAR_GROUND_FROM = 30
+        /** Tyre smoke puffs and skid-mark pieces kept, and how long each lasts (seconds). */
+        const val PUFFS = 18
+        const val PUFF_LIFE = 0.9f
+        const val SKIDS = 24
+        const val SKID_LIFE = 3.5f
+        /** The camera's field of view (degrees) at rest and in a turbo. */
+        const val FOV_BASE = 56f
+        const val FOV_BOOST = 60f
     }
 
     /** One car in the race; index 0 is the player's. */
@@ -481,7 +489,78 @@ class RacerGame : BaseMiniGame(), TiltControlled {
                 fx.haptics.rumble(0.1f + 0.25f * pace)
             }
         }
+        stepFx(dt)
     }
+
+    // ---------------------------------------------------------------- visual effects state
+
+    // Tyre smoke and skid marks live in track coordinates (distance along the course, offset
+    // across it), so they stay where they were made as the car drives on. They read the
+    // simulation but never change it, and use hash noise rather than the game's random numbers.
+    private val puffD = FloatArray(PUFFS)
+    private val puffX = FloatArray(PUFFS)
+    private val puffAge = FloatArray(PUFFS) { 9f }
+    private val puffTint = IntArray(PUFFS)
+    private var puffNext = 0
+    private var puffT = 0f
+    private val skidD0 = FloatArray(SKIDS)
+    private val skidX0 = FloatArray(SKIDS)
+    private val skidD1 = FloatArray(SKIDS)
+    private val skidX1 = FloatArray(SKIDS)
+    private val skidAge = FloatArray(SKIDS) { 99f }
+    private var skidNext = 0
+    /** Where each rear wheel's mark last reached (distance; negative when it has not started). */
+    private val lastSkidD = floatArrayOf(-1f, -1f)
+    private var fxTick = 0
+    /** The turbo's ramp in and out (0..1), and the camera's field of view easing towards it. */
+    private var boostK = 0f
+    private var fovNow = FOV_BASE
+    private var lastRenderT = 0f
+
+    /** Ages the smoke and marks and lays new ones while the car drifts. */
+    private fun stepFx(dt: Float) {
+        fxTick++
+        for (i in 0 until PUFFS) if (puffAge[i] < PUFF_LIFE) puffAge[i] += dt
+        for (i in 0 until SKIDS) if (skidAge[i] < SKID_LIFE) skidAge[i] += dt
+        if (drifting && me.v > 250f && !raceDone && !timeUp) {
+            puffT -= dt
+            if (puffT <= 0f) {
+                puffT = 0.045f
+                val side = if (fxTick % 2 == 0) -16f else 16f
+                puffD[puffNext] = me.d - 18f
+                puffX[puffNext] = me.x + side + (hash01(fxTick, 3) - 0.5f) * 10f
+                puffAge[puffNext] = 0f
+                puffTint[puffNext] = when {
+                    charge >= RacerTuning.BOOST_CHARGE_2 -> Pal.ORANGE
+                    charge >= RacerTuning.BOOST_CHARGE_1 -> Pal.CYAN
+                    else -> 0xFFB8B4D0.toInt()
+                }
+                puffNext = (puffNext + 1) % PUFFS
+            }
+            // A mark behind each rear wheel, joined up as the car moves on.
+            for (w in 0..1) {
+                val d = me.d - 14f
+                val x = me.x + if (w == 0) -15f else 15f
+                if (lastSkidD[w] >= 0f && d - lastSkidD[w] > 9f) {
+                    skidD0[skidNext] = lastSkidD[w]
+                    skidX0[skidNext] = lastSkidX[w]
+                    skidD1[skidNext] = d
+                    skidX1[skidNext] = x
+                    skidAge[skidNext] = 0f
+                    skidNext = (skidNext + 1) % SKIDS
+                    lastSkidD[w] = d
+                    lastSkidX[w] = x
+                } else if (lastSkidD[w] < 0f) {
+                    lastSkidD[w] = d
+                    lastSkidX[w] = x
+                }
+            }
+        } else {
+            lastSkidD[0] = -1f
+            lastSkidD[1] = -1f
+        }
+    }
+    private val lastSkidX = FloatArray(2)
 
     private fun stepPlayer(dt: Float, racing: Boolean) {
         val bend = curve[segOf(me.d)]
@@ -730,7 +809,6 @@ class RacerGame : BaseMiniGame(), TiltControlled {
 
     private val stage = Stage3D(GAME_W.toInt(), GAME_H.toInt())
     private val pt = FloatArray(3)
-    private val xf = Xform()
     // Segment start points, indexed from BEHIND segments behind the car to VIEW ahead.
     private val segX = FloatArray(VIEW + BEHIND + 1)
     private val segY = FloatArray(VIEW + BEHIND + 1)
@@ -743,28 +821,8 @@ class RacerGame : BaseMiniGame(), TiltControlled {
         stage.look(0f, CAM_UP, CAM_BACK, 0f, 20f, -420f, fovDeg = 56f, centerYFrac = 0.44f)
     }
 
-    private val carModels = arrayOfNulls<Model>(CARS)
-    private fun carModel(i: Int): Model = carModels[i] ?: buildCar(cars[i].color).also { carModels[i] = it }
-
-    private fun buildCar(color: Int): Model {
-        val side = RacerArt.bodySide(color).full
-        val topT = RacerArt.bodyTop(color).full
-        val rear = RacerArt.rear(color).full
-        val glass = RacerArt.glass.full
-        val tyre = RacerArt.tyre.full
-        val b = ModelBuilder()
-        b.box(-CAR_HALF_W, 5f, -40f, CAR_HALF_W, 17f, 40f, BoxFaces(front = rear, back = side, top = topT, left = side, right = side))
-        b.box(-16f, 17f, -12f, 16f, 28f, 18f, BoxFaces(front = glass, back = glass, top = topT, left = glass, right = glass))
-        b.box(-CAR_HALF_W - 1f, 23f, 32f, CAR_HALF_W + 1f, 26f, 40f, BoxFaces(front = side, top = topT, left = side, right = side))
-        b.box(-14f, 17f, 34f, -11f, 23f, 37f, BoxFaces(front = side, left = side, right = side))
-        b.box(11f, 17f, 34f, 14f, 23f, 37f, BoxFaces(front = side, left = side, right = side))
-        for (sx in 0..1) for (sz in 0..1) {
-            val x0 = if (sx == 0) -CAR_HALF_W - 2f else CAR_HALF_W - 6f
-            val z = if (sz == 0) -26f else 26f
-            b.box(x0, 0f, z - 8f, x0 + 8f, 11f, z + 8f, BoxFaces(front = tyre, back = tyre, left = tyre, right = tyre, top = tyre))
-        }
-        return b.build()
-    }
+    /** Car models, the sky, flames and speed streaks. */
+    private val scene = RacerScene()
 
     private val ringStroke = Stroke(2f)
     private val chargeStroke = Stroke(5f)
@@ -772,12 +830,19 @@ class RacerGame : BaseMiniGame(), TiltControlled {
     private val headlight = PointLight(0f, 40f, -120f, 0.8f, 0.9f, 1f, 420f, 0.9f)
     private val sunLight = PointLight(0f, 300f, -2600f, 1f, 0.4f, 0.6f, 2600f, 0.6f)
 
+    private val boostLight = PointLight(0f, 30f, 90f, 0.4f, 0.9f, 1f, 380f, 0f)
+
     override fun render(scope: DrawScope) {
         buildTrack()
         camY = carY + CAM_UP
         val px = me.x
+        // The turbo's ramp (in over 0.12 s, out over its last 0.35 s) and the field of view easing with it.
+        boostK = if (boostT > 0f) minOf(clamp01(boostT / 0.35f), clamp01((boostFull - boostT) / 0.12f)) else 0f
+        val dtR = (time - lastRenderT).coerceIn(0f, 0.1f)
+        lastRenderT = time
+        fovNow = damp(fovNow, if (boostT > 0f) FOV_BOOST else FOV_BASE, 6f, dtR)
         // The camera follows the car most of the way across, so it stays in view off the road.
-        stage.look(px * 0.8f, camY, CAM_BACK, px * 0.5f, carY + 20f, -420f, fovDeg = if (boostT > 0f) 60f else 56f, centerYFrac = 0.44f)
+        stage.look(px * 0.8f, camY, CAM_BACK, px * 0.5f, carY + 20f, -420f, fovDeg = fovNow, centerYFrac = 0.44f)
         val r = stage.begin()
         val l = r.lighting
         l.ambR = 0.55f; l.ambG = 0.5f; l.ambB = 0.7f
@@ -787,21 +852,36 @@ class RacerGame : BaseMiniGame(), TiltControlled {
         headlight.x = px; headlight.y = carY + 40f
         l.points += headlight
         l.points += sunLight
+        if (boostK > 0.01f) {
+            // The turbo's flames light the road round the car: cyan, or gold for a super turbo.
+            boostLight.x = px
+            boostLight.y = carY + 30f
+            if (boostFull > RacerTuning.BOOST_TIME_1) {
+                boostLight.r = 1f; boostLight.g = 0.6f; boostLight.b = 0.2f
+            } else {
+                boostLight.r = 0.4f; boostLight.g = 0.9f; boostLight.b = 1f
+            }
+            boostLight.intensity = 1.3f * boostK * (0.9f + 0.1f * sin(time * 60f))
+            l.points += boostLight
+        }
         r.gradient(0xFF0A0420.toInt(), 0xFF5A1850.toInt(), 0, (r.height * 0.5f).toInt())
         r.gradient(0xFF5A1850.toInt(), 0xFF14082A.toInt(), (r.height * 0.5f).toInt(), r.height)
         // The sky is unaffected by fog; everything on the ground fades into the night.
         r.fogNear = 1e8f
         r.fogFar = 2e8f
-        drawSky(r)
+        scene.drawSky(r, -segX[VIEW + BEHIND] * 0.08f, time)
         r.fogNear = 900f
         r.fogFar = 2900f
         r.fogFloor = 0.12f
         drawRoad(r)
         drawGrid(r)
+        drawSkids(r)
         drawProps(r)
         drawGantries(r)
         drawRivals(r)
         drawPlayer(r)
+        drawSmoke(r)
+        scene.drawSpeedLines(r, px, carY, me.v / RacerTuning.MAX_SPEED, boostK, time)
         stage.present()
         drawHud(scope)
     }
@@ -846,19 +926,6 @@ class RacerGame : BaseMiniGame(), TiltControlled {
         return true
     }
 
-    private fun drawSky(r: Renderer3D) {
-        val far = -3200f
-        val glow = TexKit.glow.full
-        // The horizon drifts sideways against the bend ahead.
-        val shift = -segX[VIEW + BEHIND] * 0.08f
-        r.sprite(shift, 260f, far, 900f, 900f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.55f, tint = Pal.PINK)
-        r.sprite(shift, 250f, far + 10f, 520f, 520f, RacerArt.sun.full, emissive = 1.1f)
-        val m = RacerArt.mountains.full
-        r.quad(shift * 1.3f - 3200f, 330f, far + 60f, shift * 1.3f + 3200f, 330f, far + 60f, shift * 1.3f + 3200f, -40f, far + 60f, shift * 1.3f - 3200f, -40f, far + 60f, m, 0f, 0f, 1f, emissive = 0.9f)
-        val s = RacerArt.skyline.full
-        r.quad(shift * 1.6f - 2200f, 190f, far + 120f, shift * 1.6f + 2200f, 190f, far + 120f, shift * 1.6f + 2200f, -40f, far + 120f, shift * 1.6f - 2200f, -40f, far + 120f, s, 0f, 0f, 1f, emissive = 0.8f)
-    }
-
     private fun drawRoad(r: Renderer3D) {
         val base = floor(me.d / SEG).toInt()
         val white = RacerArt.white.full
@@ -867,12 +934,27 @@ class RacerGame : BaseMiniGame(), TiltControlled {
             val i = wrap(base + j - BEHIND)
             val x0 = segX[j]; val y0 = segY[j]; val z0 = segZ[j]
             val x1 = segX[j + 1]; val y1 = segY[j + 1]; val z1 = segZ[j + 1]
-            r.quad(
-                x1 - GROUND_HALF, y1 - 0.5f, z1, x1 + GROUND_HALF, y1 - 0.5f, z1, x0 + GROUND_HALF, y0 - 0.5f, z0, x0 - GROUND_HALF, y0 - 0.5f, z0,
-                ground, 0f, 1f, 0f, emissive = 0.9f,
-            )
+            // Far out, where fog has all but hidden it, the neon ground is laid in two-segment strips (a
+            // little lower, so a hill can't push it through the road).
+            val farGround = j >= BEHIND + FAR_GROUND_FROM
+            if (!farGround || j % 2 == 0) {
+                val jn = if (farGround && j + 2 <= VIEW + BEHIND) j + 2 else j + 1
+                val drop = if (farGround) 1.5f else 0.5f
+                r.quad(
+                    segX[jn] - GROUND_HALF, segY[jn] - drop, segZ[jn], segX[jn] + GROUND_HALF, segY[jn] - drop, segZ[jn], x0 + GROUND_HALF, y0 - drop, z0, x0 - GROUND_HALF, y0 - drop, z0,
+                    ground, 0f, 1f, 0f, emissive = 0.9f,
+                )
+            }
             val asphalt = if ((i / 2) % 2 == 0) RacerArt.asphalt.full else RacerArt.asphaltDark.full
-            r.quad(x1 - ROAD_HALF, y1, z1, x1 + ROAD_HALF, y1, z1, x0 + ROAD_HALF, y0, z0, x0 - ROAD_HALF, y0, z0, asphalt, 0f, 1f, 0f)
+            r.quad(x1 - ROAD_HALF, y1, z1, x1 + ROAD_HALF, y1, z1, x0 + ROAD_HALF, y0, z0, x0 - ROAD_HALF, y0, z0, asphalt, 0f, 1f, 0f, gloss = RacerLook.ROAD_GLOSS)
+            val near = j < BEHIND + RacerLook.DETAIL_SEGMENTS
+            if (near) {
+                // A bright edge line just inside each rumble strip.
+                val e0 = ROAD_HALF - 5f
+                val e1 = ROAD_HALF - 2.5f
+                r.quad(x1 - e0, y1 + 0.35f, z1, x1 - e1, y1 + 0.35f, z1, x0 - e1, y0 + 0.35f, z0, x0 - e0, y0 + 0.35f, z0, white, 0f, 1f, 0f, emissive = RacerLook.EDGE_LINE_EMISSIVE, tint = 0xFFCFF4FF.toInt())
+                r.quad(x1 + e1, y1 + 0.35f, z1, x1 + e0, y1 + 0.35f, z1, x0 + e0, y0 + 0.35f, z0, x0 + e1, y0 + 0.35f, z0, white, 0f, 1f, 0f, emissive = RacerLook.EDGE_LINE_EMISSIVE, tint = 0xFFCFF4FF.toInt())
+            }
             // Neon rumble strips.
             val rumble = if (i % 2 == 0) Pal.CYAN else Pal.PINK
             val a = ROAD_HALF
@@ -880,7 +962,7 @@ class RacerGame : BaseMiniGame(), TiltControlled {
             r.quad(x1 - b, y1 + 0.3f, z1, x1 - a, y1 + 0.3f, z1, x0 - a, y0 + 0.3f, z0, x0 - b, y0 + 0.3f, z0, white, 0f, 1f, 0f, emissive = 1.1f, tint = rumble)
             r.quad(x1 + a, y1 + 0.3f, z1, x1 + b, y1 + 0.3f, z1, x0 + b, y0 + 0.3f, z0, x0 + a, y0 + 0.3f, z0, white, 0f, 1f, 0f, emissive = 1.1f, tint = rumble)
             // Dashed lane lines.
-            if (i % 3 == 0) {
+            if (near && i % 3 == 0) {
                 val h = LANE / 2f
                 r.quad(x1 - h - 2.5f, y1 + 0.3f, z1, x1 - h + 2.5f, y1 + 0.3f, z1, x0 - h + 2.5f, y0 + 0.3f, z0, x0 - h - 2.5f, y0 + 0.3f, z0, white, 0f, 1f, 0f, emissive = 0.9f)
                 r.quad(x1 + h - 2.5f, y1 + 0.3f, z1, x1 + h + 2.5f, y1 + 0.3f, z1, x0 + h + 2.5f, y0 + 0.3f, z0, x0 + h - 2.5f, y0 + 0.3f, z0, white, 0f, 1f, 0f, emissive = 0.9f)
@@ -912,6 +994,14 @@ class RacerGame : BaseMiniGame(), TiltControlled {
                 val offR = ROAD_HALF + 70f + hash01(i, 4) * 60f
                 r.billboard(segX[j] - offL, segY[j], segZ[j], 90f, 140f, RacerArt.palm.full, lean = 0f)
                 r.billboard(segX[j] + offR, segY[j], segZ[j], 90f, 140f, RacerArt.palm.full, lean = 0f)
+            }
+            if (i % 5 == 2) {
+                // A neon pylon, alternating sides and colours, with a glow at its head.
+                val side = if ((i / 5) % 2 == 0) 1 else -1
+                val px = segX[j] + side * (ROAD_HALF + 50f)
+                val tint = if ((i / 10) % 2 == 0) Pal.CYAN else Pal.PINK
+                r.billboard(px, segY[j], segZ[j], 5f, 130f, RacerArt.white.full, lean = 0f, emissive = 1.3f, tint = tint)
+                r.sprite(px, segY[j] + 132f, segZ[j], 46f, 46f, TexKit.glow.full, blend = Blend.ADD, emissive = 1f, alpha = 0.55f, tint = tint)
             }
             if (i % 23 == 11) {
                 val side = if (hash01(i, 9) > 0.5f) 1 else -1
@@ -956,13 +1046,20 @@ class RacerGame : BaseMiniGame(), TiltControlled {
         }
     }
 
+    /** The road's slope at [d] along the course (height gained per unit), eased between segments so a car's pitch doesn't tick. */
+    private fun gradeAt(d: Float): Float {
+        val pos = d / SEG
+        val i = floor(pos).toInt()
+        val f = pos - i
+        return (slope[wrap(i)] + (slope[wrap(i + 1)] - slope[wrap(i)]) * f) / SEG
+    }
+
     private fun drawRivals(r: Renderer3D) {
         val glow = RacerArt.tailGlow.full
         for (i in 1 until CARS) {
             val c = cars[i]
             if (!trackPoint(c.d, c.x)) continue
-            xf.set(pt[0], pt[1], pt[2], yaw = c.yaw)
-            carModel(i).draw(r, xf = xf)
+            scene.drawCar(r, i, c.color, pt[2] > -RacerLook.LOD_DISTANCE, pt[0], pt[1], pt[2], c.yaw, 0f, gradeAt(c.d))
             r.sprite(pt[0], pt[1] + 11f, pt[2] + 41f, 70f, 26f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.5f, tint = Pal.RED)
         }
     }
@@ -970,18 +1067,38 @@ class RacerGame : BaseMiniGame(), TiltControlled {
     private fun drawPlayer(r: Renderer3D) {
         val px = me.x
         val bounce = sin(time * 30f) * (me.v / RacerTuning.MAX_SPEED) * 0.8f
-        xf.set(px, carY + bounce, 0f, yaw = -tilt * 0.6f + driftYaw, roll = -tilt)
-        carModel(0).draw(r, xf = xf)
+        scene.drawCar(r, 0, me.color, true, px, carY + bounce, 0f, -tilt * 0.6f + driftYaw, -tilt, gradeAt(me.d))
         val glow = RacerArt.tailGlow.full
         r.sprite(px - 15f, carY + 11f, 41f, 40f, 24f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.7f, tint = Pal.RED)
         r.sprite(px + 15f, carY + 11f, 41f, 40f, 24f, glow, blend = Blend.ADD, emissive = 1f, alpha = 0.7f, tint = Pal.RED)
-        if (boostT > 0f) {
-            val a = 0.6f + 0.3f * sin(time * 60f)
-            r.sprite(px, carY + 9f, 50f, 46f, 30f, glow, blend = Blend.ADD, emissive = 1.2f, alpha = a, tint = Pal.CYAN)
-            r.sprite(px, carY + 9f, 60f, 26f, 60f, glow, blend = Blend.ADD, emissive = 1.2f, alpha = a * 0.7f, tint = Pal.WHITE)
-        } else if (me.v > RacerTuning.MAX_SPEED * 0.8f) {
-            val a = 0.35f + 0.25f * sin(time * 50f)
-            r.sprite(px, carY + 8f, 46f, 30f, 18f, glow, blend = Blend.ADD, emissive = 1f, alpha = a, tint = Pal.CYAN)
+        scene.drawFlames(r, px, carY, boostK, if (boostFull > RacerTuning.BOOST_TIME_1) 1f else 0f, me.v / RacerTuning.MAX_SPEED, time)
+    }
+
+    /** Tyre smoke: soft puffs that swell and fade where the car drifted, tinted by the boost charge. */
+    private fun drawSmoke(r: Renderer3D) {
+        val tex = RacerArt.smoke.full
+        val calm = if (ScreenShake.intensity <= 0f) RacerLook.CALM_K else 1f
+        for (i in 0 until PUFFS) {
+            val age = puffAge[i]
+            if (age >= PUFF_LIFE || !trackPoint(puffD[i], puffX[i])) continue
+            val p = age / PUFF_LIFE
+            val size = 14f + 46f * p
+            val tint = puffTint[i]
+            val coloured = tint != 0xFFB8B4D0.toInt()
+            r.sprite(pt[0], pt[1] + 6f + age * 14f, pt[2], size, size * 0.8f, tex, blend = Blend.ALPHA, emissive = if (coloured) 0.9f else 0.55f, alpha = RacerLook.SMOKE_ALPHA * (1f - p) * calm, tint = tint)
+        }
+    }
+
+    /** Dark tyre marks laid behind the rear wheels while drifting, fading over a few seconds. */
+    private fun drawSkids(r: Renderer3D) {
+        val tex = RacerArt.skid.full
+        for (i in 0 until SKIDS) {
+            val age = skidAge[i]
+            if (age >= SKID_LIFE || !trackPoint(skidD0[i], skidX0[i])) continue
+            val ax = pt[0]; val ay = pt[1]; val az = pt[2]
+            if (!trackPoint(skidD1[i], skidX1[i])) continue
+            val a = RacerLook.SKID_ALPHA * (1f - age / SKID_LIFE)
+            r.quad(pt[0] - 2.6f, pt[1] + 0.4f, pt[2], pt[0] + 2.6f, pt[1] + 0.4f, pt[2], ax + 2.6f, ay + 0.4f, az, ax - 2.6f, ay + 0.4f, az, tex, 0f, 1f, 0f, blend = Blend.ALPHA, alpha = a, cull = false)
         }
     }
 
@@ -1152,6 +1269,12 @@ class RacerGame : BaseMiniGame(), TiltControlled {
         // Sky, setting sun and skyline.
         p.fill(0f, 0f, fw, hz * 0.55f, Color(0xFF0A0420.toInt()))
         p.fill(0f, hz * 0.55f, fw, hz * 0.45f, night)
+        // Stars, twinkling, and a rose glow along the horizon.
+        for (k in 0 until 14) {
+            p.disc(hash01(k, 21) * fw, hash01(k, 22) * hz * 0.55f, 0.16f, Color.White, 0.25f + 0.6f * (0.5f + 0.5f * sin(time * 2f + k * 2.3f)))
+        }
+        p.fill(0f, hz - 1.6f, fw, 1.6f, Color(Pal.PINK), 0.16f)
+        p.disc(fw / 2f, hz - 0.2f, 3.6f, Color(Pal.ORANGE), 0.22f)
         p.disc(fw / 2f, hz - 0.2f, 3.4f, Color(Pal.ORANGE))
         p.disc(fw / 2f, hz - 1.2f, 2.6f, Color(Pal.PINK), 0.8f)
         p.fill(fw / 2f - 4f, hz - 1.6f, 8f, 0.35f, night)
@@ -1180,6 +1303,15 @@ class RacerGame : BaseMiniGame(), TiltControlled {
             p.fill(cx - half - 0.5f, y, 0.5f, 0.5f, rc)
             p.fill(cx + half, y, 0.5f, 0.5f, rc)
             if (band % 3 == 0) p.fill(cx - 0.15f, y, 0.3f, 0.5f, Color.White, 0.6f)
+        }
+
+        // Lights streaming out of the vanishing point once the race is on.
+        if (go > 0f) {
+            for (k in 0 until 10) {
+                val ang = 0.2f + k * 0.29f
+                val d = (time * 9f + k * 2.7f) % 12f
+                if (d > 1.5f) p.disc(fw / 2f + cos(ang) * d * 2.2f, hz + sin(ang) * d * 0.9f, 0.12f + d * 0.012f, Color(0xFFCFE8FF.toInt()), 0.35f * clamp01(go / 0.8f))
+            }
         }
 
         // Rivals, [attractGap] car lengths ahead of the player; the slower ones drop back as they're passed.
@@ -1228,7 +1360,10 @@ class RacerGame : BaseMiniGame(), TiltControlled {
             }
         }
 
-        // The player's car.
+        // The player's car, with its underglow and tail lights glowing.
+        p.fill(fw / 2f - 3.4f, fh - 0.9f, 6.8f, 0.8f, Color(Pal.RED), 0.28f)
+        p.disc(fw / 2f - 1.5f, fh - 1.9f, 1.2f, Color(Pal.RED), 0.25f)
+        p.disc(fw / 2f + 1.5f, fh - 1.9f, 1.2f, Color(Pal.RED), 0.25f)
         p.fill(fw / 2f - 2.2f, fh - 2.6f, 4.4f, 2.2f, Color(Pal.RED))
         p.fill(fw / 2f - 1.3f, fh - 3.3f, 2.6f, 0.9f, Color(Pal.shade(Pal.SKY, 0.6f)))
         p.fill(fw / 2f - 2f, fh - 1.6f, 1f, 0.5f, Color(Pal.YELLOW))
@@ -1240,6 +1375,11 @@ class RacerGame : BaseMiniGame(), TiltControlled {
         p.text(ATTRACT_POS[pos - 1], 0.6f, 0.5f, Color(if (pos == 1) Pal.GOLD else Pal.WHITE), tiny = true)
         val lap = (run / 3.6f).toInt().coerceIn(0, LAPS - 1)
         p.textCentered(ATTRACT_LAP[lap], fw - 4.2f, 0.5f, Color(Pal.CYAN), tiny = true)
+        if (loop < 2.4f) {
+            val a = clamp01(minOf(loop / 0.3f, (2.4f - loop) / 0.4f))
+            p.textCentered("TURBO RACER", fw / 2f, hz * 0.55f, Color(Pal.YELLOW), tiny = true, alpha = 0.45f * a, size = 0.55f)
+            p.textCentered("TURBO RACER", fw / 2f, hz * 0.55f, Color(Pal.CREAM), tiny = true, alpha = a, size = 0.5f)
+        }
         if (go >= 0f && go < 0.9f && (time * 6f).toInt() % 2 == 0) {
             p.textCentered("GO!", fw / 2f, fh * 0.55f, Color(Pal.LIME), tiny = true)
         }
