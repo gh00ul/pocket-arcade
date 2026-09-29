@@ -39,6 +39,8 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
         private set
     var phase = 0f
         private set
+    /** How this kid moves: blended poses, gait, gaze and follow-through (see [FigureAnim]). */
+    val anim = FigureAnim(seed = (seed * 1000f).toInt(), scale = 1f)
     var state = State.IDLE
         private set
     /** Index of the hangout this kid is heading to or using, or -1. */
@@ -72,7 +74,16 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
     /** Seconds left of walking on regardless of the player (see [IMPATIENT_TIME]). */
     private var impatientT = 0f
 
+    /**
+     * One simulation step: where the kid goes and what they do (which the animation never
+     * changes), then the animation follows it.
+     */
     fun update(dt: Float, world: HubWorld) {
+        step(dt, world)
+        anim.update(dt, x, y, yaw, pose, phase)
+    }
+
+    private fun step(dt: Float, world: HubWorld) {
         if (world.firstPerson && giveWay(dt, world)) {
             yaw = turnTowards(yaw, targetYaw, dt * 8f)
             return

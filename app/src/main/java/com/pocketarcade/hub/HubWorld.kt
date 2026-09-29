@@ -14,6 +14,7 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.exp
+import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
 
@@ -87,6 +88,8 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
     val npcs = ArrayList<Npc>()
     /** The café queue and the barista. */
     val cafe = CafeLife()
+    /** The prize clerk's animation: standing behind the counter, turning to whoever comes up. */
+    val clerk = FigureAnim(seed = 5, scale = 1.12f)
     val camera = HubCamera()
     val joystick = Joystick()
     var time = 0f
@@ -257,6 +260,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
         feelWalls()
         for (i in npcs.indices) npcs[i].update(dt, this)
         cafe.update(dt, this)
+        clerk.update(dt, map.clerkX, map.clerkY, sin(time * 0.4f) * 0.4f, Pose.STAND, 0f)
         val gait = if (fp) player.speedFrac else if (player.moving) 1f else 0f
         val run = if (fp) (player.speedFrac - 1f) / (Player.RUN_SCALE - 1f) else 0f
         camera.update(player.x, player.y, player.vx, player.vy, player.moving, player.phase, dt, gait, run)

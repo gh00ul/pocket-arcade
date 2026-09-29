@@ -427,16 +427,16 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         // The crowd. In first person you are the camera, so your own kid isn't drawn.
         val pl = world.player
         val showPlayer = fp < 0.85f
-        if (showPlayer) pl.look?.let { figureFor(it).draw(r, pl.x, 0f, pl.y, pl.yaw, pl.pose, pl.phase, t) }
+        if (showPlayer) pl.look?.let { figureFor(it).draw(r, pl.x, 0f, pl.y, pl.anim) }
         val npcs = world.npcs
         for (i in npcs.indices) {
             val n = npcs[i]
             if (!visible(n.x - 10f, n.y - 10f, n.x + 10f, n.y + 10f, FIGURE_HEIGHT)) continue
-            figureFor(n.look).draw(r, n.x, 0f, n.y, n.yaw, n.pose, n.phase, t + n.seed)
+            figureFor(n.look).draw(r, n.x, 0f, n.y, n.anim)
         }
         val clerkVisible = visible(map.clerkX - 10f, map.clerkY - 10f, map.clerkX + 10f, map.clerkY + 10f, FIGURE_HEIGHT)
         if (clerkVisible) {
-            figureFor(Looks.clerk).draw(r, map.clerkX, 0f, map.clerkY, sin(t * 0.4f) * 0.4f, Pose.STAND, 0f, t, 1.12f)
+            figureFor(Looks.clerk).draw(r, map.clerkX, 0f, map.clerkY, world.clerk, 1.12f)
         }
         cafe.draw(r, world, t, minX, maxX, minZ, maxZ) // Café
 

@@ -46,6 +46,9 @@ class Player {
     var look: CharacterLook? = null
         private set
 
+    /** How the kid moves: blended poses, gait and follow-through (see [FigureAnim]); stepped by [update] and [walkFirstPerson]. */
+    val anim = FigureAnim(seed = 1)
+
     private val out = FloatArray(2)
     private val slid = FloatArray(2)
 
@@ -94,6 +97,7 @@ class Player {
             if (!faceYaw.isNaN()) yaw = faceYaw
         }
         pose = if (moving) Pose.WALK else Pose.STAND
+        anim.update(dt, x, y, yaw, pose, phase)
     }
 
     /**
@@ -160,6 +164,7 @@ class Player {
             if ((phase / PI.toFloat()).toInt() != before) stepped = true
         }
         pose = if (moving) Pose.WALK else Pose.STAND
+        anim.update(dt, x, y, yaw, pose, phase)
     }
 
     /** Nudges the kid (after something else moved them, like a kid bumping into them). */

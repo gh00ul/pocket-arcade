@@ -76,6 +76,8 @@ class CafeLife {
             private set
         var phase = 0f
             private set
+        /** How the barista moves (see [FigureAnim]). */
+        val anim = FigureAnim(seed = 7, scale = 1.1f)
         var state = State.IDLE
             private set
         /** The kid being served, once they reach the till. */
@@ -199,6 +201,7 @@ class CafeLife {
                 State.SERVE -> Pose.HOLD
                 State.TAKE, State.IDLE -> Pose.STAND
             }
+            anim.update(dt, x, z, yaw, pose, phase)
         }
 
         private fun goalYawWhileWalking(target: Float, dt: Float) {
