@@ -31,6 +31,12 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
          * could go next starts the same way.
          */
         const val IMPATIENT_TIME = 3f
+        /** A kid notices the player inside this distance and stops noticing beyond [NOTICE_LEAVE] (world units). */
+        const val NOTICE_DIST = 64f
+        const val NOTICE_LEAVE = 84f
+        /** A kid playing a machine looks at a point this far in front of them, at screen height. */
+        const val MACHINE_DIST = 14f
+        const val MACHINE_GAZE_Y = 44f
     }
 
     var yaw = rng.range(0f, 6.28f)
@@ -54,6 +60,10 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
     /** Carrying a café treat (a cup or a cone, by [Figure.heldItem]). */
     var holding = false
         private set
+
+    /** How long this kid has had the player close by, and how long it takes them to notice (seconds). */
+    private var noticeT = 0f
+    private val reaction = 0.25f + 0.45f * AnimMath.unit((seed * 1000f).toInt(), 0, 9)
 
     private var timer = rng.range(0.5f, 3f)
     private var path: IntArray = NO_PATH
@@ -80,7 +90,34 @@ class Npc(val look: CharacterLook, var x: Float, var y: Float, private val rng: 
      */
     fun update(dt: Float, world: HubWorld) {
         step(dt, world)
+        aimGaze(dt, world)
         anim.update(dt, x, y, yaw, pose, yawGoal = targetYaw)
+    }
+
+    /**
+     * Decides what this kid is looking at: the machine they are playing, the barista at the till,
+     * the till from further back in the queue, and anyone who comes near, once they have noticed
+     * (after a moment's reaction time, different for each kid). Only the head follows.
+     */
+    private fun aimGaze(dt: Float, world: HubWorld) {
+        val p = world.player
+        val near = if (noticeT > 0f) NOTICE_LEAVE else NOTICE_DIST
+        noticeT = if (dist(x, y, p.x, p.y) < near) noticeT + dt else 0f
+        when (state) {
+            State.PLAY -> if (hangout >= 0) {
+                val h = world.map.hangouts[hangout]
+                anim.look(h.x + sin(h.yaw) * MACHINE_DIST, h.z + cos(h.yaw) * MACHINE_DIST, MACHINE_GAZE_Y)
+            }
+            State.QUEUE -> if (ordering) {
+                val b = world.cafe.barista
+                anim.look(b.x, b.z, Figure.HEAD_Y * 1.05f)
+            } else {
+                anim.look(CafeLayout.TILL_X, CafeLayout.LANE_Z, Figure.HEAD_Y)
+            }
+            else -> {}
+        }
+        // Someone nearby gets noticed, unless this kid is absorbed in a game or giving an order.
+        if (noticeT > reaction && state != State.PLAY && !ordering) anim.look(p.x, p.y, Figure.HEAD_Y)
     }
 
     private fun step(dt: Float, world: HubWorld) {

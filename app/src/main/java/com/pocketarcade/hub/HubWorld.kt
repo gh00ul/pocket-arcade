@@ -6,6 +6,7 @@ import com.pocketarcade.engine.AudioSynth
 import com.pocketarcade.engine.Haptics
 import com.pocketarcade.engine.Sfx
 import com.pocketarcade.engine.damp
+import com.pocketarcade.engine.dist
 import com.pocketarcade.engine.len
 import com.pocketarcade.engine.r3d.Camera3D
 import com.pocketarcade.engine.range
@@ -66,6 +67,8 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
          */
         const val WALL_FROM = 0.5f
         const val WALL_TO = 0.2f
+        /** The prize clerk turns their head to anyone within this distance of them (world units). */
+        const val CLERK_NOTICE = 110f
 
         private const val DEG = PI.toFloat() / 180f
 
@@ -260,6 +263,7 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
         feelWalls()
         for (i in npcs.indices) npcs[i].update(dt, this)
         cafe.update(dt, this)
+        lookAround()
         clerk.update(dt, map.clerkX, map.clerkY, sin(time * 0.4f) * 0.4f, Pose.STAND)
         val gait = if (fp) player.speedFrac else if (player.moving) 1f else 0f
         val run = if (fp) (player.speedFrac - 1f) / (Player.RUN_SCALE - 1f) else 0f
@@ -286,6 +290,17 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?, privat
             promptT += dt
         }
         if (fp) assist(dt)
+    }
+
+    /**
+     * Points heads at what they would be looking at: the player at the machine they stand before,
+     * the prize clerk at whoever comes up to the counter. (The kids and the barista decide for
+     * themselves, in their own updates.)
+     */
+    private fun lookAround() {
+        val spot = activeSpot
+        if (spot != null && !player.moving) player.anim.look(spot.focusX, spot.focusZ, spot.focusY)
+        if (dist(map.clerkX, map.clerkY, player.x, player.y) < CLERK_NOTICE) clerk.look(player.x, player.y, Figure.HEAD_Y)
     }
 
     /** Walking into a wall or a cabinet gives a bump: brought to a sudden stop while still pushing on (see [WALL_FROM]). */

@@ -1,5 +1,6 @@
 package com.pocketarcade.hub
 
+import com.pocketarcade.engine.dist
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.random.Random
@@ -13,6 +14,8 @@ class CafeLife {
     companion object {
         const val QUEUE_LEN = 4
         private const val BARISTA_SPEED = 38f
+        /** The barista glances at the player standing within this distance of them (world units). */
+        private const val BARISTA_NOTICE = 90f
     }
 
     /** The kid holding each queue spot (walking there or standing in it), front first. */
@@ -198,6 +201,13 @@ class CafeLife {
                 State.MAKE -> Pose.PLAY
                 State.SERVE -> Pose.HOLD
                 State.TAKE, State.IDLE -> Pose.STAND
+            }
+            val served = customer
+            if (served != null && (state == State.TAKE || state == State.SERVE)) {
+                anim.look(served.x, served.y, Figure.HEAD_Y)
+            } else if (state == State.IDLE || state == State.WIPE) {
+                val p = world.player
+                if (dist(x, z, p.x, p.y) < BARISTA_NOTICE) anim.look(p.x, p.y, Figure.HEAD_Y)
             }
             anim.update(dt, x, z, yaw, pose, if (state == State.WALK) (if (goalX > x) PI.toFloat() / 2f else -PI.toFloat() / 2f) else goalYaw)
         }

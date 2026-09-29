@@ -106,6 +106,77 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
 
         /** What a still picture assumes for the ground speed of a walking pose. */
         private const val STILL_WALK_SPEED = 40f
+
+        // ---- looking
+
+        /**
+         * The head turns at most this far (radians) from the body's facing. A target up to [LOOK_FULL]
+         * round from the facing is looked at as far as that allows; beyond it the gaze eases off, and
+         * past [LOOK_CUTOFF] (well behind the figure) it is ignored.
+         */
+        private const val HEAD_YAW_MAX = 1.0f
+        private const val LOOK_FULL = 1.75f
+        private const val LOOK_CUTOFF = 2.5f
+
+        /** How far the head tips up and down (radians) to follow a target's height. */
+        private const val HEAD_UP = 0.35f
+        private const val HEAD_DOWN = 0.45f
+
+        /** The shoulders turn this share of the head's turn, so a look starts in the body and not only the neck. */
+        private const val GAZE_SHARE = 0.28f
+
+        /** The gaze fades in and out at this rate (per second); the head's spring is [HEAD_OMEGA] and [HEAD_ZETA] (almost no overshoot). */
+        private const val GAZE_RATE = 7f
+        private const val HEAD_OMEGA = 12f
+        private const val HEAD_ZETA = 0.85f
+
+        /** Walking or turning, the head leads the body into the turn: this share of the turn still to do, up to [LEAD_MAX] radians. */
+        private const val LEAD_GAIN = 0.55f
+        private const val LEAD_MAX = 0.55f
+
+        // ---- idle life
+
+        /** Breathing: seconds a breath takes, how far the chest swells (a fraction) and lifts the shoulders (figure units). */
+        private const val BREATH_PERIOD = 3.8f
+        private const val BREATH_SWELL = 0.018f
+        private const val BREATH_LIFT = 0.22f
+
+        /** Standing still is never quite still: a slow sway (figure units, radians of roll) and a wandering head (radians). */
+        private const val SWAY_PERIOD = 7f
+        private const val SWAY_X = 0.25f
+        private const val SWAY_ROLL = 0.012f
+        private const val DRIFT_YAW = 0.03f
+
+        /** Seconds between fidgets while standing about (a fidget is a glance, a weight shift or a foot tap). */
+        private const val FIDGET_MIN = 3.5f
+        private const val FIDGET_MAX = 8.5f
+
+        /** A glance: how far the head turns away (radians) and for how long (seconds). */
+        private const val GLANCE_YAW = 0.6f
+        private const val GLANCE_TIME = 1.4f
+
+        /** A weight shift: sway (figure units), the opposite tilt of the shoulders and the free leg's step forward (radians), and its length. */
+        private const val SHIFT_SWAY = 0.9f
+        private const val SHIFT_ROLL = 0.05f
+        private const val SHIFT_LEG = 0.10f
+        private const val SHIFT_TIME = 1.9f
+
+        /** A foot tap: the toe's lift (figure units), the leg's step forward (radians), taps per second (radians) and its length. */
+        private const val TAP_LIFT = 0.35f
+        private const val TAP_PITCH = 0.07f
+        private const val TAP_RATE = 14f
+        private const val TAP_TIME = 1.5f
+
+        /** Seconds between blinks, how long one takes, and how often one is a quick double. */
+        private const val BLINK_MIN = 2.2f
+        private const val BLINK_MAX = 5.6f
+        private const val BLINK_TIME = 0.14f
+        private const val DOUBLE_BLINK = 0.15f
+
+        private const val FIDGET_NONE = 0
+        private const val FIDGET_GLANCE = 1
+        private const val FIDGET_SHIFT = 2
+        private const val FIDGET_TAP = 3
     }
 
     // ------------------------------------------------------------------ outputs
@@ -174,6 +245,9 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
     var blink = 0f
         private set
 
+    /** How many fidgets this figure has started (for tests and tuning). */
+    val fidgetCount: Int get() = fidgetN
+
     /** True for the one update in which a foot came down (for footstep sounds). */
     var stepped = false
         private set
@@ -226,6 +300,52 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
     private val accSwing = FloatArray(2)
     private var accRoot = 0f
     private var accItem = 0f
+    private var accHeadYaw = 0f
+    private var accHeadPitch = 0f
+    private var accHeadRoll = 0f
+    private var accLean = 0f
+
+    // Gaze: a target set with [look] for the next update, how strongly it is followed, and the head's springs.
+    private var lookOn = false
+    private var lookX = 0f
+    private var lookZ = 0f
+    private var lookY = 0f
+    private var gaze = 0f
+    private val headYawSpring = Spring()
+    private val headPitchSpring = Spring()
+    private val headRollSpring = Spring()
+
+    // Fidgets and blinks (seeded from [seed], so the same figure fidgets the same way every run).
+    private var fidgetKind = FIDGET_NONE
+    private var fidgetT = 0f
+    private var fidgetDur = 0f
+    private var fidgetDir = 1f
+    private var fidgetN = 0
+    private var fidgetWait = FIDGET_MIN * (0.3f + 0.7f * AnimMath.unit(seed, 0, 5))
+    private var blinkT = -1f
+    private var blinkWait = BLINK_MIN + (BLINK_MAX - BLINK_MIN) * AnimMath.unit(seed, 0, 1)
+    private var blinkN = 1
+
+    // What the fidget is doing to each joint this step (already weighted by how idle the figure is).
+    private var fidYaw = 0f
+    private var fidPitch = 0f
+    private var fidRoll = 0f
+    private var fidSway = 0f
+    private var fidBank = 0f
+    private val fidLeg = FloatArray(2)
+    private val fidLift = FloatArray(2)
+
+    /**
+     * Asks the figure to look at the world point ([x], [y] up, [z]) for the coming update: the
+     * head turns toward it (within what a neck can do), the shoulders follow a little, and the
+     * gaze eases off again once this stops being called. A point behind the figure is ignored.
+     */
+    fun look(x: Float, z: Float, y: Float = Figure.HEAD_Y * scale) {
+        lookOn = true
+        lookX = x
+        lookZ = z
+        lookY = y
+    }
 
     /**
      * One simulation step of [dt] seconds. [x], [z] is where the figure stands, [yaw] where it
@@ -302,6 +422,7 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         // The seat follows the (already eased) sitting weight, so sitting starts gently, and its
         // spring adds the settle at the bottom.
         seat.step(blender.weight(Pose.SIT) + blender.weight(Pose.SIP), h, SEAT_OMEGA, SEAT_ZETA)
+        accumulatePose()
 
         // --- gait: the stride advances with the ground covered, and settles when the figure stops
         gait += (AnimMath.smooth(speed / GAIT_FULL_SPEED) - gait) * AnimMath.k(GAIT_RATE, h)
@@ -327,7 +448,130 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         val bankTarget = (-yawRate * TURN_BANK * (speed / BANK_SPEED).coerceAtMost(1f)).coerceIn(-BANK_MAX, BANK_MAX)
         bank += (bankTarget - bank) * AnimMath.k(BANK_RATE, h)
 
+        stepFidgets(h)
+        stepGaze(x, z, yawGoal, h)
+        stepBlink(h)
         solve()
+    }
+
+    /**
+     * Idle fidgets: while the figure stands easy, every few seconds it glances away, shifts its
+     * weight or taps a foot. Timed and chosen from the seed, and weighted by how idle it is, so
+     * setting off or sitting down fades one out instead of cutting it.
+     */
+    private fun stepFidgets(h: Float) {
+        val idle = blender.weight(Pose.STAND) + blender.weight(Pose.HOLD)
+        val still = (1f - gait) * (1f - seat.x.coerceIn(0f, 1f))
+        fidYaw = 0f; fidPitch = 0f; fidRoll = 0f; fidSway = 0f; fidBank = 0f
+        fidLeg[0] = 0f; fidLeg[1] = 0f; fidLift[0] = 0f; fidLift[1] = 0f
+        if (fidgetKind == FIDGET_NONE) {
+            if (idle > 0.9f && still > 0.95f) fidgetWait -= h
+            if (fidgetWait <= 0f) {
+                val n = fidgetN++
+                val r = AnimMath.unit(seed, n, 3)
+                fidgetKind = if (r < 0.45f) FIDGET_GLANCE else if (r < 0.75f) FIDGET_SHIFT else FIDGET_TAP
+                fidgetDur = when (fidgetKind) {
+                    FIDGET_GLANCE -> GLANCE_TIME
+                    FIDGET_SHIFT -> SHIFT_TIME
+                    else -> TAP_TIME
+                }
+                fidgetDir = if (AnimMath.unit(seed, n, 4) < 0.5f) -1f else 1f
+                fidgetT = 0f
+            }
+        } else {
+            fidgetT += h
+            if (fidgetT >= fidgetDur) {
+                fidgetKind = FIDGET_NONE
+                fidgetWait = FIDGET_MIN + (FIDGET_MAX - FIDGET_MIN) * AnimMath.unit(seed, fidgetN, 5)
+            }
+        }
+        val calm = idle * still
+        if (fidgetKind != FIDGET_NONE) {
+            // Up quickly, held, and back down: a raised window over the fidget's length.
+            val e = AnimMath.smooth(fidgetT / 0.25f) * AnimMath.smooth((fidgetDur - fidgetT) / 0.35f) * calm
+            val d = fidgetDir
+            when (fidgetKind) {
+                FIDGET_GLANCE -> {
+                    fidYaw = d * GLANCE_YAW * e
+                    fidPitch = -0.06f * e
+                    fidRoll = d * 0.05f * e
+                }
+                FIDGET_SHIFT -> {
+                    fidSway = d * SHIFT_SWAY * e
+                    fidBank = d * SHIFT_ROLL * e
+                    // The free leg (opposite the weight-bearing side) steps out a little.
+                    fidLeg[if (d > 0f) 0 else 1] = -SHIFT_LEG * e
+                }
+                else -> {
+                    val tap = sin(fidgetT * TAP_RATE)
+                    val leg = if (d > 0f) 1 else 0
+                    fidLeg[leg] = -TAP_PITCH * e
+                    fidLift[leg] = TAP_LIFT * maxOf(0f, tap) * e
+                    fidPitch = 0.03f * tap * e
+                }
+            }
+        }
+        // Standing still is never quite still: a slow sway and a wandering head.
+        val sw = sin(clock * AnimMath.TAU / SWAY_PERIOD)
+        fidSway += SWAY_X * sw * calm
+        fidBank += SWAY_ROLL * sw * calm
+        fidYaw += DRIFT_YAW * sin(clock * 0.7f + seed) * calm
+    }
+
+    /**
+     * Where the head points: at the [look] target if there is one, otherwise leading the body into
+     * whatever turn it is making, plus the fidgets. Springs give the head a soft arrival.
+     */
+    private fun stepGaze(x: Float, z: Float, yawGoal: Float, h: Float) {
+        var targetYaw = 0f
+        var targetPitch = 0f
+        var strength = 0f
+        if (lookOn) {
+            val dx = lookX - x
+            val dz = lookZ - z
+            val d = hypot(dx, dz)
+            if (d > 1f) {
+                val rel = AnimMath.wrap(kotlin.math.atan2(dx, dz) - this.yaw)
+                val away = abs(rel)
+                if (away < LOOK_CUTOFF) {
+                    targetYaw = rel.coerceIn(-HEAD_YAW_MAX, HEAD_YAW_MAX)
+                    targetPitch = kotlin.math.atan2(Figure.HEAD_Y * scale - lookY, d).coerceIn(-HEAD_UP, HEAD_DOWN)
+                    // A target well round the side is let go of gradually rather than at a cut-off.
+                    strength = 1f - AnimMath.smooth((away - LOOK_FULL) / (LOOK_CUTOFF - LOOK_FULL))
+                }
+            }
+        }
+        lookOn = false
+        gaze += (strength - gaze) * AnimMath.k(GAZE_RATE, h)
+        val lead = (AnimMath.wrap(yawGoal - this.yaw) * LEAD_GAIN).coerceIn(-LEAD_MAX, LEAD_MAX)
+        val yawT = gaze * targetYaw + (1f - gaze) * lead + accHeadYaw + fidYaw
+        val pitchT = gaze * targetPitch + accHeadPitch + fidPitch
+        val rollT = accHeadRoll + fidRoll
+        val zeta = if (reduceMotion) 1f else HEAD_ZETA
+        headYawSpring.step(yawT.coerceIn(-HEAD_YAW_MAX, HEAD_YAW_MAX), h, HEAD_OMEGA, zeta)
+        headPitchSpring.step(pitchT, h, HEAD_OMEGA, zeta)
+        headRollSpring.step(rollT, h, HEAD_OMEGA, zeta)
+    }
+
+    /** Blinking on a seeded timer: a quick close and slower open, now and then twice in a row. */
+    private fun stepBlink(h: Float) {
+        if (blinkT >= 0f) {
+            blinkT += h
+            val p = blinkT / BLINK_TIME
+            if (p >= 1f) {
+                blinkT = -1f
+                val n = blinkN++
+                blinkWait = if (AnimMath.unit(seed, n, 2) < DOUBLE_BLINK) 0.16f
+                else BLINK_MIN + (BLINK_MAX - BLINK_MIN) * AnimMath.unit(seed, n, 1)
+                blink = 0f
+            } else {
+                blink = if (p < 0.4f) AnimMath.smooth(p / 0.4f) else 1f - AnimMath.smooth((p - 0.4f) / 0.6f)
+            }
+        } else {
+            blink = 0f
+            blinkWait -= h
+            if (blinkWait <= 0f) blinkT = 0f
+        }
     }
 
     /**
@@ -354,6 +598,18 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         waveAge = time
         clapAge = time
         stepped = false
+        // No history: no gaze, no fidget, eyes open, and every spring at rest on its pose.
+        lookOn = false
+        gaze = 0f
+        fidgetKind = FIDGET_NONE
+        fidYaw = 0f; fidPitch = 0f; fidRoll = 0f; fidSway = 0f; fidBank = 0f
+        fidLeg[0] = 0f; fidLeg[1] = 0f; fidLift[0] = 0f; fidLift[1] = 0f
+        blinkT = -1f
+        blink = 0f
+        accumulatePose()
+        headYawSpring.reset(accHeadYaw)
+        headPitchSpring.reset(accHeadPitch)
+        headRollSpring.reset(accHeadRoll)
         solve()
     }
 
@@ -361,18 +617,25 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
 
     // ------------------------------------------------------------------ the rig
 
-    private fun solve() {
+    /** Sums every pose's share of the arms, the body and the head into the accumulators. */
+    private fun accumulatePose() {
         val w = blender.weights
         accArmP[0] = 0f; accArmP[1] = 0f
         accArmR[0] = 0f; accArmR[1] = 0f
         accSwing[0] = 0f; accSwing[1] = 0f
         accRoot = 0f
         accItem = 0f
+        accHeadYaw = 0f
+        accHeadPitch = 0f
+        accHeadRoll = 0f
+        accLean = 0f
         for (i in w.indices) {
             val wi = w[i]
             if (wi > 1e-4f) addPose(Pose.ALL[i], wi)
         }
+    }
 
+    private fun solve() {
         // Legs walk unless seated; the body sits on whichever foot is lower.
         val rig = phase + plant
         val c = cos(rig)
@@ -385,8 +648,8 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
             val side = SIDES[s]
             val pitch = Gait.legPitch(side, rig, amp) * gaitK
             val lift = Gait.legLift(side, rig, liftMax) * gaitK
-            legPitch[s] = pitch - SEAT_LEG * seat.x
-            legLift[s] = lift
+            legPitch[s] = pitch - SEAT_LEG * seat.x + fidLeg[s]
+            legLift[s] = lift + fidLift[s]
             low = minOf(low, Gait.footHeight(pitch, lift))
         }
         val dip = (Gait.CONTACT + (Gait.CONTACT_RUN - Gait.CONTACT) * run) * (if (reduceMotion) REDUCED_DIP else 1f)
@@ -406,10 +669,20 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
         itemAmount = accItem.coerceIn(0f, 1f)
 
         // Spine: shoulders twist against the hips, the torso rocks over the planted foot, leans and banks.
-        twist = -TWIST_WALK * (1f + TWIST_RUN_BONUS * run) * c * gait
-        lean = leanSpring.x
-        leanRoll = bank + GAIT_ROLL * sin(rig) * gait
-        headPitch = -HEAD_LEVEL * lean
+        twist = -TWIST_WALK * (1f + TWIST_RUN_BONUS * run) * c * gait + GAZE_SHARE * headYawSpring.x
+        lean = leanSpring.x + accLean
+        leanRoll = bank + GAIT_ROLL * sin(rig) * gait + fidBank
+        sway = fidSway
+
+        // Head: the gaze, less what the spine has already turned, so it stays steady through a stride.
+        headYaw = headYawSpring.x - twist
+        headPitch = headPitchSpring.x - HEAD_LEVEL * leanSpring.x
+        headRoll = headRollSpring.x
+
+        // Breathing, a little less noticeable once the figure is moving.
+        val breathing = sin(clock * AnimMath.TAU / BREATH_PERIOD) * (1f - 0.7f * gait)
+        breath = BREATH_SWELL * breathing
+        breathLift = BREATH_LIFT * breathing
     }
 
     /** Adds pose [p]'s share [wi] of every joint. */
@@ -428,11 +701,17 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
             Pose.PLAY -> {
                 accArmP[0] += wi * (-1.05f + sin(t * 11f - 1f) * 0.12f); accArmR[0] += wi * -0.05f
                 accArmP[1] += wi * (-1.05f + sin(t * 11f + 1f) * 0.12f); accArmR[1] += wi * 0.05f
+                // Leaning in to the game, eyes on the screen and glancing about it.
+                accHeadPitch += wi * 0.10f
+                accHeadYaw += wi * 0.10f * sin(t * 0.9f)
+                accLean += wi * 0.05f
             }
             Pose.CHEER -> {
                 accArmP[0] += wi * (-2.6f + sin(cheerAge * 9f - 1f) * 0.25f); accArmR[0] += wi * -0.2f
                 accArmP[1] += wi * (-2.6f + sin(cheerAge * 9f + 1f) * 0.25f); accArmR[1] += wi * 0.2f
                 accRoot += wi * abs(sin(cheerAge * 9f)) * 2.5f
+                accHeadPitch += wi * -0.16f
+                accLean += wi * -0.04f
             }
             Pose.SIT -> {
                 accArmP[0] += wi * -0.6f; accArmR[0] += wi * -0.1f
@@ -442,6 +721,9 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
                 // Circles with a cloth on the counter top.
                 accArmP[1] += wi * (-1.15f + sin(t * 7f) * 0.1f); accArmR[1] += wi * (0.05f + cos(t * 7f) * 0.28f)
                 accArmP[0] += wi * -0.75f; accArmR[0] += wi * -0.12f
+                // Head down, watching the cloth.
+                accHeadPitch += wi * 0.28f
+                accLean += wi * 0.10f
             }
             Pose.CARRY -> {
                 accArmP[1] += wi * (-1.25f + sin(t * 2f) * 0.04f); accArmR[1] += wi * 0.02f
@@ -461,6 +743,7 @@ class FigureAnim(val seed: Int = 0, val scale: Float = 1f) {
                 val lift = if (c < 1.4f) sin(c / 1.4f * PI_F) else 0f
                 accArmP[1] += wi * (-0.95f - lift * 1.35f); accArmR[1] += wi * (0.05f + lift * 0.2f)
                 accArmP[0] += wi * -0.6f; accArmR[0] += wi * -0.1f
+                accHeadPitch += wi * -0.12f * lift
                 accItem += wi
             }
             // Emotes: arms as standing until their own poses arrive (see below).
