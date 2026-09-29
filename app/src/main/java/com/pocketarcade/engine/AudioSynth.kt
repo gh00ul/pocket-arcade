@@ -6,6 +6,7 @@ import android.media.AudioManager
 import android.media.AudioTrack
 import com.pocketarcade.engine.audio.Attract
 import com.pocketarcade.engine.audio.MixEngine
+import com.pocketarcade.engine.audio.Room
 
 /** Every sound effect in the game. All of them are synthesized at startup; there are no audio files. */
 enum class Sfx {
@@ -75,6 +76,16 @@ class AudioSynth {
         get() = engine.ambienceVolume
         set(v) {
             engine.ambienceVolume = v
+        }
+
+    /**
+     * The room the sound effects sound in (hall, inside a game, the title). Changing it
+     * crossfades over about a second.
+     */
+    var room: Room
+        get() = engine.reverb.room
+        set(v) {
+            engine.reverb.room = v
         }
 
     private var thread: Thread? = null

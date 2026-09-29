@@ -18,8 +18,11 @@ class MixEngineTest {
     fun setUp() {
         engine = MixEngine(rate)
         engine.bank.generateAll()
-        // Only the sound effects under test: no ambience.
+        // Only the dry sound effects under test: no ambience and no reverb tail (see reverbAddsATailAfterTheSoundEnds).
         engine.ambientTarget = 0f
+        engine.reverb.returnScale = 0f
+        // The reverb's return glides to zero over the first block.
+        engine.render(out)
     }
 
     /** The peak of each channel over [blocks] rendered blocks. */
@@ -182,5 +185,34 @@ class MixEngineTest {
         var s = 0.0
         for (v in a) s += v * v
         return sqrt(s / a.size).toFloat()
+    }
+
+    @Test
+    fun reverbAddsATailAfterTheSoundEnds() {
+        engine.reverb.returnScale = 1f
+        engine.reverb.room = Room.HALL
+        engine.play(Sfx.COIN, 1f, 1f)
+        // Well after the 0.32 s coin has finished, its reverb is still ringing in both ears.
+        repeat(60) { engine.render(out) }
+        assertEquals(0, engine.activeVoices())
+        val p = peaks(20)
+        assertTrue("no tail: ${p[0]} ${p[1]}", p[0] > 20f && p[1] > 20f)
+        // ...and it dies away.
+        repeat(1200) { engine.render(out) }
+        assertEquals(0f, peaks(5).max(), 2f)
+    }
+
+    @Test
+    fun aPlayedSoundsReverbSendScalesWithItsVolume() {
+        engine.reverb.returnScale = 1f
+        engine.reverb.room = Room.HALL
+        engine.play(Sfx.COIN, 1f, 1f)
+        repeat(60) { engine.render(out) }
+        val loud = peaks(20)[0]
+        repeat(1200) { engine.render(out) }
+        engine.play(Sfx.COIN, 0.1f, 1f)
+        repeat(60) { engine.render(out) }
+        val quiet = peaks(20)[0]
+        assertTrue("quiet tail $quiet vs loud $loud", quiet < loud * 0.2f)
     }
 }

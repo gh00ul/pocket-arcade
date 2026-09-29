@@ -54,6 +54,9 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
     /** The background sound (see [HallAmbience]). */
     val ambience = HallAmbience(sampleRate)
 
+    /** The room the sound effects sound in; changing it crossfades (see [Reverb]). */
+    val reverb = Reverb(sampleRate)
+
     // ------------------------------------------------------------ the listener
 
     @Volatile private var listenerX = 0f
@@ -86,7 +89,7 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
         val v = volume * sfxVolume
         if (muted || v <= 0f) return
         // Dead centre: the equal-power pan law's 1/sqrt(2) each side, made up (see Spatial.CENTRE_MAKEUP) to unity.
-        enqueue(sfx, v, v, pitch, Priority.NORMAL)
+        enqueue(sfx, v, v, pitch, Priority.NORMAL, v)
     }
 
     /** Plays [sfx] from the world point ([x], [z]) as heard from the listener. Inaudible sounds cost nothing. */
@@ -96,10 +99,11 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
         val p = callerPlacement
         Spatial.place(listenerX, listenerZ, listenerYaw, x, z, p)
         if (p.silent) return
-        enqueue(sfx, p.left * v, p.right * v, pitch, priority, p.send)
+        enqueue(sfx, p.left * v, p.right * v, pitch, priority, p.send * v)
     }
 
-    private fun enqueue(sfx: Sfx, gainL: Float, gainR: Float, pitch: Float, priority: Int, sendScale: Float = 1f) {
+    /** [sendScale] is how much of the sound's default reverb send to use: its loudness, times how near it is. */
+    private fun enqueue(sfx: Sfx, gainL: Float, gainR: Float, pitch: Float, priority: Int, sendScale: Float) {
         if (bank.samples(sfx) == null) return
         synchronized(queueLock) {
             if (queued == QUEUE_CAP) return
@@ -131,8 +135,14 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
 
     private val voices = Array(MAX_VOICES + DYING_SLOTS) { Voice() }
 
+    /** Whether the last block was muted (so the reverb's tail is emptied once, not every block). */
+    private var wasMuted = false
+
     private val mixL = FloatArray(BLOCK)
     private val mixR = FloatArray(BLOCK)
+
+    /** The mono sum of every voice's reverb send. */
+    private val sendBus = FloatArray(BLOCK)
 
     override fun ambientVoices(): Int {
         var c = 0
@@ -208,6 +218,7 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
             val rate = v.rate
             val gl = v.gainL
             val gr = v.gainR
+            val sd = v.send
             val last = snd.size - 1
             var fade = v.fade
             var ended = false
@@ -225,6 +236,7 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
                 }
                 mixL[i] += s * gl
                 mixR[i] += s * gr
+                sendBus[i] += s * sd
                 pos += rate
                 i++
                 if (ended) break
@@ -251,13 +263,18 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
                 v.sound = null
                 v.fade = 0
             }
+            if (!wasMuted) reverb.reset()
+            wasMuted = true
             java.util.Arrays.fill(out, 0, n * 2, 0)
             return
         }
+        wasMuted = false
         java.util.Arrays.fill(mixL, 0, n, 0f)
         java.util.Arrays.fill(mixR, 0, n, 0f)
+        java.util.Arrays.fill(sendBus, 0, n, 0f)
         ambience.render(mixL, mixR, n, this, ambienceVolume, listenerX, listenerZ, listenerYaw)
         mixVoices(n)
+        reverb.process(sendBus, n, mixL, mixR)
         for (i in 0 until n) {
             out[2 * i] = limit(mixL[i])
             out[2 * i + 1] = limit(mixR[i])
@@ -274,6 +291,34 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
 
 /** How much of each sound effect goes to the room reverb, and other per-sound mixing defaults. */
 internal object SfxMix {
-    /** Reverb send when a sound is played without saying otherwise (0 = dry). */
-    fun sendFor(sfx: Sfx): Float = 0f
+    /** Reverb send of small, close, mechanical sounds: hardly any, so they stay crisp. */
+    private const val SEND_DRY = 0.06f
+
+    /** Menu and UI sounds, and the ticks and beeps of a round. */
+    private const val SEND_UI = 0.1f
+
+    /** Most sounds. */
+    private const val SEND_NORMAL = 0.16f
+
+    /** Bright, ringing sounds (coins, glass, chimes) bloom into a room. */
+    private const val SEND_RING = 0.26f
+
+    /** Fanfares and big moments get the most room. */
+    private const val SEND_BIG = 0.34f
+
+    /** Reverb send when a sound is played without saying otherwise (0 = dry, 1 = as loud as the sound). */
+    fun sendFor(sfx: Sfx): Float = when (sfx) {
+        Sfx.STEP, Sfx.ENGINE, Sfx.ROLL, Sfx.CLAW_MOTOR, Sfx.REEL, Sfx.PRINT, Sfx.SKID, Sfx.SPINNER,
+        Sfx.SHELL, Sfx.DRY_FIRE, Sfx.TICKET, Sfx.FLIPPER, Sfx.SLINGSHOT -> SEND_DRY
+
+        Sfx.BLIP, Sfx.SELECT, Sfx.ERROR, Sfx.COUNTDOWN, Sfx.WHOOSH, Sfx.BUZZER, Sfx.TILT, Sfx.PLUNGER -> SEND_UI
+
+        Sfx.COIN, Sfx.TOKEN, Sfx.CLINK, Sfx.SPILL, Sfx.RIM, Sfx.PRIZE, Sfx.LAP, Sfx.BITE, Sfx.CATCH,
+        Sfx.BUMPER, Sfx.RICOCHET, Sfx.STEAM -> SEND_RING
+
+        Sfx.WIN, Sfx.JACKPOT, Sfx.HIGHSCORE, Sfx.LUCKY, Sfx.FINISH, Sfx.GO, Sfx.CHEER, Sfx.EXPLOSION,
+        Sfx.BOMB, Sfx.CRASH, Sfx.GUNSHOT, Sfx.ALARM -> SEND_BIG
+
+        else -> SEND_NORMAL
+    }
 }

@@ -119,7 +119,7 @@ internal class HallAmbience(private val sampleRate: Int) {
         /** How many times a bleep tries for a cabinet within earshot before giving up this round. */
         const val PICK_TRIES = 4
 
-        /** Reverb send of a bleep: machines are a room away. */
+        /** Reverb send of a bleep, as a share of its own level: machines are a room away. */
         const val BLEEP_SEND = 0.5f
 
         /** Without positions (the title, before the hall reports in) a bleep comes from a random spot this wide and this far. */
@@ -287,7 +287,7 @@ internal class HallAmbience(private val sampleRate: Int) {
         val pal = Attract.palette(kind)
         val sfx = pal.sfx[rng.nextInt(pal.sfx.size)]
         val v = level * pal.level
-        sink.startVoice(sfx, p.left * v, p.right * v, BLEEP_SEND * p.send, rng.range(pal.pitchLo, pal.pitchHi), Priority.AMBIENT)
+        sink.startVoice(sfx, p.left * v, p.right * v, BLEEP_SEND * p.send * v, rng.range(pal.pitchLo, pal.pitchHi), Priority.AMBIENT)
     }
 
     /** A sound from the café counter, if the café is known and the listener is within earshot of it. */
@@ -299,6 +299,6 @@ internal class HallAmbience(private val sampleRate: Int) {
         Spatial.place(lx, lz, yaw, cafeX, cafeZ, p)
         if (p.silent) return
         val v = level * ambient * volume
-        sink.startVoice(sfx, p.left * v, p.right * v, BLEEP_SEND * p.send, pitch, Priority.AMBIENT)
+        sink.startVoice(sfx, p.left * v, p.right * v, BLEEP_SEND * p.send * v, pitch, Priority.AMBIENT)
     }
 }
