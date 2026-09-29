@@ -135,6 +135,9 @@ class StackerGame : BaseMiniGame() {
     private val speed: Float
         get() = (StackerTuning.SPEED_START + height * StackerTuning.SPEED_PER_LEVEL).coerceAtMost(StackerTuning.SPEED_MAX)
 
+    /** Every drop is a single tap: there is no pointer to forget. */
+    override fun cancelInput() {}
+
     override fun onTouch(type: TouchType, id: Long, x: Float, y: Float, timeMs: Long) {
         if (type != TouchType.DOWN || !moving || timeUp || endedEarly) return
         drop()

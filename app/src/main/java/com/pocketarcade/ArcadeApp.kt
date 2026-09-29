@@ -85,10 +85,24 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     val fade = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val audio = services.audio
+    // The hall's camera: taken from the save once, then driven by the HUD button (and saved).
+    var firstPerson by remember { mutableStateOf(false) }
+    var viewRestored by remember { mutableStateOf(false) }
 
     LaunchedEffect(save.hat, save.outfit) { world.setPlayerLook(save.playerLook()) }
     LaunchedEffect(save.owned) { world.setDecor(save.ownedDecor) }
     LaunchedEffect(save.muted) { audio.muted = save.muted }
+    LaunchedEffect(save.loaded) {
+        if (save.loaded && !viewRestored) {
+            viewRestored = true
+            firstPerson = save.firstPerson
+            world.setFirstPerson(save.firstPerson, animate = false)
+        }
+    }
+    // Going to the background lets go of every finger on the hall.
+    LaunchedEffect(signals.paused) {
+        if (signals.paused) world.cancelInput()
+    }
     LaunchedEffect(screen) {
         audio.ambientTarget = when (screen) {
             Screen.HUB -> 1f
@@ -114,20 +128,27 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         }
     }
 
-    fun enterMachine(index: Int) {
+    /**
+     * Spends a token and dives into machine [index] through [at], the cabinet whose prompt was
+     * tapped; without one (a launch shortcut) it dives into the copy nearest the player. The
+     * cabinet is picked before the token is spent.
+     */
+    fun enterMachine(index: Int, at: Spot?) {
         if (busy) return
+        val spot = at ?: world.nearestMachineSpot(index) ?: return
+        // Claimed before the suspending spend, so a quick second tap can't spend a second token.
+        busy = true
         scope.launch {
             if (!services.repo.spendToken()) {
                 audio.play(Sfx.ERROR)
                 services.haptics.tick()
                 banner = "OUT OF TOKENS! TRY THE TOKEN MACHINE"
+                busy = false
                 return@launch
             }
-            busy = true
             audio.play(Sfx.TOKEN)
             audio.play(Sfx.WHOOSH, 0.8f)
             services.haptics.hit()
-            val spot = world.map.spots.first { it.type == SpotType.MACHINE && it.machine == index }
             diveSpot = spot
             world.cancelInput()
             launch {
@@ -167,12 +188,12 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
         if (index < 0 || screen == Screen.GAME) return@LaunchedEffect
         overlay = Overlay.NONE
         screen = Screen.HUB
-        enterMachine(index)
+        enterMachine(index, null)
     }
 
     fun onSpot(spot: Spot) {
         when (spot.type) {
-            SpotType.MACHINE -> enterMachine(spot.machine)
+            SpotType.MACHINE -> enterMachine(spot.machine, spot)
             SpotType.TOKENS -> {
                 world.cancelInput()
                 overlay = Overlay.TOKENS
@@ -222,6 +243,14 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                         },
                         onToggleMute = {
                             scope.launch { services.repo.setMuted(!save.muted) }
+                        },
+                        firstPerson = firstPerson,
+                        onToggleView = {
+                            val on = !firstPerson
+                            firstPerson = on
+                            world.setFirstPerson(on, animate = true)
+                            audio.play(Sfx.WHOOSH, 0.35f, if (on) 1.3f else 0.9f)
+                            scope.launch { services.repo.setFirstPerson(on) }
                         },
                     )
                 }

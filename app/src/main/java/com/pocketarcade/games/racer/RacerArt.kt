@@ -6,6 +6,8 @@ import com.pocketarcade.engine.r3d.TexKit
 import com.pocketarcade.engine.r3d.TexPaint
 import com.pocketarcade.engine.r3d.Texture
 import com.pocketarcade.engine.r3d.paintTexture
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.sin
 
 /** Painted art for the synthwave racer. */
@@ -166,11 +168,87 @@ internal object RacerArt {
         arrayOf(
             sign("ARCADE", Pal.CYAN),
             sign("TURBO!", Pal.PINK),
-            sign("TOKENS", Pal.YELLOW),
+            sign("DRIFT!", Pal.YELLOW),
             sign("HI-SCORE", Pal.LIME),
         )
     }
     val post: Texture by lazy { TexKit.solid(4, 4, Pal.DARKGRAY) }
+
+    /** Start light lenses, lit red and green and dark, and the black box they sit in. */
+    private fun lamp(color: Int, lit: Boolean) = paintTexture(16, 16, 8) {
+        clear(0)
+        circle(8f, 8f, 7.2f, Pal.shade(color, if (lit) 0.7f else 0.25f))
+        circle(8f, 8f, 5.6f, Pal.shade(color, if (lit) 1f else 0.35f))
+        if (lit) circle(6.5f, 6.5f, 2f, Pal.mix(color, Pal.WHITE, 0.6f))
+    }
+    val lampRed: Texture by lazy { lamp(0xFFFF2020.toInt(), true) }
+    val lampGreen: Texture by lazy { lamp(0xFF20FF50.toInt(), true) }
+    val lampOff: Texture by lazy { lamp(Pal.GRAY, false) }
+    val lampBox: Texture by lazy { TexKit.solid(4, 4, 0xFF06040A.toInt()) }
+
+    /** Black and white chequers painted across the road at the start/finish line. */
+    val checker: Texture by lazy {
+        paintTexture(32, 4, 4) {
+            fill(Pal.WHITE)
+            for (x in 0 until 16) for (y in 0 until 2) if ((x + y) % 2 == 0) rect(x * 2f, y * 2f, 2f, 2f, Pal.BLACK)
+        }
+    }
+
+    /**
+     * The lit plate on the back of a hall cabinet's racing seat, the pod's number [n] in a
+     * roundel under a chequered strip, so the pods read from across the hall.
+     */
+    fun seatPlate(n: Int): Texture = seatPlates.getOrPut(n) {
+        paintTexture(32, 48, 6) {
+            vgrad(0f, 0f, 32f, 48f, 0xFF3A0A12.toInt(), 0xFF140408.toInt())
+            for (x in 0 until 8) for (y in 0 until 2) rect(x * 4f, 2f + y * 4f, 4f, 4f, if ((x + y) % 2 == 0) Pal.WHITE else Pal.BLACK)
+            glow(2.5f, Pal.withAlpha(Pal.RED, 0.9f)) { strokeRound(2f, 12f, 28f, 34f, 4f, 1.4f, -1) }
+            strokeRound(2f, 12f, 28f, 34f, 4f, 1f, 0xFFFF8A80.toInt())
+            circle(16f, 26f, 9f, Pal.WHITE)
+            ring(16f, 26f, 9f, 1.2f, Pal.RED)
+            label(n.toString(), 16f, 21.5f, 10f, 0xFF140408.toInt())
+            label("TURBO", 16f, 38.5f, 4.2f, Pal.WHITE)
+        }
+    }
+    private val seatPlates = HashMap<Int, Texture>()
+
+    /** The hall cabinet's dash: a lit speedo and rev counter either side of a digital readout. */
+    val dash: Texture by lazy {
+        paintTexture(64, 20, 6) {
+            fill(0xFF100C18.toInt())
+            rect(0f, 0f, 64f, 0.8f, Pal.shade(Pal.PINK, 0.7f))
+            for (g in 0..1) {
+                val cx = if (g == 0) 12f else 52f
+                val color = if (g == 0) Pal.CYAN else Pal.PINK
+                circle(cx, 11f, 8f, 0xFF1C1828.toInt())
+                ring(cx, 11f, 7.4f, 0.8f, color)
+                for (k in 0..8) {
+                    val a = (0.75f + k * 0.1875f) * PI.toFloat()
+                    line(cx + cos(a) * 5.6f, 11f + sin(a) * 5.6f, cx + cos(a) * 6.8f, 11f + sin(a) * 6.8f, 0.5f, if (k >= 7) Pal.RED else Pal.WHITE)
+                }
+                val n = (if (g == 0) 1.95f else 2.1f) * PI.toFloat()
+                line(cx, 11f, cx + cos(n) * 6f, 11f + sin(n) * 6f, 0.8f, Pal.ORANGE)
+                circle(cx, 11f, 1.2f, Pal.GRAY)
+            }
+            round(23f, 6f, 18f, 9f, 1f, 0xFF06040A.toInt())
+            label("288", 32f, 7.5f, 6f, Pal.CYAN)
+        }
+    }
+
+    /** The neon FINISH banner on the start/finish gantry, chequered at both ends. */
+    val banner: Texture by lazy {
+        paintTexture(120, 20, 6) {
+            fill(0xFF08060C.toInt())
+            for (x in 0 until 4) for (y in 0 until 4) {
+                val c = if ((x + y) % 2 == 0) Pal.WHITE else Pal.BLACK
+                rect(x * 4f, y * 5f, 4f, 5f, c)
+                rect(104f + x * 4f, y * 5f, 4f, 5f, c)
+            }
+            strokeRound(17f, 1f, 86f, 18f, 2f, 1f, Pal.CYAN)
+            glow(1.4f, Pal.withAlpha(Pal.PINK, 0.8f)) { label("FINISH", 60f, 5f, 10f, -1) }
+            label("FINISH", 60f, 5f, 10f, Pal.mix(Pal.PINK, Pal.WHITE, 0.3f))
+        }
+    }
 
     /** A spinning token pickup (drawn squashed to fake the spin). */
     val token: Texture by lazy {

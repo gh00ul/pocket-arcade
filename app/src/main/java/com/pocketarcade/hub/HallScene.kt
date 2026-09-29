@@ -5,16 +5,18 @@ import com.pocketarcade.data.SaveState
 import com.pocketarcade.engine.hash01
 import com.pocketarcade.engine.r3d.Blend
 import com.pocketarcade.engine.r3d.BoxFaces
+import com.pocketarcade.engine.r3d.Frustum
 import com.pocketarcade.engine.r3d.Model
 import com.pocketarcade.engine.r3d.ModelBuilder
 import com.pocketarcade.engine.r3d.PointLight
 import com.pocketarcade.engine.r3d.Renderer3D
 import com.pocketarcade.engine.r3d.TexPaint
 import com.pocketarcade.engine.r3d.Texture
+import com.pocketarcade.games.CabinetShape
 import com.pocketarcade.games.MiniGame
-import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * Draws the whole arcade: the floor and walls, every cabinet and fixture, the crowd, the
@@ -22,21 +24,71 @@ import kotlin.math.sin
  * camera can see.
  */
 class HallScene(val map: HubMap, private val games: List<MiniGame>) {
+    private companion object {
+        /** The renderer's point-light budget. */
+        const val MAX_LIGHTS = 64
+        /** Everything standing on the floor fits under this: cabinets with their toppers, fixtures. */
+        const val STAND_HEIGHT = 170f
+        /** A kid with a hat on. */
+        const val FIGURE_HEIGHT = 62f
+        /** The lighting rig, its beams and the hung signs reach up to here. */
+        const val RIG_HEIGHT = 290f
+        /** Slack round each thing's floor box for what overhangs it (marquee lips, shadows). */
+        const val MARGIN = 14f
+        /** Overhead the whole hall is in range; first person draws out to here, where the fog is black. */
+        const val OVERHEAD_FAR = 3000f
+        const val FP_DRAW_DISTANCE = 900f
+        const val FP_FOG_NEAR = 260f
+        val DISCO_COLORS = intArrayOf(0xFFFF4FA8.toInt(), 0xFF39E6F2.toInt(), 0xFFFFD84D.toInt(), 0xFF9B6BFF.toInt())
+    }
+
     private val arts = games.map { MachineArt(it) }
-    private val units = map.props.filter { it.kind == PropKind.MACHINE }.map { MachineUnit(it, games[it.machine], arts[it.machine]) }
-    private val fixtures = ArrayList<Pair<Prop, Model>>()
+    /** Every cabinet, back to front: the order the see-through pass needs, fixed for the map's life. */
+    private val units = map.props.filter { it.kind == PropKind.MACHINE }
+        .map { MachineUnit(it, games[it.machine], arts[it.machine]) }
+        .sortedBy { it.prop.z0 }
+    private val fixtureProps = ArrayList<Prop>()
+    private val fixtureModels = ArrayList<Model>()
     private val lights = ArrayList<PointLight>()
-    private val baseIntensity = HashMap<PointLight, Float>()
+    /** Each light's steady intensity (the per-frame flicker scales it). */
+    private val baseIntensity: FloatArray
     private val structure: Model
+    /** Trusses and spotlights, the racers' hung sign, the upper-wall murals, the entrance chase lights. */
+    private val rig = HallRig(map, games)
     private val floorShade: Texture
+    private val hasDisco = map.props.any { it.decor == DecorStyle.DISCO_BALL }
     private val figures = HashMap<CharacterLook, Figure>()
     private val corners = FloatArray(2)
+    /** The camera's view out to the draw distance; everything below is culled against it. */
+    private val view = Frustum()
+    private val footprint = FloatArray(4)
     private val bulb = HallArt.solid(-1).full
     private val halo = HallArt.glow.full
     private val shadow = HallArt.shadow.full
+    // Café: the barista, slushie tanks and steam are drawn by CafeScene.kt.
+    private val cafe = CafeScene()
+
+    // The part of the floor under anything in view this frame (plus margins), the same for the
+    // lighting rig overhead, and the lights picked for it.
+    private var minX = 0f
+    private var maxX = 0f
+    private var minZ = 0f
+    private var maxZ = 0f
+    private var rigMinX = 0f
+    private var rigMaxX = 0f
+    private var rigMinZ = 0f
+    private var rigMaxZ = 0f
+    /** The floor point lights are ranked from: what the camera looks at, or just ahead of the eye. */
+    private var keyX = 0f
+    private var keyZ = 0f
+    private val pickIndex = IntArray(MAX_LIGHTS)
+    private val pickKey = FloatArray(MAX_LIGHTS)
 
     init {
-        for (p in map.props) if (p.kind != PropKind.MACHINE) fixtures += p to Props.build(p, lights)
+        for (p in map.props) if (p.kind != PropKind.MACHINE) {
+            fixtureProps += p
+            fixtureModels += Props.build(p, lights)
+        }
         for (u in units) lights += u.lights
         // Ceiling downlights in a grid.
         var z = 90f
@@ -51,9 +103,10 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         // Neon along the walls.
         lights += PointLight(92f, 110f, 40f, 0.3f, 0.9f, 1f, 130f, 0.7f)
         lights += PointLight(534f, 110f, 40f, 0.7f, 0.4f, 1f, 130f, 0.7f)
-        for (l in lights) baseIntensity[l] = l.intensity
+        // The structure adds the street lamps, so read the steady intensities after it.
         structure = buildStructure()
         floorShade = buildFloorShade()
+        baseIntensity = FloatArray(lights.size) { lights[it].intensity }
     }
 
     // ------------------------------------------------------------------ static structure
@@ -158,21 +211,32 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         b.quad(wl, hgt - 8f, back + 0.3f, w - wl, hgt - 8f, back + 0.3f, w - wl, hgt - 10f, back + 0.3f, wl, hgt - 10f, back + 0.3f, neonPink, 0f, 0f, 1f, emissive = 1.8f)
         b.quad(wl + 0.3f, hgt - 8f, front, wl + 0.3f, hgt - 8f, back, wl + 0.3f, hgt - 10f, back, wl + 0.3f, hgt - 10f, front, neonCyan, 1f, 0f, 0f, emissive = 1.8f)
         b.quad(w - wl - 0.3f, hgt - 8f, back, w - wl - 0.3f, hgt - 8f, front, w - wl - 0.3f, hgt - 10f, front, w - wl - 0.3f, hgt - 10f, back, neonCyan, -1f, 0f, 0f, emissive = 1.8f)
-        // Posters on the side walls.
-        for (k in 0 until 4) {
-            val pz = 300f + k * 130f
+        // Posters on the side walls, clear of the zone signs and the tall banks against them.
+        // Wall art runs its first corner to its second left to right as seen from the hall.
+        for ((k, pz) in HubLayout.leftPosters.withIndex()) {
             val tex = HallArt.poster(k).full
-            b.quad(wl + 0.4f, 100f, pz - 12f, wl + 0.4f, 100f, pz + 12f, wl + 0.4f, 64f, pz + 12f, wl + 0.4f, 64f, pz - 12f, tex, 1f, 0f, 0f, gloss = 0.5f)
-            val tex2 = HallArt.poster(k + 1).full
-            b.quad(w - wl - 0.4f, 100f, pz + 12f, w - wl - 0.4f, 100f, pz - 12f, w - wl - 0.4f, 64f, pz - 12f, w - wl - 0.4f, 64f, pz + 12f, tex2, -1f, 0f, 0f, gloss = 0.5f)
+            b.quad(wl + 0.4f, 100f, pz + 12f, wl + 0.4f, 100f, pz - 12f, wl + 0.4f, 64f, pz - 12f, wl + 0.4f, 64f, pz + 12f, tex, 1f, 0f, 0f, gloss = 0.5f)
+        }
+        for ((k, pz) in HubLayout.rightPosters.withIndex()) {
+            val tex = HallArt.poster(k + 1).full
+            b.quad(w - wl - 0.4f, 100f, pz - 12f, w - wl - 0.4f, 100f, pz + 12f, w - wl - 0.4f, 64f, pz + 12f, w - wl - 0.4f, 64f, pz - 12f, tex, -1f, 0f, 0f, gloss = 0.5f)
         }
         // Big neon signs on the back wall.
         b.quad(22f, 132f, back + 0.5f, 164f, 132f, back + 0.5f, 164f, 96f, back + 0.5f, 22f, 96f, back + 0.5f, HallArt.neon("POCKET ARCADE", 0xFF39E6F2.toInt(), 768, 160, 96f).full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1.7f, cull = false)
         b.quad(470f, 132f, back + 0.5f, 590f, 132f, back + 0.5f, 590f, 100f, back + 0.5f, 470f, 100f, back + 0.5f, HallArt.neon("HIGH SCORE", 0xFFB080FF.toInt(), 640, 160, 96f).full, 0f, 0f, 1f, blend = Blend.ADD, emissive = 1.7f, cull = false)
-        // Zone signs on the side walls.
-        b.quad(wl + 0.6f, 124f, 190f, wl + 0.6f, 124f, 290f, wl + 0.6f, 100f, 290f, wl + 0.6f, 100f, 190f, HallArt.neon("SKEE-BALL", 0xFFFFD84D.toInt(), 640, 160, 100f).full, 1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
-        b.quad(w - wl - 0.6f, 124f, 280f, w - wl - 0.6f, 124f, 180f, w - wl - 0.6f, 100f, 180f, w - wl - 0.6f, 100f, 280f, HallArt.neon("HOOPS", 0xFFFF8A3D.toInt(), 512, 160, 110f).full, -1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
-        b.quad(wl + 0.6f, 116f, 510f, wl + 0.6f, 116f, 630f, wl + 0.6f, 92f, 630f, wl + 0.6f, 92f, 510f, HallArt.neon("SNACK BAR", 0xFF5CF08A.toInt(), 640, 160, 100f).full, 1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
+        // Zone signs on the side walls, from the floor plan: each over its bank and the cross
+        // aisle in front of it. A machine's sign is only up while that machine is on the floor.
+        for (sg in HubLayout.wallSigns) {
+            if (sg.shape != null && games.none { it.look.shape == sg.shape }) continue
+            val tex = HallArt.neon(sg.text, sg.color, sg.texW, 160, sg.size).full
+            if (sg.right) {
+                val x = w - wl - 0.6f
+                b.quad(x, sg.y1, sg.z0, x, sg.y1, sg.z1, x, sg.y0, sg.z1, x, sg.y0, sg.z0, tex, -1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
+            } else {
+                val x = wl + 0.6f
+                b.quad(x, sg.y1, sg.z1, x, sg.y1, sg.z0, x, sg.y0, sg.z0, x, sg.y0, sg.z1, tex, 1f, 0f, 0f, blend = Blend.ADD, emissive = 1.7f, cull = false)
+            }
+        }
         // Baseboards.
         val base = HallArt.darkMetal.full
         b.box(wl, 0f, back, w - wl, 4f, back + 1f, BoxFaces(front = base, top = base))
@@ -204,28 +268,98 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
 
     private fun figureFor(look: CharacterLook): Figure = figures.getOrPut(look) { Figure(look) }
 
+    /**
+     * Whether something standing on a floor rectangle (up to [height] tall) is in this frame's
+     * view: its box, with [MARGIN] of slack, reaches the camera's view volume.
+     */
+    private fun visible(x0: Float, z0: Float, x1: Float, z1: Float, height: Float = STAND_HEIGHT) =
+        x1 > minX && x0 < maxX && z1 > minZ && z0 < maxZ &&
+            view.boxVisible(x0 - MARGIN, 0f, z0 - MARGIN, x1 + MARGIN, height, z1 + MARGIN)
+
+    /** A fixture's box runs up past its own height (the disco ball hangs on a chain above it). */
+    private fun fixtureVisible(p: Prop) = visible(p.x0, p.z0, p.x1, p.z1, maxOf(STAND_HEIGHT, p.height + 64f))
+
+    /** A cabinet counts as in view while any of it, or the glow it throws on the floor in front, is. */
+    private fun unitVisible(p: Prop) = visible(p.x0 - 12f, p.z0, p.x1 + 12f, p.z1 + 40f)
+
+    /**
+     * Works out what is in view: the view volume out to the draw distance, the floor under
+     * anything standing in it, the same for the rig overhead, and the point the lights are
+     * ranked from. Right for any camera, looking down on the hall or straight along it.
+     */
+    private fun cullFor(r: Renderer3D, fp: Float) {
+        val cam = r.camera
+        val far = OVERHEAD_FAR + (FP_DRAW_DISTANCE - OVERHEAD_FAR) * fp
+        view.set(cam, far)
+        if (view.footprint(0f, STAND_HEIGHT, footprint)) {
+            minX = footprint[0] - MARGIN; maxX = footprint[1] + MARGIN
+            minZ = footprint[2] - MARGIN; maxZ = footprint[3] + MARGIN
+        } else {
+            // Looking wholly above everything: nothing on the floor is in view.
+            minX = 0f; maxX = -1f; minZ = 0f; maxZ = -1f
+        }
+        if (view.footprint(0f, RIG_HEIGHT, footprint)) {
+            rigMinX = footprint[0] - MARGIN; rigMaxX = footprint[1] + MARGIN
+            rigMinZ = footprint[2] - MARGIN; rigMaxZ = footprint[3] + MARGIN
+        } else {
+            rigMinX = 0f; rigMaxX = -1f; rigMinZ = 0f; rigMaxZ = -1f
+        }
+        // Rank lights from the floor at the middle of the screen overhead, and from just ahead of
+        // the eye in first person, where the nearest (biggest on screen) surfaces are.
+        var cx = (minX + maxX) / 2f
+        var cz = (minZ + maxZ) / 2f
+        if (cam.rayToPlaneY(r.width / 2f, r.height / 2f, 0f, corners)) {
+            cx = corners[0]; cz = corners[1]
+        }
+        val fl = sqrt(cam.fx * cam.fx + cam.fz * cam.fz)
+        val ahead = 60f
+        val ex = cam.ex + if (fl > 1e-3f) cam.fx / fl * ahead else 0f
+        val ez = cam.ez + if (fl > 1e-3f) cam.fz / fl * ahead else 0f
+        keyX = cx + (ex - cx) * fp
+        keyZ = cz + (ez - cz) * fp
+    }
+
+    /**
+     * Picks the lights that reach what's in view, nearest the key point first (big lights count
+     * as a little nearer), up to the renderer's budget, and sets their flicker. Allocation-free:
+     * this runs every frame.
+     */
+    private fun pickLights(r: Renderer3D, t: Float) {
+        val camX = keyX
+        val camZ = keyZ
+        var n = 0
+        for (i in lights.indices) {
+            val pl = lights[i]
+            if (pl.x + pl.radius <= rigMinX || pl.x - pl.radius >= rigMaxX || pl.z + pl.radius <= rigMinZ || pl.z - pl.radius >= rigMaxZ) continue
+            if (!view.sphereVisible(pl.x, pl.y, pl.z, pl.radius)) continue
+            val dx = pl.x - camX
+            val dz = pl.z - camZ
+            val key = sqrt(dx * dx + dz * dz) - 0.35f * pl.radius
+            if (n == MAX_LIGHTS && key >= pickKey[n - 1]) continue
+            // Insertion into the sorted pick list, dropping the farthest when it's full.
+            var j = if (n < MAX_LIGHTS) n++ else n - 1
+            while (j > 0 && pickKey[j - 1] > key) {
+                pickKey[j] = pickKey[j - 1]
+                pickIndex[j] = pickIndex[j - 1]
+                j--
+            }
+            pickKey[j] = key
+            pickIndex[j] = i
+        }
+        val l = r.lighting
+        for (k in 0 until n) {
+            val i = pickIndex[k]
+            val pl = lights[i]
+            pl.intensity = baseIntensity[i] * (0.94f + 0.06f * sin(t * 2.3f + pl.x * 0.05f + pl.z * 0.03f))
+            l.points += pl
+        }
+    }
+
     fun render(r: Renderer3D, world: HubWorld, save: SaveState) {
         val t = world.time
-        val cam = r.camera
-
-        // What part of the floor is on screen (plus margins for tall things).
-        var minX = Float.MAX_VALUE
-        var maxX = -Float.MAX_VALUE
-        var minZ = Float.MAX_VALUE
-        var maxZ = -Float.MAX_VALUE
-        for ((sx, sy) in listOf(0f to 0f, r.width.toFloat() to 0f, 0f to r.height.toFloat(), r.width.toFloat() to r.height.toFloat())) {
-            if (cam.rayToPlaneY(sx, sy, 0f, corners)) {
-                minX = minOf(minX, corners[0]); maxX = maxOf(maxX, corners[0])
-                minZ = minOf(minZ, corners[1]); maxZ = maxOf(maxZ, corners[1])
-            } else {
-                minZ = -200f
-            }
-        }
-        if (minX > maxX) {
-            minX = 0f; maxX = HubLayout.WIDTH.toFloat(); minZ = 0f; maxZ = HubLayout.DEPTH.toFloat()
-        }
-        minX -= 60f; maxX += 60f; minZ -= 140f; maxZ += 60f
-        fun visible(x0: Float, z0: Float, x1: Float, z1: Float) = x1 > minX && x0 < maxX && z1 > minZ && z0 < maxZ
+        // 0 overhead … 1 first person (eased while switching).
+        val fp = world.camera.fpAmount
+        cullFor(r, fp)
 
         // Lighting: dim hall, warm downlights, every machine glowing its colour.
         val l = r.lighting
@@ -233,75 +367,94 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
         l.setDirection(0.1f, 1f, 0.35f)
         l.dirR = 0.16f; l.dirG = 0.15f; l.dirB = 0.18f
         l.points.clear()
-        val camX = (minX + maxX) / 2f
-        val camZ = (minZ + maxZ) / 2f
-        val candidates = lights.filter { it.x + it.radius > minX && it.x - it.radius < maxX && it.z + it.radius > minZ && it.z - it.radius < maxZ }
-            .sortedBy { abs(it.x - camX) + abs(it.z - camZ) }
-        for ((i, pl) in candidates.withIndex()) {
-            if (i >= 64) break
-            val base = baseIntensity[pl] ?: pl.intensity
-            pl.intensity = base * (0.94f + 0.06f * sin(t * 2.3f + pl.x * 0.05f + pl.z * 0.03f))
-            l.points += pl
-        }
-        r.fogNear = 760f
-        r.fogFar = 1800f
-        r.fogFloor = 0.35f
+        pickLights(r, t)
+        // At eye level the far end of the hall fades to black by the draw distance, so nothing
+        // visibly pops in or out there; overhead keeps the old gentle haze.
+        r.fogNear = 760f + (FP_FOG_NEAR - 760f) * fp
+        r.fogFar = 1800f + (FP_DRAW_DISTANCE - 1800f) * fp
+        r.fogFloor = 0.35f * (1f - fp)
+        r.cullModels = true
+        r.drawDistance = if (fp > 0f) view.far else 0f
         r.exposure = 1.25f
         r.bloom = 0.85f
         r.clear(0xFF07050E.toInt())
 
         structure.draw(r, Blend.OPAQUE)
+        rig.model.draw(r, Blend.OPAQUE)
+        rig.drawOpaque(r, t, rigMinX, rigMaxX, rigMinZ, rigMaxZ)
 
-        for ((p, m) in fixtures) {
-            if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
-            m.draw(r, Blend.OPAQUE)
+        for (i in fixtureProps.indices) {
+            val p = fixtureProps[i]
+            if (!fixtureVisible(p)) continue
+            fixtureModels[i].draw(r, Blend.OPAQUE)
         }
-        for (u in units) {
+        for (i in units.indices) {
+            val u = units[i]
             val p = u.prop
-            if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
+            if (!unitVisible(p)) continue
             u.refresh(save.highScore(u.game.id), t)
             u.drawOpaque(r, t)
         }
 
-        // The crowd.
+        // The crowd. In first person you are the camera, so your own kid isn't drawn.
         val pl = world.player
-        pl.look?.let { figureFor(it).draw(r, pl.x, 0f, pl.y, pl.yaw, pl.pose, pl.phase, t) }
-        for (n in world.npcs) {
-            if (!visible(n.x - 10f, n.y - 10f, n.x + 10f, n.y + 10f)) continue
+        val showPlayer = fp < 0.85f
+        if (showPlayer) pl.look?.let { figureFor(it).draw(r, pl.x, 0f, pl.y, pl.yaw, pl.pose, pl.phase, t) }
+        val npcs = world.npcs
+        for (i in npcs.indices) {
+            val n = npcs[i]
+            if (!visible(n.x - 10f, n.y - 10f, n.x + 10f, n.y + 10f, FIGURE_HEIGHT)) continue
             figureFor(n.look).draw(r, n.x, 0f, n.y, n.yaw, n.pose, n.phase, t + n.seed)
         }
-        if (visible(map.clerkX - 10f, map.clerkY - 10f, map.clerkX + 10f, map.clerkY + 10f)) {
+        if (visible(map.clerkX - 10f, map.clerkY - 10f, map.clerkX + 10f, map.clerkY + 10f, FIGURE_HEIGHT)) {
             figureFor(Looks.clerk).draw(r, map.clerkX, 0f, map.clerkY, sin(t * 0.4f) * 0.4f, Pose.STAND, 0f, t, 1.12f)
         }
+        cafe.draw(r, world, t, minX, maxX, minZ, maxZ) // Café
 
         // ---- see-through layers, back to front where it matters.
-        r.decal(304f - 62f, 606f, 304f + 62f, 730f, 0.05f, HallArt.floorLogo.full, blend = Blend.ALPHA)
+        val logoZ = HubLayout.FRONT_WALL - 234f
+        r.decal(304f - 62f, logoZ, 304f + 62f, logoZ + 124f, 0.05f, HallArt.floorLogo.full, blend = Blend.ALPHA)
         r.decal(0f, 0f, HubLayout.WIDTH.toFloat(), HubLayout.DEPTH.toFloat(), 0.08f, floorShade.full, blend = Blend.ALPHA)
-        for (u in units) {
+        for (i in units.indices) {
+            val u = units[i]
             val p = u.prop
-            if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
+            if (!unitVisible(p)) continue
             val pulse = 0.28f + 0.06f * sin(t * 2f + p.centerX * 0.1f)
             r.decal(p.x0 - 12f, p.z1 - 4f, p.x1 + 12f, p.z1 + 40f, 0.15f, halo, Blend.ADD, emissive = 1f, alpha = pulse, tint = u.art.glow)
         }
-        shadowAt(r, pl.x, pl.y, 1f)
-        for (n in world.npcs) if (visible(n.x, n.y, n.x, n.y)) shadowAt(r, n.x, n.y, 1f)
-        shadowAt(r, map.clerkX, map.clerkY, 1.1f)
-        for ((p, m) in fixtures) {
-            if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
-            m.draw(r, Blend.ALPHA)
+        if (showPlayer) shadowAt(r, pl.x, pl.y, 1f)
+        for (i in npcs.indices) {
+            val n = npcs[i]
+            if (visible(n.x - 10f, n.y - 7f, n.x + 10f, n.y + 7f, 1f)) shadowAt(r, n.x, n.y, 1f)
         }
-        for (u in units.sortedBy { it.prop.z0 }) {
+        shadowAt(r, map.clerkX, map.clerkY, 1.1f)
+        // First person's tap-to-walk: a pulsing glow where you're headed.
+        val route = world.route
+        if (route.active && fp > 0.5f) {
+            val s = 1f + 0.12f * sin(t * 7f)
+            r.flat(route.goalX, route.goalY, 0.35f, 26f * s, 26f * s, halo, blend = Blend.ADD, emissive = 1f, alpha = 0.55f * fp, tint = 0xFFFFD84D.toInt())
+            r.flat(route.goalX, route.goalY, 0.4f, 9f, 9f, halo, blend = Blend.ADD, emissive = 1f, alpha = 0.9f * fp, tint = -1)
+        }
+        for (i in fixtureProps.indices) {
+            val p = fixtureProps[i]
+            if (!fixtureVisible(p)) continue
+            fixtureModels[i].draw(r, Blend.ALPHA)
+        }
+        for (i in units.indices) {
+            val u = units[i]
             val p = u.prop
-            if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
+            if (!unitVisible(p)) continue
             u.drawTransparent(r)
             u.drawBulbs(r, t, bulb, halo)
         }
         structure.draw(r, Blend.ADD)
-        for ((p, m) in fixtures) {
-            if (!visible(p.x0, p.z0, p.x1, p.z1)) continue
-            m.draw(r, Blend.ADD)
+        for (i in fixtureProps.indices) {
+            val p = fixtureProps[i]
+            if (!fixtureVisible(p)) continue
+            fixtureModels[i].draw(r, Blend.ADD)
         }
-        if (map.props.any { it.decor == DecorStyle.DISCO_BALL }) drawDiscoSpots(r, t)
+        rig.drawGlow(r, t, rigMinX, rigMaxX, rigMinZ, rigMaxZ)
+        if (hasDisco) drawDiscoSpots(r, t)
     }
 
     private fun shadowAt(r: Renderer3D, x: Float, z: Float, s: Float) {
@@ -309,7 +462,7 @@ class HallScene(val map: HubMap, private val games: List<MiniGame>) {
     }
 
     private fun drawDiscoSpots(r: Renderer3D, t: Float) {
-        val colors = intArrayOf(0xFFFF4FA8.toInt(), 0xFF39E6F2.toInt(), 0xFFFFD84D.toInt(), 0xFF9B6BFF.toInt())
+        val colors = DISCO_COLORS
         for (k in 0 until 14) {
             val a = t * 0.6f + k * 0.45f
             val d = 60f + hash01(k, 3) * 120f

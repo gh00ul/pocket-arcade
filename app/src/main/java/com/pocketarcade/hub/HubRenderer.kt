@@ -25,6 +25,16 @@ import kotlin.math.sin
 class HubRenderer {
     companion object {
         const val SLOT = "hub"
+        private const val FLOOR_GLOW = 0.45f
+        /** Neon, screens and marquees mirrored in the glossy tiles; a faint haze on the carpet. */
+        private const val FLOOR_REFLECT = 1.3f
+        private const val FLOOR_REFLECT_MATTE = 0.18f
+        private const val WALK_HINT = "DRAG ANYWHERE TO WALK"
+        private val FP_HINT = "${ArcadeFont.LEFT} DRAG TO WALK      DRAG TO LOOK ${ArcadeFont.RIGHT}"
+        private const val FP_TAP_HINT = "OR TAP A MACHINE TO WALK THERE"
+        private val STICK_GLOW = listOf(Color.White.copy(alpha = 0.02f), Color.White.copy(alpha = 0.14f))
+        private val KNOB = listOf(Color(0xFFFFB8DD), Color(Pal.PINK), Color(0xFFB02070))
+        private val KNOB_RUN = listOf(Color(0xFFFFF2B0), Color(Pal.GOLD), Color(0xFFC07A10))
     }
 
     private val r = Renderer3D(1, 1)
@@ -41,31 +51,66 @@ class HubRenderer {
 
         r.startFrame()
         r.resize(w, h)
+        // The blacklight carpet: its neon print fluoresces a little.
+        r.floorGlow = FLOOR_GLOW
+        r.floorReflect = FLOOR_REFLECT
+        // From a kid's eye the carpet's haze reads as a wet floor, so it all but goes in first person.
+        r.floorReflectMatte = FLOOR_REFLECT_MATTE * (1f - 0.85f * world.camera.fpAmount)
         world.camera.apply(r.camera, w, h)
         sc.render(r, world, save)
         Gfx.submit(SLOT, r.finishFrame(0, 0, w, h))
 
         val px = 2f * scope.density
         drawPrompt(scope, world, save)
-        if (!world.hasWalked) {
-            val a = 0.55f + 0.45f * sin(world.time * 4f)
-            ArcadeFont.drawCentered(scope, "DRAG ANYWHERE TO WALK", sw / 2f, sh * 0.8f, px * 1.2f, Color.White, a, tiny = true)
+        val fp = world.camera.fpAmount
+        val a = 0.55f + 0.45f * sin(world.time * 4f)
+        if (world.camera.dive > 0.01f) {
+            // Diving into (or out of) a machine: no hints over the screen.
+        } else if (fp > 0.5f) {
+            if (!world.hasWalked || !world.hasLooked) {
+                // Above where the left thumb and its stick go.
+                ArcadeFont.drawCentered(scope, FP_HINT, sw / 2f, sh * 0.68f, px * 1.2f, Color.White, a, tiny = true)
+                ArcadeFont.drawCentered(scope, FP_TAP_HINT, sw / 2f, sh * 0.68f + px * 12f, px * 1.1f, Color.White, a * 0.8f, tiny = true)
+            }
+        } else if (!world.hasWalked) {
+            ArcadeFont.drawCentered(scope, WALK_HINT, sw / 2f, sh * 0.8f, px * 1.2f, Color.White, a, tiny = true)
         }
         val js = world.joystick
         if (js.active) {
             val rad = js.radius
-            scope.drawCircle(Brush.radialGradient(listOf(Color.White.copy(alpha = 0.02f), Color.White.copy(alpha = 0.14f)), Offset(js.baseX, js.baseY), rad), rad, Offset(js.baseX, js.baseY))
-            scope.drawCircle(Color.White, rad, Offset(js.baseX, js.baseY), alpha = 0.35f, style = Stroke(width = px * 1.2f))
+            val base = Offset(js.baseX, js.baseY)
+            // In first person the busy, bright hall is right behind the stick: give it a dark
+            // backing and a firmer rim so it reads, and a ring where the walk turns into a run.
+            if (fp > 0.01f) {
+                scope.drawCircle(Color.Black, rad * 1.04f, base, alpha = 0.3f * fp)
+                scope.drawCircle(Color.White, rad * Joystick.RUN_FROM, base, alpha = 0.22f * fp, style = Stroke(width = px * 0.8f))
+            }
+            scope.drawCircle(Brush.radialGradient(STICK_GLOW, base, rad), rad, base)
+            scope.drawCircle(Color.White, rad, base, alpha = 0.35f + 0.3f * fp, style = Stroke(width = px * (1.2f + 0.6f * fp)))
             val knob = Offset(js.knobX, js.knobY)
-            scope.drawCircle(Color.Black, rad * 0.44f, knob + Offset(0f, px * 2f), alpha = 0.3f)
-            scope.drawCircle(Brush.radialGradient(listOf(Color(0xFFFFB8DD), Color(Pal.PINK), Color(0xFFB02070)), knob - Offset(rad * 0.12f, rad * 0.15f), rad * 0.6f), rad * 0.42f, knob)
-            scope.drawCircle(Color.White, rad * 0.42f, knob, alpha = 0.35f, style = Stroke(width = px))
+            val kr = rad * 0.42f
+            scope.drawCircle(Color.Black, kr * 1.05f, knob + Offset(0f, px * 2f), alpha = 0.3f)
+            val running = fp > 0.5f && js.run > 0.5f
+            scope.drawCircle(Brush.radialGradient(if (running) KNOB_RUN else KNOB, knob - Offset(rad * 0.12f, rad * 0.15f), rad * 0.6f), kr, knob)
+            scope.drawCircle(Color.White, kr, knob, alpha = 0.35f + 0.25f * fp, style = Stroke(width = px))
+        } else if (fp > 0.5f && world.camera.dive <= 0.01f && !world.route.active) {
+            // First person with no thumb down: a faint ghost of the stick where a left thumb rests.
+            val rad = js.radius
+            val base = Offset(sw * 0.22f, sh - rad - 56f * scope.density)
+            scope.drawCircle(Color.Black, rad, base, alpha = 0.12f * fp)
+            scope.drawCircle(Color.White, rad, base, alpha = 0.16f * fp, style = Stroke(width = px))
+            scope.drawCircle(Color.White, rad * 0.42f, base, alpha = 0.12f * fp)
         }
     }
 
     private fun drawPrompt(scope: DrawScope, world: HubWorld, save: SaveState) {
         val spot = world.activeSpot
-        if (spot == null || world.camera.dive > 0.01f || !r.camera.project(spot.anchorX, spot.anchorHeight, spot.anchorZ, proj)) {
+        val fp = world.camera.fpAmount
+        // In first person the bubble floats at about eye level in front of the machine instead of
+        // over its top, which is above the view when you stand right at it.
+        val anchorY = spot?.let { it.anchorHeight + (minOf(it.anchorHeight, HubCamera.EYE_HEIGHT + 8f) - it.anchorHeight) * fp } ?: 0f
+        val projected = spot != null && r.camera.project(spot.anchorX, anchorY, spot.anchorZ, proj)
+        if (spot == null || world.camera.dive > 0.01f || (!projected && fp < 0.5f)) {
             world.bubbleLeft = 0f
             world.bubbleRight = 0f
             return
@@ -111,8 +156,14 @@ class HubRenderer {
         val bh = pad * 2f + ArcadeFont.height(tu, true) + u * 4f + ArcadeFont.height(u * 1.3f) + u * 4f + ArcadeFont.height(tu, true)
         val tip = u * 5f
         val bob = sin(t * 4f) * u * 0.8f
-        val ax = proj[0]
-        val ay = proj[1] + bob
+        // Keep the whole bubble on screen, clear of the HUD along the top: up close in first
+        // person the anchor can be off the top or side, or (looking away) behind the eye.
+        val sw = scope.size.width
+        val sh = scope.size.height
+        val edge = u * 4f
+        val topLimit = maxOf(world.hudBottom, 84f * scope.density) + u * 3f + bh + tip
+        val ax = (if (projected) proj[0] else sw / 2f).coerceIn(minOf(edge + bw / 2f, sw / 2f), maxOf(sw - edge - bw / 2f, sw / 2f))
+        val ay = (if (projected) proj[1] else sh * 0.42f).coerceIn(minOf(topLimit, sh * 0.7f), sh * 0.7f) + bob
         val left = ax - bw / 2f
         val top = ay - bh - tip
         val pop = easeOutBack(clamp01(world.promptT / 0.22f))

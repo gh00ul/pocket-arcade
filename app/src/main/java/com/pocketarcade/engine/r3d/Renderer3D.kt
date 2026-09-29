@@ -44,7 +44,64 @@ class Renderer3D(w: Int, h: Int) {
     var exposure = 1f
     var bloom = 0.8f
 
+    /** Brightness (0..1, after tone mapping) above which things glow. */
+    var bloomThreshold = Look.BLOOM_THRESHOLD
+
+    /** How far glows spread (0 = a tight halo, 1 = wide and hazy). */
+    var bloomRadius = Look.BLOOM_RADIUS
+
+    /** Strength of the colour grade (saturation, contrast, cool shadows / warm highlights). */
+    var grade = Look.GRADE
+
+    /** Sharpening of the upscaled image (0 = off). */
+    var sharpen = Look.SHARPEN
+
+    /** Darkening towards the corners. */
+    var vignette = Look.VIGNETTE
+
+    /** Fresnel rim light on lit surfaces, tinted by the lights nearby (0 = off). */
+    var rim = Look.RIM
+
+    /** Blacklight: how much saturated colours on the floor (y ≈ 0, facing up) glow. */
+    var floorGlow = 0f
+
+    /**
+     * Strength of the reflections glossy surfaces pick up from a built-in arcade room ([EnvMap]):
+     * chrome, glass, balls and glossy paint, weighted by gloss and Fresnel (0 = off).
+     */
+    var envReflect = Look.ENV_REFLECT
+
+    /**
+     * Reflections of glowing things (neon, screens, marquees, bulbs) in glossy floors at y = 0,
+     * weighted by the floor's gloss and Fresnel (0 = off). By default they are streaks taken
+     * from the previous frame's glow up the screen from each floor pixel — nearly free; see
+     * [floorMirror] for true mirror images.
+     */
+    var floorReflect = 0f
+
+    /** A faint blurred glow of the same reflections on matte floors such as carpet (0 = off). */
+    var floorReflectMatte = 0f
+
+    /**
+     * Draw floor reflections as real mirror images: the glowing geometry again, upside down, at
+     * quarter size (sharper and exact, but an extra pass of draw calls).
+     */
+    var floorMirror = false
+
     var polysDrawn = 0
+        private set
+
+    /**
+     * Model instances whose bounding sphere lies wholly beyond this view depth are skipped
+     * (0 = no limit). Pair it with fog that has faded to black by then so nothing pops.
+     */
+    var drawDistance = 0f
+
+    /** Skips model instances whose bounding sphere is wholly outside the camera's view. */
+    var cullModels = false
+
+    /** Model instances skipped by [drawDistance] or [cullModels] this frame. */
+    var modelsCulled = 0
         private set
 
     private companion object {
@@ -54,11 +111,14 @@ class Renderer3D(w: Int, h: Int) {
 
     private val pool = ConcurrentLinkedQueue<RenderPass>()
     private var pass: RenderPass? = null
+    private var frameStartNs = 0L
 
     // Opaque immediate geometry, bucketed by texture.
     private class Bucket(val tex: Texture) {
         var data = FloatArray(1024 * S)
         var count = 0
+        /** Whether any polygon in it this frame is emissive. */
+        var glow = false
     }
     private val buckets = IdentityHashMap<Texture, Bucket>()
     private val bucketList = ArrayList<Bucket>()
@@ -68,8 +128,10 @@ class Renderer3D(w: Int, h: Int) {
     private var trans = FloatArray(1024 * S)
     private var transCount = 0
     private var order = IntArray(64 * 5)
+    private var orderGlow = BooleanArray(64)
     private var orderCount = 0
     private var opaqueInstances = IntArray(64)
+    private var opaqueInstanceGlow = BooleanArray(64)
     private var opaqueInstanceCount = 0
 
     private val texIndex = IdentityHashMap<Texture, Int>()
@@ -84,16 +146,21 @@ class Renderer3D(w: Int, h: Int) {
 
     /** Starts recording a new frame. */
     fun startFrame() {
+        frameStartNs = System.nanoTime()
         val p = pool.poll() ?: RenderPass(pool)
         p.reset()
         pass = p
-        for (b in bucketList) b.count = 0
+        for (b in bucketList) {
+            b.count = 0
+            b.glow = false
+        }
         lastBucket = null
         transCount = 0
         orderCount = 0
         opaqueInstanceCount = 0
         texIndex.clear()
         polysDrawn = 0
+        modelsCulled = 0
         fogUsedNear = 1e8f
         fogUsedFar = 2e8f
         fogUsedFloor = 0f
@@ -249,6 +316,7 @@ class Renderer3D(w: Int, h: Int) {
             if ((b.count + count) * S > b.data.size) b.data = b.data.copyOf(maxOf((b.count + count) * S, b.data.size * 2))
             o = b.count * S
             b.count += count
+            if (emissive > 0f) b.glow = true
             dst = b.data
         } else {
             if ((transCount + count) * S > trans.size) trans = trans.copyOf(maxOf((transCount + count) * S, trans.size * 2))
@@ -260,11 +328,12 @@ class Renderer3D(w: Int, h: Int) {
                 val p = (orderCount - 1) * 5
                 if (order[p] == RenderPass.KIND_BATCH && order[p + 1] == bi && order[p + 2] == ti && order[p + 3] + order[p + 4] == transCount) {
                     order[p + 4] += count
+                    if (emissive > 0f) orderGlow[orderCount - 1] = true
                 } else {
-                    addOrder(RenderPass.KIND_BATCH, bi, ti, transCount, count)
+                    addOrder(RenderPass.KIND_BATCH, bi, ti, transCount, count, emissive > 0f)
                 }
             } else {
-                addOrder(RenderPass.KIND_BATCH, bi, ti, transCount, count)
+                addOrder(RenderPass.KIND_BATCH, bi, ti, transCount, count, emissive > 0f)
             }
             transCount += count
             dst = trans
@@ -310,10 +379,12 @@ class Renderer3D(w: Int, h: Int) {
         return i
     }
 
-    private fun addOrder(kind: Int, blend: Int, index: Int, first: Int, count: Int) {
+    private fun addOrder(kind: Int, blend: Int, index: Int, first: Int, count: Int, glow: Boolean) {
         if ((orderCount + 1) * 5 > order.size) order = order.copyOf(order.size * 2)
+        if (orderCount + 1 > orderGlow.size) orderGlow = orderGlow.copyOf(orderGlow.size * 2)
         val o = orderCount * 5
         order[o] = kind; order[o + 1] = blend; order[o + 2] = index; order[o + 3] = first; order[o + 4] = count
+        orderGlow[orderCount] = glow
         orderCount++
     }
 
@@ -324,10 +395,18 @@ class Renderer3D(w: Int, h: Int) {
     /** Draws [model] (placed by [xf]); [only] limits it to one blend layer. */
     fun drawModel(model: Model, only: Blend?, emissiveBoost: Float, xf: Xform?, tint: Int) {
         val p = current()
+        if ((cullModels || drawDistance > 0f) && !instanceInView(model, xf)) {
+            modelsCulled++
+            return
+        }
         val wantOpaque = model.hasOpaque && (only == null || only == Blend.OPAQUE)
         val wantAlpha = model.hasAlpha && (only == null || only == Blend.ALPHA)
         val wantAdd = model.hasAdd && (only == null || only == Blend.ADD)
         if (!wantOpaque && !wantAlpha && !wantAdd) return
+        // Models always take fog, so a frame drawn only from models still needs its settings.
+        if (fogNear < 1e7f) {
+            fogUsedNear = fogNear; fogUsedFar = fogFar; fogUsedFloor = fogFloor
+        }
         for (tex in modelTextures(model)) noteTexture(tex)
         val mi = p.models.size
         p.models += model
@@ -347,14 +426,48 @@ class Renderer3D(w: Int, h: Int) {
             p.instances[o + 21] = mi.toFloat()
             return p.instanceCount++
         }
+        val glows = if (emissiveBoost > 0f) model.glowMask else 0
         if (wantOpaque) {
             val idx = instance(Blend.OPAQUE)
-            if (opaqueInstanceCount + 1 > opaqueInstances.size) opaqueInstances = opaqueInstances.copyOf(opaqueInstances.size * 2)
+            if (opaqueInstanceCount + 1 > opaqueInstances.size) {
+                opaqueInstances = opaqueInstances.copyOf(opaqueInstances.size * 2)
+                opaqueInstanceGlow = opaqueInstanceGlow.copyOf(opaqueInstances.size)
+            }
+            opaqueInstanceGlow[opaqueInstanceCount] = glows and (1 shl Blend.OPAQUE.ordinal) != 0
             opaqueInstances[opaqueInstanceCount++] = idx
         }
-        if (wantAlpha) addOrder(RenderPass.KIND_MODEL, Blend.ALPHA.ordinal, instance(Blend.ALPHA), 0, 0)
-        if (wantAdd) addOrder(RenderPass.KIND_MODEL, Blend.ADD.ordinal, instance(Blend.ADD), 0, 0)
+        if (wantAlpha) addOrder(RenderPass.KIND_MODEL, Blend.ALPHA.ordinal, instance(Blend.ALPHA), 0, 0, glows and (1 shl Blend.ALPHA.ordinal) != 0)
+        if (wantAdd) addOrder(RenderPass.KIND_MODEL, Blend.ADD.ordinal, instance(Blend.ADD), 0, 0, glows and (1 shl Blend.ADD.ordinal) != 0)
         polysDrawn += model.polys.size
+    }
+
+    /** Whether a placed model's bounding sphere reaches the view (and lies within [drawDistance]). */
+    internal fun instanceInView(model: Model, xf: Xform?): Boolean {
+        val cam = camera
+        val bx = model.boundX
+        val by = model.boundY
+        val bz = model.boundZ
+        val x = xf?.x(bx, by, bz) ?: bx
+        val y = xf?.y(bx, by, bz) ?: by
+        val z = xf?.z(bx, by, bz) ?: bz
+        val r = model.boundR * (xf?.maxScale() ?: 1f) + 0.5f
+        val vz = cam.viewZ(x, y, z)
+        if (vz + r < cam.near) return false
+        if (drawDistance > 0f && vz - r > drawDistance) return false
+        if (!cullModels) return true
+        val vx = cam.viewX(x, y, z)
+        val vy = cam.viewY(x, y, z)
+        // Distances outside the four side planes through the eye (the image edges).
+        val f = cam.focal
+        val right = (cam.imageW - cam.cx) / f
+        val left = cam.cx / f
+        val top = cam.cy / f
+        val bottom = (cam.imageH - cam.cy) / f
+        if ((vx - right * vz) / sqrt(1f + right * right) > r) return false
+        if ((-vx - left * vz) / sqrt(1f + left * left) > r) return false
+        if ((vy - top * vz) / sqrt(1f + top * top) > r) return false
+        if ((-vy - bottom * vz) / sqrt(1f + bottom * bottom) > r) return false
+        return true
     }
 
     private val modelTex = IdentityHashMap<Model, Array<Texture>>()
@@ -383,6 +496,7 @@ class Renderer3D(w: Int, h: Int) {
         p.cx0 = clipX0; p.cy0 = clipY0; p.cx1 = clipX1; p.cy1 = clipY1
         val cam = camera
         val c = p.cam
+        p.near = cam.near
         c[0] = cam.ex; c[1] = cam.ey; c[2] = cam.ez
         c[3] = cam.rx; c[4] = cam.ry; c[5] = cam.rz
         c[6] = cam.ux; c[7] = cam.uy; c[8] = cam.uz
@@ -396,6 +510,17 @@ class Renderer3D(w: Int, h: Int) {
         p.fogFloor = fogUsedFloor
         p.exposure = exposure
         p.bloom = bloom
+        p.bloomThreshold = bloomThreshold
+        p.bloomRadius = bloomRadius
+        p.grade = grade
+        p.sharpen = sharpen
+        p.vignette = vignette
+        p.rim = rim
+        p.floorGlow = floorGlow
+        p.envReflect = envReflect
+        p.floorReflect = floorReflect
+        p.floorReflectMatte = floorReflectMatte
+        p.floorMirror = floorMirror
         packLights(p)
 
         // Opaque buckets first, then the see-through geometry in order.
@@ -407,19 +532,20 @@ class Renderer3D(w: Int, h: Int) {
         for (b in bucketList) {
             if (b.count == 0) continue
             System.arraycopy(b.data, 0, p.verts, at * S, b.count * S)
-            p.addDraw(RenderPass.KIND_BATCH, Blend.OPAQUE.ordinal, texIndex[b.tex]!!, at, b.count)
+            p.addDraw(RenderPass.KIND_BATCH, Blend.OPAQUE.ordinal, texIndex[b.tex]!!, at, b.count, b.glow)
             at += b.count
         }
-        for (i in 0 until opaqueInstanceCount) p.addDraw(RenderPass.KIND_MODEL, Blend.OPAQUE.ordinal, opaqueInstances[i], 0, 0)
+        for (i in 0 until opaqueInstanceCount) p.addDraw(RenderPass.KIND_MODEL, Blend.OPAQUE.ordinal, opaqueInstances[i], 0, 0, opaqueInstanceGlow[i])
         val transBase = at
         System.arraycopy(trans, 0, p.verts, at * S, transCount * S)
         at += transCount
         for (i in 0 until orderCount) {
             val o = i * 5
             val first = if (order[o] == RenderPass.KIND_BATCH) order[o + 3] + transBase else 0
-            p.addDraw(order[o], order[o + 1], order[o + 2], first, order[o + 4])
+            p.addDraw(order[o], order[o + 1], order[o + 2], first, order[o + 4], orderGlow[i])
         }
         p.vertCount = at
+        p.recordNs = System.nanoTime() - frameStartNs
         // Forget buckets for textures that weren't used this frame.
         if (bucketList.size > 64) {
             bucketList.removeAll { it.count == 0 }
@@ -428,6 +554,10 @@ class Renderer3D(w: Int, h: Int) {
         }
         return p
     }
+
+    // Scratch for the light grid, reused between frames.
+    private var cellCount = IntArray(0)
+    private var cellWeakest = FloatArray(0)
 
     /** Copies the lights and builds the grid telling each patch of floor which lights reach it. */
     private fun packLights(p: RenderPass) {
@@ -462,8 +592,13 @@ class Renderer3D(w: Int, h: Int) {
         val size = gw * 2 * gh * 4
         if (p.grid.size < size) p.grid = ByteArray(size)
         java.util.Arrays.fill(p.grid, 0, size, 0)
-        val cellCount = IntArray(gw * gh)
-        val cellWeakest = FloatArray(gw * gh)
+        if (cellCount.size < gw * gh) {
+            cellCount = IntArray(gw * gh)
+            cellWeakest = FloatArray(gw * gh)
+        }
+        val cellCount = cellCount
+        val cellWeakest = cellWeakest
+        java.util.Arrays.fill(cellCount, 0, gw * gh, 0)
         for (i in 0 until count) {
             val pl = l.points[i]
             if (pl.intensity <= 0f) continue
@@ -667,6 +802,17 @@ class Renderer3D(w: Int, h: Int) {
             blend = blend, emissive = emissive, alpha = alpha, cull = false, tint = tint,
         )
     }
+}
+
+/** Default post-processing and shading settings shared by [Renderer3D] and [RenderPass]. */
+object Look {
+    const val BLOOM_THRESHOLD = 0.62f
+    const val BLOOM_RADIUS = 0.65f
+    const val GRADE = 1f
+    const val SHARPEN = 0.25f
+    const val VIGNETTE = 0.22f
+    const val RIM = 0.3f
+    const val ENV_REFLECT = 1f
 }
 
 /** Blends two ARGB colours. */

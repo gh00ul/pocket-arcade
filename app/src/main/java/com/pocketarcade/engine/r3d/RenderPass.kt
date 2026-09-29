@@ -17,6 +17,9 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
         // Draw list entry kinds.
         const val KIND_BATCH = 0
         const val KIND_MODEL = 1
+
+        /** The near clipping distance every pass used before it became configurable. */
+        const val DEFAULT_NEAR = 8f
     }
 
     // Where on the window to draw (pixels, top-left origin) and an optional clip rectangle.
@@ -26,6 +29,8 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
 
     // Camera: eye, basis and pinhole projection in viewport pixels.
     val cam = FloatArray(16)
+    /** Near clipping distance (view depth) for the GPU's depth range; games keep the default. */
+    var near = DEFAULT_NEAR
 
     // Background.
     var clearColor = 0
@@ -46,6 +51,23 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
     var exposure = 1f
     var bloom = 0.8f
 
+    // Look: see the matching fields on Renderer3D.
+    var bloomThreshold = Look.BLOOM_THRESHOLD
+    var bloomRadius = Look.BLOOM_RADIUS
+    var grade = Look.GRADE
+    var sharpen = Look.SHARPEN
+    var vignette = Look.VIGNETTE
+    var rim = Look.RIM
+    var floorGlow = 0f
+    var envReflect = Look.ENV_REFLECT
+    var floorReflect = 0f
+    var floorReflectMatte = 0f
+    var floorMirror = false
+
+    /** UI-thread time spent recording this pass (startFrame → finishFrame), for frame stats. */
+    var recordNs = 0L
+    internal var statsTaken = false
+
     // Light grid over the XZ plane: RGBA bytes, two texels per cell holding 8 light indices + 1.
     var gridW = 0
     var gridH = 0
@@ -63,6 +85,11 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
     var draws = IntArray(64 * 5)
     var drawCount = 0
 
+    /** Per draw-list entry: whether it holds glowing (emissive) geometry, for floor reflections. */
+    var drawGlow = BooleanArray(64)
+    /** How many draw-list entries glow. */
+    var glowDraws = 0
+
     // Model instances: model, which blend layer, 4×4 matrix, tint RGBA, emissive boost.
     val models = ArrayList<Model>()
     var instances = FloatArray(64 * 22)
@@ -70,6 +97,7 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
 
     internal fun reset() {
         clip = false
+        near = DEFAULT_NEAR
         clearColor = 0
         gradientCount = 0
         lightCount = 0
@@ -78,11 +106,25 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
         fogFloor = 0f
         exposure = 1f
         bloom = 0.8f
+        bloomThreshold = Look.BLOOM_THRESHOLD
+        bloomRadius = Look.BLOOM_RADIUS
+        grade = Look.GRADE
+        sharpen = Look.SHARPEN
+        vignette = Look.VIGNETTE
+        rim = Look.RIM
+        floorGlow = 0f
+        envReflect = Look.ENV_REFLECT
+        floorReflect = 0f
+        floorReflectMatte = 0f
+        floorMirror = false
+        recordNs = 0L
+        statsTaken = false
         gridW = 0
         gridH = 0
         vertCount = 0
         textures.clear()
         drawCount = 0
+        glowDraws = 0
         models.clear()
         instanceCount = 0
     }
@@ -97,10 +139,13 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
         if (need > verts.size) verts = verts.copyOf(maxOf(need, verts.size * 2))
     }
 
-    internal fun addDraw(kind: Int, blend: Int, index: Int, first: Int, count: Int) {
+    internal fun addDraw(kind: Int, blend: Int, index: Int, first: Int, count: Int, glow: Boolean = false) {
         if ((drawCount + 1) * 5 > draws.size) draws = draws.copyOf(draws.size * 2)
+        if (drawCount + 1 > drawGlow.size) drawGlow = drawGlow.copyOf(drawGlow.size * 2)
         val o = drawCount * 5
         draws[o] = kind; draws[o + 1] = blend; draws[o + 2] = index; draws[o + 3] = first; draws[o + 4] = count
+        drawGlow[drawCount] = glow
+        if (glow) glowDraws++
         drawCount++
     }
 

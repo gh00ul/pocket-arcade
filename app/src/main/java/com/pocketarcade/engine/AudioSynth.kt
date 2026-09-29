@@ -17,6 +17,18 @@ enum class Sfx {
     WHACK, BONK, BOMB, POP, SWISH, RIM, BOUNCE, THUD, ROLL,
     CLAW_MOTOR, CLAW_GRAB, DROP, PRIZE, CHEER, STEP, WHOOSH,
     COUNTDOWN, GO, HIGHSCORE, CLINK, SPILL, BUZZER, LUCKY, GUTTER,
+
+    // Light-gun shooter.
+    GUNSHOT, RELOAD, DRY_FIRE, RICOCHET, EXPLOSION, ENEMY_FIRE, ALARM, SHELL,
+
+    // Pinball.
+    FLIPPER, BUMPER, SLINGSHOT, PLUNGER, DRAIN, SPINNER, TILT,
+
+    // Fishing.
+    CAST, SPLASH, REEL, BITE, LINE_SNAP, CATCH,
+
+    // Racer. ENGINE is a short steady rev meant to be replayed back to back, pitched to the speed.
+    ENGINE, SKID, BOOST, CRASH, LAP, FINISH, HORN,
 }
 
 /**
@@ -284,7 +296,10 @@ class AudioSynth {
         }
     }
 
-    private fun generateAll() {
+    /** The synthesized samples of [sfx] once [generateAll] has run (for tests). */
+    internal fun samples(sfx: Sfx): FloatArray? = sounds[sfx.ordinal]
+
+    internal fun generateAll() {
         fun put(s: Sfx, b: FloatArray) {
             sounds[s.ordinal] = b
         }
@@ -428,6 +443,7 @@ class AudioSynth {
             tone(it, 0f, 0.45f, 300f, 90f, wave = TRIANGLE, vol = 0.3f, decay = 3f)
             tone(it, 0f, 0.45f, 600f, wave = NOISE, vol = 0.15f, lowpass = 0.1f, decay = 4f)
         })
+        generateMachineSounds()
         // Normalise any buffer that clips so stacked partials never distort.
         for (i in sounds.indices) {
             val s = sounds[i] ?: continue
@@ -438,5 +454,164 @@ class AudioSynth {
                 for (j in s.indices) s[j] *= k
             }
         }
+    }
+
+    /** The light-gun, pinball, fishing and racer sounds. */
+    private fun generateMachineSounds() {
+        fun put(s: Sfx, b: FloatArray) {
+            sounds[s.ordinal] = b
+        }
+
+        // ---- Light-gun shooter.
+        put(Sfx.GUNSHOT, buf(0.3f).also {
+            tone(it, 0f, 0.012f, 9000f, wave = NOISE, vol = 0.6f, decay = 150f)
+            tone(it, 0f, 0.26f, 6000f, 700f, wave = NOISE, vol = 0.7f, decay = 16f, lowpass = 0.45f)
+            tone(it, 0f, 0.2f, 170f, 42f, wave = SINE, vol = 0.9f, decay = 20f)
+        })
+        put(Sfx.RELOAD, buf(0.34f).also {
+            // Magazine out, slide back, slide home.
+            tone(it, 0f, 0.03f, 2600f, wave = SQUARE, vol = 0.18f, duty = 0.2f, decay = 90f)
+            tone(it, 0f, 0.03f, 7000f, wave = NOISE, vol = 0.25f, decay = 90f)
+            tone(it, 0.1f, 0.1f, 1500f, 3200f, wave = NOISE, vol = 0.18f, attack = 0.02f, lowpass = 0.3f)
+            tone(it, 0.22f, 0.1f, 1900f, wave = SQUARE, vol = 0.22f, duty = 0.3f, decay = 60f)
+            tone(it, 0.22f, 0.06f, 8000f, wave = NOISE, vol = 0.3f, decay = 70f)
+            tone(it, 0.22f, 0.1f, 240f, 120f, wave = SINE, vol = 0.4f, decay = 35f)
+        })
+        put(Sfx.DRY_FIRE, buf(0.06f).also {
+            tone(it, 0f, 0.04f, 3200f, wave = SQUARE, vol = 0.18f, duty = 0.15f, decay = 120f)
+            tone(it, 0f, 0.02f, 6000f, wave = NOISE, vol = 0.15f, decay = 150f)
+        })
+        put(Sfx.RICOCHET, buf(0.5f).also {
+            tone(it, 0f, 0.02f, 8000f, wave = NOISE, vol = 0.4f, decay = 120f)
+            tone(it, 0.01f, 0.46f, 3400f, 1100f, wave = SINE, vol = 0.3f, decay = 5f, vibHz = 38f, vibDepth = 0.03f)
+            tone(it, 0.01f, 0.4f, 5100f, 1600f, wave = SINE, vol = 0.1f, decay = 7f)
+        })
+        put(Sfx.EXPLOSION, buf(1.3f).also {
+            tone(it, 0f, 1.25f, 2600f, 180f, wave = NOISE, vol = 0.75f, decay = 3f, lowpass = 0.22f)
+            tone(it, 0f, 0.9f, 80f, 24f, wave = SINE, vol = 0.95f, decay = 3.5f)
+            val r = Random(11)
+            for (k in 0 until 8) tone(it, 0.15f + r.nextFloat() * 0.7f, 0.05f, 4000f, wave = NOISE, vol = 0.12f, decay = 60f)
+        })
+        put(Sfx.ENEMY_FIRE, buf(0.22f).also {
+            tone(it, 0f, 0.2f, 1600f, 260f, wave = SQUARE, vol = 0.18f, duty = 0.3f, decay = 10f)
+            tone(it, 0f, 0.08f, 5000f, wave = NOISE, vol = 0.2f, decay = 40f, lowpass = 0.5f)
+        })
+        put(Sfx.ALARM, buf(0.95f).also {
+            for (k in 0 until 6) tone(it, k * 0.15f, 0.15f, if (k % 2 == 0) 880f else 660f, vol = 0.18f, duty = 0.5f, lowpass = 0.6f)
+        })
+        put(Sfx.SHELL, buf(0.2f).also {
+            // A spent casing bouncing on the floor.
+            for (k in 0 until 3) tone(it, k * 0.06f - k * k * 0.008f, 0.05f, 4200f - k * 300f, wave = SINE, vol = 0.14f / (k + 1), decay = 50f)
+        })
+
+        // ---- Pinball.
+        put(Sfx.FLIPPER, buf(0.12f).also {
+            tone(it, 0f, 0.015f, 5000f, wave = NOISE, vol = 0.35f, decay = 120f)
+            tone(it, 0f, 0.1f, 140f, 60f, wave = SINE, vol = 0.7f, decay = 30f)
+            tone(it, 0f, 0.05f, 420f, 220f, wave = SQUARE, vol = 0.12f, duty = 0.3f, decay = 40f)
+        })
+        put(Sfx.BUMPER, buf(0.3f).also {
+            tone(it, 0f, 0.02f, 7000f, wave = NOISE, vol = 0.3f, decay = 100f)
+            tone(it, 0f, 0.25f, 1100f, 700f, wave = SINE, vol = 0.35f, decay = 16f)
+            tone(it, 0f, 0.25f, 2200f, wave = TRIANGLE, vol = 0.15f, decay = 14f)
+            tone(it, 0f, 0.12f, 180f, 90f, wave = SINE, vol = 0.5f, decay = 25f)
+        })
+        put(Sfx.SLINGSHOT, buf(0.14f).also {
+            tone(it, 0f, 0.05f, 6000f, wave = NOISE, vol = 0.4f, decay = 70f)
+            tone(it, 0f, 0.12f, 620f, 260f, wave = SQUARE, vol = 0.15f, duty = 0.25f, decay = 22f)
+        })
+        put(Sfx.PLUNGER, buf(0.45f).also {
+            tone(it, 0f, 0.4f, 90f, 240f, wave = SAW, vol = 0.2f, vibHz = 22f, vibDepth = 0.08f, decay = 5f, lowpass = 0.4f)
+            tone(it, 0.02f, 0.3f, 800f, 4000f, wave = NOISE, vol = 0.2f, attack = 0.03f, decay = 8f, lowpass = 0.3f)
+        })
+        put(Sfx.DRAIN, buf(0.9f).also {
+            tone(it, 0f, 0.3f, 392f, 370f, wave = TRIANGLE, vol = 0.25f)
+            tone(it, 0.3f, 0.55f, 294f, 110f, wave = TRIANGLE, vol = 0.28f, decay = 3f)
+            tone(it, 0f, 0.8f, 300f, 80f, wave = NOISE, vol = 0.15f, lowpass = 0.08f, decay = 3f)
+        })
+        put(Sfx.SPINNER, buf(0.45f).also {
+            // Ticks slowing down as the spinner winds out.
+            var at = 0f
+            var gap = 0.022f
+            while (at < 0.4f) {
+                tone(it, at, 0.015f, 2300f, wave = SQUARE, vol = 0.15f, duty = 0.2f, decay = 150f)
+                at += gap
+                gap *= 1.18f
+            }
+        })
+        put(Sfx.TILT, buf(0.8f).also {
+            for (k in 0 until 4) tone(it, k * 0.2f, 0.14f, 110f, wave = SAW, vol = 0.2f, lowpass = 0.35f, vibHz = 30f, vibDepth = 0.04f)
+        })
+
+        // ---- Fishing.
+        put(Sfx.CAST, buf(0.5f).also {
+            tone(it, 0f, 0.45f, 700f, 5200f, wave = NOISE, vol = 0.3f, attack = 0.06f, decay = 5f, lowpass = 0.25f)
+            tone(it, 0.02f, 0.4f, 1800f, 2600f, wave = SQUARE, vol = 0.04f, duty = 0.1f, vibHz = 60f, vibDepth = 0.3f, decay = 4f)
+        })
+        put(Sfx.SPLASH, buf(0.6f).also {
+            tone(it, 0f, 0.55f, 3200f, 500f, wave = NOISE, vol = 0.45f, decay = 6f, lowpass = 0.3f)
+            tone(it, 0f, 0.12f, 260f, 90f, wave = SINE, vol = 0.4f, decay = 22f)
+            val r = Random(5)
+            for (k in 0 until 5) tone(it, 0.08f + r.nextFloat() * 0.3f, 0.05f, r.range(900f, 1600f), r.range(1800f, 2600f), wave = SINE, vol = 0.1f, decay = 40f)
+        })
+        put(Sfx.REEL, buf(0.2f).also {
+            // Ratchet clicks, short enough to repeat while the crank turns.
+            for (k in 0 until 8) {
+                tone(it, k * 0.025f, 0.012f, 1500f, wave = SQUARE, vol = 0.12f, duty = 0.2f, decay = 200f)
+                tone(it, k * 0.025f, 0.008f, 5000f, wave = NOISE, vol = 0.08f, decay = 250f)
+            }
+        })
+        put(Sfx.BITE, buf(0.28f).also {
+            tone(it, 0f, 0.1f, 280f, 720f, wave = SINE, vol = 0.4f, decay = 14f)
+            tone(it, 0.13f, 0.12f, 320f, 900f, wave = SINE, vol = 0.45f, decay = 12f)
+        })
+        put(Sfx.LINE_SNAP, buf(0.5f).also {
+            tone(it, 0f, 0.02f, 9000f, wave = NOISE, vol = 0.45f, decay = 150f)
+            tone(it, 0f, 0.45f, 950f, 180f, wave = SAW, vol = 0.18f, decay = 7f, vibHz = 24f, vibDepth = 0.06f, lowpass = 0.5f)
+        })
+        put(Sfx.CATCH, buf(0.8f).also {
+            val notes = floatArrayOf(660f, 880f, 1100f, 1320f, 1760f)
+            notes.forEachIndexed { i, f -> tone(it, i * 0.07f, 0.25f, f, wave = TRIANGLE, vol = 0.22f, decay = 9f) }
+            tone(it, 0f, 0.3f, 2400f, 700f, wave = NOISE, vol = 0.15f, decay = 9f, lowpass = 0.3f)
+        })
+
+        // ---- Racer.
+        put(Sfx.ENGINE, buf(0.24f).also {
+            // Steady (no decay) so back-to-back plays blur into one engine note.
+            tone(it, 0f, 0.24f, 82f, wave = SAW, vol = 0.22f, attack = 0.01f, vibHz = 32f, vibDepth = 0.06f, lowpass = 0.25f)
+            tone(it, 0f, 0.24f, 41f, wave = SQUARE, vol = 0.12f, attack = 0.01f, duty = 0.35f, lowpass = 0.2f)
+            tone(it, 0f, 0.24f, 1200f, wave = NOISE, vol = 0.05f, attack = 0.01f, lowpass = 0.1f)
+        })
+        put(Sfx.SKID, buf(0.6f).also {
+            tone(it, 0f, 0.55f, 2200f, 1500f, wave = NOISE, vol = 0.35f, attack = 0.03f, decay = 3f, lowpass = 0.55f, vibHz = 45f, vibDepth = 0.2f)
+            tone(it, 0f, 0.5f, 900f, 760f, wave = SQUARE, vol = 0.05f, duty = 0.1f, decay = 3f, vibHz = 45f, vibDepth = 0.05f)
+        })
+        put(Sfx.BOOST, buf(0.7f).also {
+            tone(it, 0f, 0.65f, 140f, 620f, wave = SAW, vol = 0.2f, attack = 0.05f, decay = 2.5f, lowpass = 0.35f)
+            tone(it, 0f, 0.6f, 500f, 5000f, wave = NOISE, vol = 0.25f, attack = 0.1f, decay = 3f, lowpass = 0.3f)
+        })
+        put(Sfx.CRASH, buf(1.0f).also {
+            tone(it, 0f, 0.95f, 4500f, 300f, wave = NOISE, vol = 0.65f, decay = 4f, lowpass = 0.35f)
+            tone(it, 0f, 0.5f, 95f, 30f, wave = SINE, vol = 0.9f, decay = 6f)
+            tone(it, 0.03f, 0.6f, 1320f, wave = SINE, vol = 0.14f, decay = 9f)
+            tone(it, 0.05f, 0.6f, 1930f, wave = SINE, vol = 0.1f, decay = 11f)
+        })
+        put(Sfx.LAP, buf(0.5f).also {
+            tone(it, 0f, 0.12f, 988f, wave = TRIANGLE, vol = 0.3f, decay = 8f)
+            tone(it, 0.12f, 0.35f, 1319f, wave = TRIANGLE, vol = 0.3f, decay = 6f)
+        })
+        put(Sfx.FINISH, buf(1.4f).also {
+            val melody = floatArrayOf(523f, 659f, 784f, 1047f, 784f, 1047f)
+            val times = floatArrayOf(0f, 0.1f, 0.2f, 0.3f, 0.5f, 0.6f)
+            melody.forEachIndexed { i, f ->
+                val last = i == melody.lastIndex
+                tone(it, times[i], if (last) 0.7f else 0.1f, f, vol = 0.2f, duty = 0.25f, decay = if (last) 3f else 0f, vibHz = if (last) 7f else 0f, vibDepth = 0.012f)
+            }
+            tone(it, 0f, 1.3f, 131f, 196f, wave = TRIANGLE, vol = 0.3f, decay = 1.5f)
+        })
+        put(Sfx.HORN, buf(0.5f).also {
+            tone(it, 0f, 0.45f, 350f, vol = 0.18f, duty = 0.45f, lowpass = 0.35f)
+            tone(it, 0f, 0.45f, 440f, vol = 0.14f, duty = 0.45f, lowpass = 0.35f)
+        })
     }
 }

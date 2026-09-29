@@ -54,6 +54,12 @@ object SkeeTuning {
     const val LAUNCH_RATIO = 0.5f
     const val FLIGHT_GRAVITY = 1000f
     const val RELOAD_SECONDS = 0.35f
+    /**
+     * Failsafe: a ball still in play this long after its roll is sent to the gutter. The
+     * slowest real roll (stopping just short of the ramp, then rolling all the way back) is
+     * over in about 5.5 s, so this only catches a ball the physics can't finish.
+     */
+    const val BALL_TIMEOUT = 8f
 
     val RING_POINTS = intArrayOf(100, 50, 40, 30, 20, 10)
     /** Ring outer x-radii matching [RING_POINTS]; rings are ellipses squashed to 78% height. */
@@ -132,6 +138,8 @@ class SkeeBallGame : BaseMiniGame() {
         var points = 0
         var ring = -1
         var active = false
+        /** Seconds since the roll started, whatever the phase (for the failsafe). */
+        var age = 0f
     }
 
     private val balls = Array(6) { Ball() }
@@ -146,6 +154,8 @@ class SkeeBallGame : BaseMiniGame() {
     private var lastSpeed = 0f
     private var speedShowT = 0f
     private val readySquash = Spring()
+    private var gutters = 0
+    private var failsafeTrips = 0
 
     override fun reset() {
         balls.forEach { it.active = false }
@@ -157,13 +167,18 @@ class SkeeBallGame : BaseMiniGame() {
         ringFlash.fill(0f)
         speedShowT = 0f
         readySquash.snap(1f)
+        gutters = 0
+        failsafeTrips = 0
     }
 
     override fun ticketsFor(score: Int): Int = SkeeTuning.BASE_TICKETS + score / SkeeTuning.POINTS_PER_TICKET
 
     override fun isSettled(): Boolean = balls.none { it.active }
 
-    override fun onTimeUp() {
+    override fun onTimeUp() = cancelInput()
+
+    /** Drops the ball being dragged; it eases back to its resting spot. */
+    override fun cancelInput() {
         dragging = -1L
     }
 
@@ -206,23 +221,30 @@ class SkeeBallGame : BaseMiniGame() {
         val speed = (len(tmp.x, tmp.y) * SkeeTuning.FLICK_TO_SPEED).coerceIn(SkeeTuning.MIN_SPEED, SkeeTuning.MAX_SPEED)
         val maxA = SkeeTuning.MAX_ANGLE_DEG * (Math.PI.toFloat() / 180f)
         val angle = atan2(tmp.x, up).coerceIn(-maxA, maxA)
-        val b = balls.firstOrNull { !it.active } ?: return
-        b.active = true
-        b.phase = Phase.ROLLING
-        b.x = readyX
-        b.y = readyY
-        b.z = 0f
-        b.vx = sin(angle) * speed
-        b.vy = -cos(angle) * speed
-        b.vz = 0f
-        b.t = 0f
-        b.spin = 0f
+        if (!launch(readyX, readyY, speed, angle)) return
         hasReady = false
         reloadT = SkeeTuning.RELOAD_SECONDS
         lastSpeed = speed
         speedShowT = 1.6f
         play(Sfx.ROLL, 0.8f, 0.8f + speed / 1500f)
         fx.haptics.tick()
+    }
+
+    /** Sets a free ball rolling from ([x], [y]) at [speed], [angle] radians off straight up the lane. */
+    private fun launch(x: Float, y: Float, speed: Float, angle: Float): Boolean {
+        val b = balls.firstOrNull { !it.active } ?: return false
+        b.active = true
+        b.phase = Phase.ROLLING
+        b.x = x
+        b.y = y
+        b.z = 0f
+        b.vx = sin(angle) * speed
+        b.vy = -cos(angle) * speed
+        b.vz = 0f
+        b.t = 0f
+        b.age = 0f
+        b.spin = 0f
+        return true
     }
 
     override fun step(dt: Float) {
@@ -247,6 +269,11 @@ class SkeeBallGame : BaseMiniGame() {
 
     private fun stepBall(b: Ball, dt: Float) {
         b.t += dt
+        b.age += dt
+        if (b.age > SkeeTuning.BALL_TIMEOUT && b.phase != Phase.GUTTER) {
+            failsafeTrips++
+            gutter(b)
+        }
         when (b.phase) {
             Phase.ROLLING -> {
                 val sp = len(b.vx, b.vy)
@@ -273,11 +300,11 @@ class SkeeBallGame : BaseMiniGame() {
                     } else {
                         b.vy = abs(b.vy) + 40f
                     }
-                }
-                if (b.vy >= 0f && b.y > RAMP_Y + 4f && len(b.vx, b.vy) < 200f) {
-                    // Too slow: it rolls back down the lane.
-                    b.vy = (b.vy + 300f * dt)
-                    if (b.y > GAME_H + BALL_R) gutter(b)
+                } else if (b.vy >= 0f && len(b.vx, b.vy) < 200f) {
+                    // Too slow to reach the ramp: it rolls back down the lane. This takes any ball
+                    // that isn't heading up the lane, including one that friction stopped dead
+                    // (vy is 0 or -0) or that only slides across it after bouncing off a wall.
+                    b.vy += 300f * dt
                 }
                 if (b.y > GAME_H + BALL_R) gutter(b)
             }
@@ -316,6 +343,8 @@ class SkeeBallGame : BaseMiniGame() {
     }
 
     private fun gutter(b: Ball) {
+        if (b.phase == Phase.GUTTER) return
+        gutters++
         b.phase = Phase.GUTTER
         b.t = 0f
         popups.add("GUTTER", CX, 420f, Color(Pal.GRAY), size = 3f)
@@ -692,6 +721,21 @@ class SkeeBallGame : BaseMiniGame() {
             ArcadeFont.drawCentered(this, "PWR", x + 17f, top + h + 6f, 2f, Color.White, a)
         }
     }
+
+    // ---------------------------------------------------------------- simulation-test hooks
+
+    /** Lane position of the ball waiting to be rolled. */
+    internal val botReadyX: Float get() = readyX
+    internal val botHasReady: Boolean get() = hasReady
+    /** Balls still rolling, flying or settling into a cup. */
+    internal val botBallsActive: Int get() = balls.count { it.active }
+    /** Balls that went down the gutter this round. */
+    internal val botGutters: Int get() = gutters
+    /** Balls the [SkeeTuning.BALL_TIMEOUT] failsafe had to retire this round (should stay 0). */
+    internal val botFailsafeTrips: Int get() = failsafeTrips
+
+    /** Rolls a ball straight from ([x], [y]), bypassing the finger: no reload, no sound. */
+    internal fun botLaunch(x: Float, y: Float, speed: Float, angleRad: Float): Boolean = launch(x, y, speed, angleRad)
 
     // ---------------------------------------------------------------- attract mode
 

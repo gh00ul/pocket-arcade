@@ -79,10 +79,18 @@ fun ArcadeText(
     tiny: Boolean = false,
     centered: Boolean = false,
     alpha: Float = 1f,
+    /** If set, the text shrinks (never grows) to fit this width. */
+    maxWidth: Dp = Dp.Unspecified,
 ) {
     val density = LocalDensity.current
-    val u = with(density) { unit.toPx() }
     val lines = remember(text) { text.split('\n') }
+    var u = with(density) { unit.toPx() }
+    if (maxWidth != Dp.Unspecified) {
+        // Width is linear in the unit, shadow pad included, so one scale fits it exactly.
+        val natural = (lines.maxOfOrNull { ArcadeFont.width(it, u, tiny) } ?: 0f) + (if (shadow) u * 1.2f else 0f)
+        val limit = with(density) { maxWidth.toPx() }
+        if (natural > limit && natural > 0f) u *= limit / natural
+    }
     val gap = u * 3.2f
     val lineH = ArcadeFont.height(u, tiny) + gap
     val pad = if (shadow) u * 1.2f else 0f
@@ -177,7 +185,13 @@ private fun DrawScope.buttonCap(base: Color, lip: Float, down: Boolean, round: B
     drawRoundRect(Color.White.copy(alpha = 0.2f), Offset(0f, faceY), Size(w, h), cr, style = Stroke(1.dp.toPx()))
 }
 
-enum class UiIcon { TROPHY, SOUND, MUTED, CLOSE, PAUSE }
+enum class UiIcon {
+    TROPHY, SOUND, MUTED, CLOSE, PAUSE,
+    /** First person: walking the hall through your own eyes. */
+    EYE,
+    /** The overhead camera following you round the hall. */
+    CAMERA,
+}
 
 /** Simple white glyphs for round buttons, fitting a box [s] across centred on [c]. */
 fun DrawScope.drawUiIcon(icon: UiIcon, c: Offset, s: Float, color: Color) {
@@ -191,6 +205,31 @@ fun DrawScope.drawUiIcon(icon: UiIcon, c: Offset, s: Float, color: Color) {
             val bw = s * 0.16f
             drawRoundRect(color, c + Offset(-s * 0.26f, -s * 0.32f), Size(bw, s * 0.64f), CornerRadius(bw / 3f))
             drawRoundRect(color, c + Offset(s * 0.1f, -s * 0.32f), Size(bw, s * 0.64f), CornerRadius(bw / 3f))
+        }
+        UiIcon.EYE -> {
+            // An almond outline with a round iris and a glint.
+            val w = s * 0.46f
+            val h = s * 0.26f
+            val eye = Path().apply {
+                moveTo(c.x - w, c.y)
+                quadraticBezierTo(c.x, c.y - h * 2f, c.x + w, c.y)
+                quadraticBezierTo(c.x, c.y + h * 2f, c.x - w, c.y)
+                close()
+            }
+            drawPath(eye, color, style = Stroke(s * 0.09f, cap = StrokeCap.Round))
+            drawCircle(color, s * 0.17f, c)
+            drawCircle(color.copy(alpha = color.alpha * 0.35f), s * 0.07f, c + Offset(s * 0.06f, -s * 0.06f))
+        }
+        UiIcon.CAMERA -> {
+            // A camera body with its viewfinder bump and a solid lens.
+            val bw = s * 0.84f
+            val bh = s * 0.56f
+            val top = c.y - bh / 2f + s * 0.06f
+            val body = Stroke(s * 0.09f)
+            drawRoundRect(color, Offset(c.x - s * 0.2f, top - s * 0.14f), Size(s * 0.4f, s * 0.16f), CornerRadius(s * 0.05f))
+            drawRoundRect(color, Offset(c.x - bw / 2f, top), Size(bw, bh), CornerRadius(s * 0.12f), style = body)
+            drawCircle(color, s * 0.15f, Offset(c.x, top + bh / 2f))
+            drawCircle(color, s * 0.045f, Offset(c.x + bw * 0.32f, top + s * 0.12f))
         }
         UiIcon.TROPHY -> {
             val cup = Path().apply {

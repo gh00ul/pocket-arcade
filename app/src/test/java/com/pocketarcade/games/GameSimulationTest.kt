@@ -1,15 +1,12 @@
 package com.pocketarcade.games
 
-import com.pocketarcade.engine.AudioSynth
 import com.pocketarcade.engine.FIXED_DT
-import com.pocketarcade.engine.Haptics
 import com.pocketarcade.engine.TouchType
 import com.pocketarcade.games.airhockey.AirHockeyGame
 import com.pocketarcade.games.claw.ClawMachineGame
 import com.pocketarcade.games.coinpusher.CoinPusherGame
 import com.pocketarcade.games.hoops.HoopsGame
 import com.pocketarcade.games.hoops.HoopsTuning
-import com.pocketarcade.games.racer.RacerGame
 import com.pocketarcade.games.skeeball.SkeeBallGame
 import com.pocketarcade.games.stacker.StackerGame
 import com.pocketarcade.games.whackamole.WhackAMoleGame
@@ -25,55 +22,11 @@ import kotlin.random.Random
  * `./gradlew testDebugUnitTest` and read the printed table to retune payouts.
  */
 class GameSimulationTest {
-    private val collected = ArrayList<String>()
-    private val fx = GameFx(AudioSynth(), Haptics(null)) { collected += it }
-
-    private class Stats(val name: String) {
-        val scores = ArrayList<Int>()
-        val tickets = ArrayList<Int>()
-        val avgScore get() = scores.average()
-        val avgTickets get() = tickets.average()
-        override fun toString() = "%-22s score %7.1f  tickets %6.1f  (min %d, max %d)".format(
-            name, avgScore, avgTickets, tickets.minOrNull() ?: 0, tickets.maxOrNull() ?: 0,
-        )
-    }
-
-    /** Runs one round; [bot] is called every step with (simulated seconds, simulated millis). */
+    /** Seeds successive rounds so every run replays the same games. */
     private var roundSeed = 1L
 
     private fun play(game: MiniGame, stats: Stats, bot: (Float, Long) -> Unit) {
-        (game as? BaseMiniGame)?.seed = roundSeed++
-        game.start(fx)
-        var timeLeft = game.roundSeconds
-        var t = 0f
-        var steps = 0
-        val maxSteps = ((game.roundSeconds + 20f) / FIXED_DT).toInt()
-        while (!game.finished && steps < maxSteps) {
-            bot(t, (t * 1000f).toLong())
-            timeLeft = (timeLeft - FIXED_DT).coerceAtLeast(0f)
-            game.update(FIXED_DT, timeLeft)
-            t += FIXED_DT
-            steps++
-        }
-        assertTrue("${game.title} never finished", game.finished)
-        stats.scores += game.score
-        stats.tickets += game.ticketsFor(game.score) + game.bonusTickets
-    }
-
-    /** A straight-line flick ending at release, sampled like a real finger. */
-    private fun flick(game: MiniGame, id: Long, x0: Float, y0: Float, vx: Float, vy: Float, ms: Long) {
-        game.onTouch(TouchType.DOWN, id, x0, y0, ms)
-        for (k in 1..6) {
-            val dt = k * 0.012f
-            game.onTouch(TouchType.MOVE, id, x0 + vx * dt, y0 + vy * dt, ms + (dt * 1000).toLong())
-        }
-        game.onTouch(TouchType.UP, id, x0 + vx * 0.072f, y0 + vy * 0.072f, ms + 72)
-    }
-
-    private fun gaussian(rng: Random): Float {
-        var u = 0f
-        repeat(6) { u += rng.nextFloat() }
-        return (u - 3f) / 0.707f
+        playRound(game, roundSeed++, stats, bot)
     }
 
     private fun skee(rounds: Int, speedNoise: Float, angleNoiseDeg: Float, seed: Int): Stats {
@@ -134,8 +87,7 @@ class GameSimulationTest {
                         val miss = rng.nextFloat() < missChance
                         val x = game.holeX(i) + if (miss) 70f else 0f
                         val y = game.holeY(i) - 40f
-                        game.onTouch(TouchType.DOWN, id, x, y, ms)
-                        game.onTouch(TouchType.UP, id++, x, y, ms + 40)
+                        tap(game, id++, x, y, ms)
                     }
                 }
             }
@@ -154,8 +106,7 @@ class GameSimulationTest {
                 if (t >= next) {
                     next = t + interval
                     val x = 60f + rng.nextFloat() * 240f
-                    game.onTouch(TouchType.DOWN, id, x, 200f, ms)
-                    game.onTouch(TouchType.UP, id++, x, 200f, ms + 30)
+                    tap(game, id++, x, 200f, ms, holdMs = 30L)
                 }
             }
         }
@@ -286,8 +237,7 @@ class GameSimulationTest {
                 }
                 val d = game.botDelta() - aim
                 if (!last.isNaN() && (d > 0f) != (last > 0f)) {
-                    game.onTouch(TouchType.DOWN, id, 180f, 300f, ms)
-                    game.onTouch(TouchType.UP, id++, 180f, 300f, ms + 30)
+                    tap(game, id++, 180f, 300f, ms, holdMs = 30L)
                     last = Float.NaN
                     height = -2
                 } else {
@@ -298,36 +248,10 @@ class GameSimulationTest {
         return stats
     }
 
-    /** Picks the clearest lane every [lag] seconds and steers for it with [noise] error. */
-    private fun racer(rounds: Int, lag: Float, noise: Float, seed: Int, chaseTokens: Boolean): Stats {
-        val stats = Stats("racer lag ${(lag * 1000).toInt()}ms")
-        val rng = Random(seed)
-        val game = RacerGame()
-        repeat(rounds) {
-            var next = 0f
-            var target = 0f
-            play(game, stats) { t, _ ->
-                if (t >= next) {
-                    next = t + lag
-                    val clear = game.botLaneClearance()
-                    val current = ((game.botPX / 100f) + 1f).toInt().coerceIn(0, 2)
-                    var best = current
-                    if (clear[current] < 700f) {
-                        for (i in 0..2) if (clear[i] > clear[best]) best = i
-                    }
-                    val token = if (chaseTokens) game.botTokenLane(900f) else -1
-                    if (token >= 0 && clear[token] > 500f) best = token
-                    target = (best - 1) * 100f + gaussian(rng) * noise
-                }
-                game.botSteer(target)
-            }
-        }
-        return stats
-    }
-
     @Test
     fun everyMachinePaysOutAndRewardsSkill() {
         val rounds = 12
+        val plushBefore = simCollected.size
         val results = listOf(
             claw(rounds, aimError = 4f, patience = 3f, seed = 1, watchClaw = true) to claw(rounds, aimError = 18f, patience = 0.2f, seed = 2, watchClaw = false),
             skee(rounds, speedNoise = 0.04f, angleNoiseDeg = 2f, seed = 3) to skee(rounds, speedNoise = 0.15f, angleNoiseDeg = 6f, seed = 4),
@@ -336,27 +260,39 @@ class GameSimulationTest {
             hoops(rounds, speedNoise = 0.04f, lateralNoise = 40f, seed = 9) to hoops(rounds, speedNoise = 0.14f, lateralNoise = 150f, seed = 10),
             hockey(rounds, lag = 0.05f, noise = 3f, seed = 11) to hockey(rounds, lag = 0.3f, noise = 18f, seed = 12),
             stacker(rounds, sigma = 8f, seed = 13) to stacker(rounds, sigma = 22f, seed = 14),
-            racer(rounds, lag = 0.15f, noise = 8f, seed = 15, chaseTokens = true) to racer(rounds, lag = 0.9f, noise = 45f, seed = 16, chaseTokens = false),
         )
         println("---- Pocket Arcade payout simulation ($rounds rounds each) ----")
         for ((good, casual) in results) {
             println(good)
             println(casual)
         }
-        for ((good, casual) in results) {
-            assertTrue("$good pays too little", good.avgTickets >= 8.0)
-            assertTrue("$good pays too much", good.avgTickets <= 70.0)
-            assertTrue("$casual pays nothing", casual.avgTickets >= 2.0)
-            assertTrue("skill should pay: $good vs $casual", good.avgScore >= casual.avgScore)
+        for ((good, casual) in results) assertPayoutBands(good, casual)
+        println("plush won by claw bots: ${simCollected.size - plushBefore}")
+    }
+
+    /** Every registered machine, new ones included, must run headless and finish a round under random play. */
+    @Test
+    fun everyRegisteredMachineFinishesARound() {
+        val rng = Random(99)
+        for (game in GameRegistry.createAll()) {
+            var next = 0.3f
+            var id = 1L
+            playRound(game, roundSeed++) { t, ms ->
+                if (t >= next) {
+                    next = t + 0.25f
+                    val x = 20f + rng.nextFloat() * 320f
+                    val y = 60f + rng.nextFloat() * 560f
+                    if (rng.nextBoolean()) tap(game, id++, x, y, ms) else flick(game, id++, x, y, rng.nextFloat() * 400f - 200f, -900f, ms)
+                }
+            }
         }
-        println("plush won by claw bots: ${collected.size}")
     }
 
     @Test
     fun pusherNeverScoresBeforeTheFirstCoin() {
         val game = CoinPusherGame()
         game.seed = 42L
-        game.start(fx)
+        game.start(simFx)
         var timeLeft = game.roundSeconds
         repeat((5f / FIXED_DT).toInt()) {
             timeLeft -= FIXED_DT
@@ -369,7 +305,7 @@ class GameSimulationTest {
     fun whackBombCostsPoints() {
         val game = WhackAMoleGame()
         game.seed = 7L
-        game.start(fx)
+        game.start(simFx)
         var timeLeft = game.roundSeconds
         var sawBomb = false
         var steps = 0

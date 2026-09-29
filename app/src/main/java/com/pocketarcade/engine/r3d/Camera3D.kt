@@ -26,6 +26,15 @@ class Camera3D {
         private set
     var cy = 0f
         private set
+    /** Size of the camera image in pixels, as last given to [lookAt]. */
+    var imageW = 1
+        private set
+    var imageH = 1
+        private set
+    /**
+     * Near clipping distance: points closer than this (in view depth) don't project, polygons
+     * wholly nearer are dropped, and the GPU clips at it (see RenderPass.near).
+     */
     var near = 8f
 
     /**
@@ -56,6 +65,8 @@ class Camera3D {
         focal = (height / 2f) / tan(fovY / 2f)
         cx = width / 2f
         cy = height * centerYFrac
+        imageW = width.coerceAtLeast(1)
+        imageH = height.coerceAtLeast(1)
     }
 
     fun viewX(x: Float, y: Float, z: Float) = (x - ex) * rx + (y - ey) * ry + (z - ez) * rz

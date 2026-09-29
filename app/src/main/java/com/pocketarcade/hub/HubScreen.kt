@@ -1,9 +1,12 @@
 package com.pocketarcade.hub
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -13,6 +16,8 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import com.pocketarcade.data.SaveState
 import com.pocketarcade.engine.gl.Gfx
 import com.pocketarcade.engine.rememberGameLoop
@@ -43,6 +48,15 @@ fun HubScreen(
             Gfx.remove(HubRenderer.SLOT)
         }
     }
+    // A dialog, a machine starting or a pause takes the hall's focus: let go of every finger, so
+    // nobody comes back to a stick still pushed or a view still turning.
+    LaunchedEffect(inputEnabled) {
+        if (!inputEnabled) world.cancelInput()
+    }
+    val density = LocalDensity.current
+    world.density = density.density
+    // The HUD row: the safe-area inset, its padding and the buttons with their lip.
+    world.hudBottom = WindowInsets.safeDrawing.getTop(density) + with(density) { 76.dp.toPx() }
 
     Canvas(
         modifier

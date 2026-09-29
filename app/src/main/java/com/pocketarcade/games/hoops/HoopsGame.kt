@@ -163,7 +163,10 @@ class HoopsGame : BaseMiniGame() {
 
     override fun isSettled(): Boolean = balls.none { it.active && !it.resolved }
 
-    override fun onTimeUp() {
+    override fun onTimeUp() = cancelInput()
+
+    /** Drops the ball being lined up; it drifts back to the middle. */
+    override fun cancelInput() {
         dragging = -1L
     }
 
@@ -591,6 +594,11 @@ class HoopsGame : BaseMiniGame() {
         ballXf.set(wx, y * S + (sqy - 1f) * d / 2f, wz, pitch = -spin).stretch(sqx, sqy, sqx)
         ballModel.draw(r, xf = ballXf)
     }
+
+    // ---------------------------------------------------------------- simulation-test hooks
+
+    /** Balls shot this round. */
+    internal val botShots: Int get() = shots
 
     // ---------------------------------------------------------------- attract mode
 

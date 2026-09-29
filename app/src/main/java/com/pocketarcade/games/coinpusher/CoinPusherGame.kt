@@ -229,6 +229,9 @@ class CoinPusherGame : BaseMiniGame() {
 
     override fun isSettled(): Boolean = drops.none { it.active } && fallers.none { it.active }
 
+    /** Every coin is a single tap: there is no pointer to forget. */
+    override fun cancelInput() {}
+
     override fun onTouch(type: TouchType, id: Long, x: Float, y: Float, timeMs: Long) {
         if (type != TouchType.DOWN || timeUp || endedEarly) return
         if (y > frontScreenY + 10f) return
@@ -417,7 +420,7 @@ class CoinPusherGame : BaseMiniGame() {
     private val coinsPanel = PusherArt.Panel(96, 22)
     private val wonPanel = PusherArt.Panel(96, 22)
 
-    private val cabinet: Model by lazy {
+    private val cabinetModel: Model by lazy {
         val b = ModelBuilder()
         val cab = PusherArt.cabinet.full
         val dark = PusherArt.dark.full
@@ -464,7 +467,7 @@ class CoinPusherGame : BaseMiniGame() {
         if (trayFlash > 0f) l.points += trayLight
         r.gradient(0xFF0C0610.toInt(), Pal.shade(Pal.ORANGE, 0.2f))
 
-        cabinet.draw(r)
+        cabinetModel.draw(r)
         drawShelf(r)
         drawTrayPile(r)
         drawPanels(r)
@@ -577,6 +580,10 @@ class CoinPusherGame : BaseMiniGame() {
             else -> r.sprite(x, y + rad, z, rad * 2.2f, rad * 2.2f, PusherArt.star.full, roll = spin * 0.3f)
         }
     }
+
+    // ---------------------------------------------------------------- simulation-test hooks
+
+    internal val botCoinsLeft: Int get() = coinsLeft
 
     // ---------------------------------------------------------------- attract mode
 

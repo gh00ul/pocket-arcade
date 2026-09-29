@@ -89,6 +89,9 @@ abstract class BaseMiniGame : MiniGame {
     protected abstract fun step(dt: Float)
     protected abstract fun render(scope: DrawScope)
 
+    /** Every game must say how it lets go of its pointers; tap-only games implement it as a no-op. */
+    abstract override fun cancelInput()
+
     /** Called once when the clock hits zero. */
     protected open fun onTimeUp() {}
 
