@@ -24,7 +24,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -52,12 +52,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.toArgb
@@ -66,6 +63,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.pocketarcade.engine.ArcadeFont
@@ -74,24 +74,18 @@ import com.pocketarcade.engine.clamp01
 import com.pocketarcade.engine.easeOutBack
 import com.pocketarcade.engine.easeOutCubic
 import kotlinx.coroutines.delay
-import kotlin.math.PI
-import kotlin.math.cos
 import kotlin.math.min
-import kotlin.math.sin
+import kotlin.math.roundToInt
+
+// The menus' design system. Tokens (colours, spacing, radii, type, glow) live in UiTheme.kt, the
+// vector icons and currency art in UiIcons.kt, chips / bars / toggles in UiParts.kt; this file
+// holds the components every screen is assembled from: text, buttons, panels, glass boxes, the
+// currency counter and the banner, plus the entrance helpers that animate them in.
 
 fun Color.shade(f: Float): Color = Color(Pal.shade(toArgb(), f))
 
 /** Mixes towards white by [f]. */
 fun Color.lift(f: Float): Color = Color(red + (1f - red) * f, green + (1f - green) * f, blue + (1f - blue) * f, alpha)
-
-/** Card and panel colours shared by the menus. */
-object UiColors {
-    val cardTop = Color(0xFF221A3C)
-    val cardBottom = Color(0xFF120C22)
-    val glass = Color(0x16FFFFFF)
-    val glassEdge = Color(0x24FFFFFF)
-    val scrim = Color(0xCC07050E)
-}
 
 /**
  * What a screen reader should say for arcade text: the symbols the font draws inline (play, star,
@@ -119,9 +113,47 @@ fun spokenText(text: String): String {
     return out.toString().trim().replace(Regex(" {2,}"), " ").lowercase()
 }
 
+/** The scale that makes something [natural] pixels wide fit in [limit]: 1 when it already fits or there is no limit. */
+internal fun shrinkScale(natural: Int, limit: Int): Float =
+    if (limit == Constraints.Infinity || natural <= 0 || natural <= limit) 1f else limit.toFloat() / natural
+
+/**
+ * Lets this composable be as wide as it likes, then scales it down (never up) to fit the width it
+ * was offered. A label that would run past its box shrinks instead: nothing in the menus may
+ * overflow on a narrow phone. It reports the scaled size, so neighbours pack against what is seen.
+ */
+fun Modifier.shrinkToFit(): Modifier = layout { measurable, constraints ->
+    val p = measurable.measure(Constraints())
+    val s = shrinkScale(p.width, constraints.maxWidth)
+    val w = constraints.constrainWidth((p.width * s).roundToInt())
+    val h = constraints.constrainHeight((p.height * s).roundToInt())
+    layout(w, h) {
+        if (s >= 1f) {
+            p.place(0, 0)
+        } else {
+            p.placeWithLayer(0, 0) {
+                scaleX = s
+                scaleY = s
+                transformOrigin = TransformOrigin(0f, 0f)
+            }
+        }
+    }
+}
+
+/** The width of [glyphs] set one by one with [tracking] units of extra space between them, at unit size [u]. */
+private fun trackedWidth(glyphs: Array<String>, u: Float, tiny: Boolean, tracking: Float): Float {
+    var w = 0f
+    for (g in glyphs) w += ArcadeFont.width(g, u, tiny)
+    return w + tracking * u * (glyphs.size - 1).coerceAtLeast(0)
+}
+
 /**
  * Text in the game's type, sized in grid units (capitals are 7 units tall, tiny ones 5), with a
- * soft shadow. Multi-line text splits on '\n'.
+ * soft shadow. Multi-line text splits on '\n'. [tracking] adds that many units of space between
+ * letters (small capitals look better spaced). [fit] shrinks the text to the width it is offered
+ * instead of letting it run past its box; [maxWidth] does the same to an explicit width.
+ *
+ * Prefer the [UiText] overload, which picks size, face and tracking together.
  */
 @Composable
 fun ArcadeText(
@@ -135,34 +167,77 @@ fun ArcadeText(
     alpha: Float = 1f,
     /** If set, the text shrinks (never grows) to fit this width. */
     maxWidth: Dp = Dp.Unspecified,
+    tracking: Float = 0f,
+    fit: Boolean = false,
 ) {
     val density = LocalDensity.current
     val lines = remember(text) { text.split('\n') }
+    // Tracked text is set glyph by glyph (kerning is traded for the spacing); plain text as runs.
+    val glyphs = remember(text, tracking) {
+        if (tracking > 0f) lines.map { l -> Array(l.length) { l[it].toString() } } else null
+    }
     // The letters are painted, so give a screen reader the words.
     val spoken = remember(text) { spokenText(text) }
+    fun lineWidth(i: Int, u: Float): Float =
+        if (glyphs != null) trackedWidth(glyphs[i], u, tiny, tracking) else ArcadeFont.width(lines[i], u, tiny)
+
     var u = with(density) { unit.toPx() }
     if (maxWidth != Dp.Unspecified) {
         // Width is linear in the unit, shadow pad included, so one scale fits it exactly.
-        val natural = (lines.maxOfOrNull { ArcadeFont.width(it, u, tiny) } ?: 0f) + (if (shadow) u * 1.2f else 0f)
+        var widest = 0f
+        for (i in lines.indices) widest = maxOf(widest, lineWidth(i, u))
+        val natural = widest + (if (shadow) u * 1.2f else 0f)
         val limit = with(density) { maxWidth.toPx() }
         if (natural > limit && natural > 0f) u *= limit / natural
     }
     val gap = u * 3.2f
     val lineH = ArcadeFont.height(u, tiny) + gap
     val pad = if (shadow) u * 1.2f else 0f
-    val widths = lines.map { ArcadeFont.width(it, u, tiny) }
+    val widths = FloatArray(lines.size) { lineWidth(it, u) }
     val w = (widths.maxOrNull() ?: 0f) + pad
     val h = lines.size * lineH - gap + pad
     val wDp = with(density) { w.toDp() }
     val hDp = with(density) { h.toDp() }
-    Canvas(modifier.size(wDp, hDp).semantics { contentDescription = spoken }) {
+    Canvas(
+        modifier
+            .then(if (fit) Modifier.shrinkToFit() else Modifier)
+            .size(wDp, hDp)
+            .semantics { contentDescription = spoken },
+    ) {
         lines.forEachIndexed { i, line ->
-            val x = if (centered) (w - pad - widths[i]) / 2f else 0f
+            val x0 = if (centered) (w - pad - widths[i]) / 2f else 0f
             val y = i * lineH
-            if (shadow) ArcadeFont.drawShadowed(this, line, x, y, u, color, alpha = alpha, tiny = tiny)
-            else ArcadeFont.draw(this, line, x, y, u, color, alpha, tiny)
+            if (glyphs == null) {
+                if (shadow) ArcadeFont.drawShadowed(this, line, x0, y, u, color, alpha = alpha, tiny = tiny)
+                else ArcadeFont.draw(this, line, x0, y, u, color, alpha, tiny)
+            } else {
+                var x = x0
+                for (g in glyphs[i]) {
+                    if (shadow) ArcadeFont.drawShadowed(this, g, x, y, u, color, alpha = alpha, tiny = tiny)
+                    else ArcadeFont.draw(this, g, x, y, u, color, alpha, tiny)
+                    x += ArcadeFont.width(g, u, tiny) + tracking * u
+                }
+            }
         }
     }
+}
+
+/**
+ * Text in one of the menus' [style]s (size, face and tracking together), shrinking to fit the
+ * width it is offered unless [fit] is off.
+ */
+@Composable
+fun ArcadeText(
+    text: String,
+    style: UiText,
+    modifier: Modifier = Modifier,
+    color: Color = UiColors.textHi,
+    centered: Boolean = false,
+    alpha: Float = 1f,
+    shadow: Boolean = true,
+    fit: Boolean = true,
+) {
+    ArcadeText(text, modifier, color, style.unit, shadow, style.tiny, centered, alpha, Dp.Unspecified, style.tracking, fit)
 }
 
 /**
@@ -171,7 +246,7 @@ fun ArcadeText(
  * a real button. With reduce motion it jumps between the two with no overshoot.
  */
 @Composable
-private fun rememberPress(pressed: Boolean): State<Float> {
+internal fun rememberPress(pressed: Boolean): State<Float> {
     val press = remember { Animatable(0f) }
     LaunchedEffect(pressed) {
         if (!UiMotion.enabled) {
@@ -186,15 +261,21 @@ private fun rememberPress(pressed: Boolean): State<Float> {
 }
 
 /** How hard the button shrinks when fully pressed (a fraction of its size), and how much it brightens. */
-private const val PRESS_SHRINK = 0.06f
+internal const val PRESS_SHRINK = 0.06f
 private const val PRESS_BRIGHTEN = 0.16f
 private const val PRESS_STIFFNESS = 1600f
 private const val RELEASE_STIFFNESS = 700f
 private const val RELEASE_DAMPING = 0.42f
 
+/** A resting button's glow (alpha at its edge) and how far it reaches; pressing dims it. */
+private const val BUTTON_GLOW = 0.28f
+private val BUTTON_GLOW_REACH = 9.dp
+
 /**
- * A glossy arcade push-button: a candy-coloured cap on a darker skirt. It sinks, shrinks a touch
- * and brightens under your finger, then springs back up past rest and settles.
+ * A glossy arcade push-button: a candy-coloured cap on a darker skirt, lit by a soft glow of its
+ * own colour. It sinks, shrinks a touch and brightens under your finger, then springs back up
+ * past rest and settles. Disabled, it is a dull slate cap that doesn't glow. Its label shrinks
+ * to fit if the button is narrower than the words.
  */
 @Composable
 fun ArcadeButton(
@@ -222,7 +303,7 @@ fun ArcadeButton(
                 scaleX = s
                 scaleY = s
             }
-            .drawBehind { buttonCap(if (enabled) color else Color(0xFF3A3450), lip.toPx(), press.value, round = false) },
+            .drawBehind { buttonCap(color, enabled, lip.toPx(), press.value, round = false) },
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -236,7 +317,10 @@ fun ArcadeButton(
                 .clearAndSetSemantics {}
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
-            ArcadeText(text, color = if (enabled) textColor else Color(0xFF8A84A0), unit = unit, tiny = tiny, centered = true)
+            ArcadeText(
+                text, Modifier.shrinkToFit(), color = if (enabled) textColor else UiColors.textOff, unit = unit,
+                shadow = enabled, tiny = tiny, centered = true, tracking = if (tiny) 0.3f else 0f,
+            )
         }
     }
 }
@@ -253,8 +337,9 @@ private fun iconLabel(icon: UiIcon): String = when (icon) {
 }
 
 /**
- * A round glossy button carrying a vector [icon]. Screen readers say [label] (by default what the
- * icon means: "Close", "Profile", "Sound on"...) and call it a button.
+ * A round glossy button carrying a vector [icon], ringed by a soft glow of its [color]. Screen
+ * readers say [label] (by default what the icon means: "Close", "Profile", "Sound on"...) and
+ * call it a button.
  */
 @Composable
 fun RoundButton(
@@ -282,7 +367,7 @@ fun RoundButton(
     ) {
         val l = lip.toPx()
         val p = press.value
-        buttonCap(color, l, p, round = true)
+        buttonCap(color, true, l, p, round = true)
         val faceY = pressOffset(l, p)
         val c = Offset(this.size.width / 2f, faceY + (this.size.height - l) / 2f)
         drawUiIcon(icon, c + Offset(0f, this.size.width * 0.03f), this.size.width * 0.5f, Color.Black.copy(alpha = 0.3f))
@@ -293,188 +378,79 @@ fun RoundButton(
 /** How far the cap has sunk into the skirt at [press] (1 = fully down); the release overshoot lifts it a little above rest. */
 internal fun pressOffset(lip: Float, press: Float): Float = if (press >= 0f) lip * 0.8f * press else lip * 0.5f * press
 
-/** The shared look of every button: drop shadow, skirt, gradient cap, gloss and rim, at press depth [press] (0 rest, 1 down). */
-private fun DrawScope.buttonCap(color: Color, lip: Float, press: Float, round: Boolean) {
+/**
+ * The shared look of every button: a glow of its colour, a drop shadow, the skirt, a gradient cap
+ * with a darker lower bevel, gloss and a lit rim, at press depth [press] (0 rest, 1 down). A
+ * button that isn't [enabled] is slate, flat and dark.
+ */
+private fun DrawScope.buttonCap(color: Color, enabled: Boolean, lip: Float, press: Float, round: Boolean) {
     val w = size.width
     val h = size.height - lip
-    val r = if (round) h / 2f else min(16.dp.toPx(), h / 2f)
+    val r = if (round) h / 2f else min(UiRadius.button.toPx(), h / 2f)
     val cr = CornerRadius(r, r)
     val faceY = pressOffset(lip, press)
+    val pr = press.coerceIn(0f, 1f)
     // The cap brightens as it is pressed, as if the light behind it came up.
-    val base = if (press > 0f) color.lift(PRESS_BRIGHTEN * press.coerceAtMost(1f)) else color
-    drawRoundRect(Color.Black.copy(alpha = 0.35f), Offset(0f, lip + 2.dp.toPx()), Size(w, h), cr)
-    drawRoundRect(base.shade(0.45f), Offset(0f, lip), Size(w, h), cr)
-    drawRoundRect(
-        Brush.verticalGradient(listOf(base.lift(0.28f), base, base.shade(0.78f)), startY = faceY, endY = faceY + h),
-        Offset(0f, faceY), Size(w, h), cr,
-    )
+    val base = if (enabled && press > 0f) color.lift(PRESS_BRIGHTEN * pr) else color
+    if (enabled) glowRoundRect(color, Offset(0f, faceY + lip * 0.4f), Size(w, h), r, BUTTON_GLOW_REACH.toPx(), BUTTON_GLOW * (1f - 0.6f * pr))
+    drawRoundRect(Color.Black.copy(alpha = 0.38f), Offset(0f, lip + 2.dp.toPx()), Size(w, h), cr)
+    drawRoundRect(if (enabled) base.shade(0.42f) else UiColors.offSkirt, Offset(0f, lip), Size(w, h), cr)
+    val top = if (enabled) base.lift(0.3f) else UiColors.offCapTop
+    val mid = if (enabled) base else UiColors.offCapTop.shade(0.9f)
+    val bottom = if (enabled) base.shade(0.74f) else UiColors.offCapBottom
+    drawRoundRect(Brush.verticalGradient(listOf(top, mid, bottom), startY = faceY, endY = faceY + h), Offset(0f, faceY), Size(w, h), cr)
+    if (enabled) {
+        // The cap's lower bevel: its bottom edge turns away from the light.
+        drawRoundRect(
+            Brush.verticalGradient(listOf(Color.Transparent, base.shade(0.5f).copy(alpha = 0.6f)), startY = faceY + h * 0.68f, endY = faceY + h),
+            Offset(0f, faceY), Size(w, h), cr, style = Stroke(2.dp.toPx()),
+        )
+    }
     val inset = 3.dp.toPx()
     val gh = h * 0.46f
     drawRoundRect(
-        Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.42f), Color.White.copy(alpha = 0.04f)), startY = faceY + inset, endY = faceY + inset + gh),
+        Brush.verticalGradient(
+            listOf(Color.White.copy(alpha = if (enabled) 0.42f else 0.1f), Color.White.copy(alpha = 0.03f)),
+            startY = faceY + inset, endY = faceY + inset + gh,
+        ),
         Offset(inset, faceY + inset * 0.7f), Size(w - inset * 2f, gh), CornerRadius(r * 0.85f, r * 0.85f),
     )
-    drawRoundRect(Color.White.copy(alpha = 0.2f), Offset(0f, faceY), Size(w, h), cr, style = Stroke(1.dp.toPx()))
-}
-
-enum class UiIcon {
-    TROPHY, SOUND, MUTED, CLOSE, PAUSE,
-    /** First person: walking the hall through your own eyes. */
-    EYE,
-    /** The overhead camera following you round the hall. */
-    CAMERA,
-    /** The quick-travel map of the hall. */
-    MAP,
-    /** The settings screen. */
-    GEAR,
-}
-
-/** Simple white glyphs for round buttons, fitting a box [s] across centred on [c]. */
-fun DrawScope.drawUiIcon(icon: UiIcon, c: Offset, s: Float, color: Color) {
-    when (icon) {
-        UiIcon.CLOSE -> {
-            val d = s * 0.3f
-            drawLine(color, c + Offset(-d, -d), c + Offset(d, d), s * 0.15f, StrokeCap.Round)
-            drawLine(color, c + Offset(d, -d), c + Offset(-d, d), s * 0.15f, StrokeCap.Round)
-        }
-        UiIcon.PAUSE -> {
-            val bw = s * 0.16f
-            drawRoundRect(color, c + Offset(-s * 0.26f, -s * 0.32f), Size(bw, s * 0.64f), CornerRadius(bw / 3f))
-            drawRoundRect(color, c + Offset(s * 0.1f, -s * 0.32f), Size(bw, s * 0.64f), CornerRadius(bw / 3f))
-        }
-        UiIcon.EYE -> {
-            // An almond outline with a round iris and a glint.
-            val w = s * 0.46f
-            val h = s * 0.26f
-            val eye = Path().apply {
-                moveTo(c.x - w, c.y)
-                quadraticBezierTo(c.x, c.y - h * 2f, c.x + w, c.y)
-                quadraticBezierTo(c.x, c.y + h * 2f, c.x - w, c.y)
-                close()
-            }
-            drawPath(eye, color, style = Stroke(s * 0.09f, cap = StrokeCap.Round))
-            drawCircle(color, s * 0.17f, c)
-            drawCircle(color.copy(alpha = color.alpha * 0.35f), s * 0.07f, c + Offset(s * 0.06f, -s * 0.06f))
-        }
-        UiIcon.CAMERA -> {
-            // A camera body with its viewfinder bump and a solid lens.
-            val bw = s * 0.84f
-            val bh = s * 0.56f
-            val top = c.y - bh / 2f + s * 0.06f
-            val body = Stroke(s * 0.09f)
-            drawRoundRect(color, Offset(c.x - s * 0.2f, top - s * 0.14f), Size(s * 0.4f, s * 0.16f), CornerRadius(s * 0.05f))
-            drawRoundRect(color, Offset(c.x - bw / 2f, top), Size(bw, bh), CornerRadius(s * 0.12f), style = body)
-            drawCircle(color, s * 0.15f, Offset(c.x, top + bh / 2f))
-            drawCircle(color, s * 0.045f, Offset(c.x + bw * 0.32f, top + s * 0.12f))
-        }
-        UiIcon.MAP -> drawMapIcon(c, s, color)
-        UiIcon.GEAR -> drawGearIcon(c, s, color)
-        UiIcon.TROPHY -> {
-            val cup = Path().apply {
-                moveTo(c.x - s * 0.3f, c.y - s * 0.38f)
-                lineTo(c.x + s * 0.3f, c.y - s * 0.38f)
-                cubicTo(c.x + s * 0.3f, c.y + s * 0.02f, c.x + s * 0.18f, c.y + s * 0.12f, c.x, c.y + s * 0.14f)
-                cubicTo(c.x - s * 0.18f, c.y + s * 0.12f, c.x - s * 0.3f, c.y + s * 0.02f, c.x - s * 0.3f, c.y - s * 0.38f)
-                close()
-            }
-            drawPath(cup, color)
-            val handle = Stroke(s * 0.08f, cap = StrokeCap.Round)
-            drawArc(color, 90f, 180f, false, Offset(c.x - s * 0.46f, c.y - s * 0.32f), Size(s * 0.3f, s * 0.3f), style = handle)
-            drawArc(color, -90f, 180f, false, Offset(c.x + s * 0.16f, c.y - s * 0.32f), Size(s * 0.3f, s * 0.3f), style = handle)
-            drawRect(color, Offset(c.x - s * 0.06f, c.y + s * 0.12f), Size(s * 0.12f, s * 0.16f))
-            drawRoundRect(color, Offset(c.x - s * 0.24f, c.y + s * 0.27f), Size(s * 0.48f, s * 0.12f), CornerRadius(s * 0.04f))
-        }
-        UiIcon.SOUND, UiIcon.MUTED -> {
-            val body = Path().apply {
-                moveTo(c.x - s * 0.42f, c.y - s * 0.14f)
-                lineTo(c.x - s * 0.24f, c.y - s * 0.14f)
-                lineTo(c.x - s * 0.02f, c.y - s * 0.36f)
-                lineTo(c.x - s * 0.02f, c.y + s * 0.36f)
-                lineTo(c.x - s * 0.24f, c.y + s * 0.14f)
-                lineTo(c.x - s * 0.42f, c.y + s * 0.14f)
-                close()
-            }
-            drawPath(body, color)
-            if (icon == UiIcon.SOUND) {
-                for (k in 1..2) {
-                    val rr = s * (0.14f + k * 0.13f)
-                    drawArc(color, -45f, 90f, false, Offset(c.x + s * 0.02f - rr, c.y - rr), Size(rr * 2f, rr * 2f), style = Stroke(s * 0.09f, cap = StrokeCap.Round))
-                }
-            } else {
-                val x0 = c.x + s * 0.14f
-                val d = s * 0.14f
-                drawLine(color, Offset(x0, c.y - d), Offset(x0 + d * 2f, c.y + d), s * 0.1f, StrokeCap.Round)
-                drawLine(color, Offset(x0 + d * 2f, c.y - d), Offset(x0, c.y + d), s * 0.1f, StrokeCap.Round)
-            }
-        }
-    }
-}
-
-/** A gold arcade token: milled rim, raised star and a shine, [r] in radius round [c]. */
-fun DrawScope.drawToken(c: Offset, r: Float) {
-    drawCircle(Color(0xFF7A4A08), r, c + Offset(0f, r * 0.08f))
-    drawCircle(Brush.radialGradient(listOf(Color(0xFFFFE89A), Color(0xFFF5B82E), Color(0xFFC77A12)), c - Offset(r * 0.35f, r * 0.4f), r * 1.6f), r, c)
-    drawCircle(Color(0xFF9A5A0A), r * 0.74f, c, style = Stroke(r * 0.1f))
-    val star = Path()
-    for (k in 0 until 10) {
-        val a = -PI.toFloat() / 2f + k * PI.toFloat() / 5f
-        val rr = if (k % 2 == 0) r * 0.46f else r * 0.2f
-        val p = c + Offset(cos(a) * rr, sin(a) * rr)
-        if (k == 0) star.moveTo(p.x, p.y) else star.lineTo(p.x, p.y)
-    }
-    star.close()
-    drawPath(star, Color(0xFFB36A0C))
-    rotate(-35f, c) {
-        drawOval(Color.White.copy(alpha = 0.45f), c + Offset(-r * 0.55f, -r * 0.82f), Size(r * 0.7f, r * 0.26f))
-    }
-}
-
-/** A prize ticket [w] wide centred on [c]: notched ends, a printed border and a star. */
-fun DrawScope.drawTicket(c: Offset, w: Float) {
-    val h = w * 0.58f
-    val tl = c - Offset(w / 2f, h / 2f)
-    val notch = h * 0.18f
-    val shape = Path().apply {
-        addRoundRect(androidx.compose.ui.geometry.RoundRect(tl.x, tl.y, tl.x + w, tl.y + h, CornerRadius(h * 0.12f)))
-    }
-    val cut = Path().apply {
-        addOval(androidx.compose.ui.geometry.Rect(Offset(tl.x, c.y), notch))
-        addOval(androidx.compose.ui.geometry.Rect(Offset(tl.x + w, c.y), notch))
-    }
-    val ticket = Path.combine(androidx.compose.ui.graphics.PathOperation.Difference, shape, cut)
-    rotate(-8f, c) {
-        drawPath(ticket, Color(0xFF7A2A06), alpha = 0.6f)
-        translate(0f, -h * 0.07f) {
-            drawPath(ticket, Brush.verticalGradient(listOf(Color(0xFFFFB35A), Color(0xFFF07A1A)), startY = tl.y, endY = tl.y + h))
-            drawRoundRect(Color(0xFFFFE0A8), tl + Offset(w * 0.17f, h * 0.2f), Size(w * 0.66f, h * 0.6f), CornerRadius(h * 0.08f), style = Stroke(h * 0.06f))
-            val star = Path()
-            for (k in 0 until 10) {
-                val a = -PI.toFloat() / 2f + k * PI.toFloat() / 5f
-                val rr = if (k % 2 == 0) h * 0.22f else h * 0.09f
-                val p = c + Offset(cos(a) * rr, sin(a) * rr)
-                if (k == 0) star.moveTo(p.x, p.y) else star.lineTo(p.x, p.y)
-            }
-            star.close()
-            drawPath(star, Color(0xFFB0300A))
-        }
-    }
-}
-
-@Composable
-fun TokenIcon(size: Dp, modifier: Modifier = Modifier) {
-    Canvas(modifier.size(size)) { drawToken(center, this.size.minDimension / 2f * 0.92f) }
-}
-
-@Composable
-fun TicketIcon(size: Dp, modifier: Modifier = Modifier) {
-    Canvas(modifier.size(size * 1.3f, size)) { drawTicket(center, this.size.width * 0.95f) }
+    drawRoundRect(
+        Brush.verticalGradient(
+            listOf(Color.White.copy(alpha = if (enabled) 0.55f else 0.14f), Color.White.copy(alpha = 0.05f)),
+            startY = faceY, endY = faceY + h,
+        ),
+        Offset(0f, faceY), Size(w, h), cr, style = Stroke(1.dp.toPx()),
+    )
 }
 
 /**
- * A full-screen modal: dims the hall, blocks touches behind it and shows a dark glass card with
- * a glowing edge, a title and a close button. It arrives: the scrim fades in, the card rises and
- * settles with a small overshoot, and the title row lands just after it. Every [GlassBox] inside
- * then slides up in turn, in the order it is composed. With reduce motion it simply fades in.
+ * The body of a modal panel or card, painted over its gradient: a bloom of the [accent] from the
+ * top, the scan texture, and a bright hairline just inside the top edge that fades down the sides
+ * (light catching a bevel).
+ */
+internal fun DrawScope.paintSurface(accent: Color, corner: Float, bloom: Float = 0.2f) {
+    val w = size.width
+    val h = size.height
+    drawRect(
+        Brush.radialGradient(listOf(accent.copy(alpha = bloom), Color.Transparent), Offset(w * 0.28f, 0f), w * 0.95f),
+    )
+    drawRect(UiTexture.scan, alpha = UiTexture.PANEL_ALPHA)
+    val inset = 1.5.dp.toPx()
+    drawRoundRect(
+        Brush.verticalGradient(listOf(UiColors.bevelLight, Color.White.copy(alpha = 0.02f)), startY = 0f, endY = h * 0.4f),
+        Offset(inset, inset), Size(w - inset * 2f, h - inset * 2f), CornerRadius((corner - inset).coerceAtLeast(0f)),
+        style = Stroke(1.dp.toPx()),
+    )
+}
+
+/**
+ * A full-screen modal: dims the hall, blocks touches behind it and shows a layered glass card: a
+ * violet gradient with a bloom of the [accent] from the top, a fine scan texture, a lit inner
+ * hairline, a glowing accent edge and outer glow, and a title row (an accent bar, the title, a
+ * close button) over a fading rule. It arrives: the scrim fades in, the card rises and settles
+ * with a small overshoot, and the title row lands just after it. Every [GlassBox] inside then
+ * slides up in turn, in the order it is composed. With reduce motion it simply fades in.
  */
 @Composable
 fun ArcadePanel(
@@ -485,7 +461,7 @@ fun ArcadePanel(
     fillHeight: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val shape = RoundedCornerShape(24.dp)
+    val shape = RoundedCornerShape(UiRadius.panel)
     val progress = rememberEntrance(PANEL_ENTRANCE_MILLIS)
     val entrance = remember { PanelEntrance(progress) }
     CompositionLocalProvider(LocalEntrance provides entrance) {
@@ -495,7 +471,7 @@ fun ArcadePanel(
                 .drawBehind { drawRect(UiColors.scrim, alpha = clamp01(progress.value * 3.2f)) }
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(12.dp),
+                .padding(UiSpace.md),
             contentAlignment = Alignment.Center,
         ) {
             Column(
@@ -513,17 +489,26 @@ fun ArcadePanel(
                     }
                     .shadow(24.dp, shape, ambientColor = accent, spotColor = accent)
                     .clip(shape)
-                    .background(Brush.verticalGradient(listOf(UiColors.cardTop, UiColors.cardBottom)))
-                    .border(2.dp, Brush.verticalGradient(listOf(accent, accent.shade(0.45f))), shape)
-                    .padding(16.dp),
+                    .background(Brush.verticalGradient(listOf(UiColors.panelTop, UiColors.panelBottom)))
+                    .drawBehind { paintSurface(accent, UiRadius.panel.toPx()) }
+                    .border(UiEdge.strong, Brush.verticalGradient(listOf(accent, accent.shade(0.45f))), shape)
+                    .padding(UiSpace.lg),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Row(Modifier.fillMaxWidth().enterStage(progress, 0.1f, 0.5f, rise = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ArcadeText(title, color = accent.lift(0.15f), unit = 3.dp)
-                    Spacer(Modifier.weight(1f))
+                    // An accent bar leads the title, like the tab of a file folder.
+                    Box(
+                        Modifier
+                            .size(5.dp, 26.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Brush.verticalGradient(listOf(accent.lift(0.35f), accent.shade(0.7f)))),
+                    )
+                    Spacer(Modifier.width(UiSpace.sm + 2.dp))
+                    ArcadeText(title, UiText.TITLE, Modifier.weight(1f), color = accent.lift(0.2f))
+                    Spacer(Modifier.width(UiSpace.sm))
                     RoundButton(UiIcon.CLOSE, onClose, Color(Pal.RED), size = 48.dp, label = "Close")
                 }
-                Spacer(Modifier.size(12.dp))
+                ArcadeDivider(accent, Modifier.padding(top = UiSpace.sm, bottom = UiSpace.md))
                 content()
             }
         }
@@ -534,23 +519,40 @@ fun ArcadePanel(
 private const val PANEL_ENTRANCE_MILLIS = 620
 
 /**
- * A frosted inset box inside a panel. Inside an [ArcadePanel] it arrives with it: each box
+ * A frosted inset box inside a panel: glass lit from the top with a hairline bevel. Given a
+ * [highlight] it takes that colour (tinted glass, a solid edge and a soft outer glow), for the
+ * one box on a screen that matters most. Inside an [ArcadePanel] it arrives with it: each box
  * composed while the panel is still coming in slides up a beat after the one before it.
  */
 @Composable
 fun GlassBox(modifier: Modifier = Modifier, highlight: Color? = null, content: @Composable ColumnScope.() -> Unit) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(UiRadius.box)
     val entrance = LocalEntrance.current
     val index = remember { entrance?.claim() ?: 0 }
     Column(
         modifier
             .then(if (entrance != null) Modifier.enterStage(entrance.progress, entrance.slotStart(index), entrance.slotStart(index) + 0.3f, rise = 14.dp) else Modifier)
+            .then(if (highlight != null) Modifier.uiGlow(highlight, UiRadius.box, 8.dp, 0.26f) else Modifier)
             .clip(shape)
-            .background(if (highlight != null) highlight.copy(alpha = 0.16f) else UiColors.glass)
-            .border(if (highlight != null) 2.dp else 1.dp, highlight ?: UiColors.glassEdge, shape)
-            .padding(12.dp),
+            .background(
+                if (highlight != null) Brush.verticalGradient(listOf(highlight.copy(alpha = 0.22f), highlight.copy(alpha = 0.08f)))
+                else Brush.verticalGradient(listOf(UiColors.glassHi, UiColors.glassLo)),
+            )
+            .drawBehind { paintGlassBevel(UiRadius.box.toPx()) }
+            .border(if (highlight != null) UiEdge.strong else UiEdge.hair, highlight ?: UiColors.glassEdge, shape)
+            .padding(UiSpace.md),
         horizontalAlignment = Alignment.CenterHorizontally,
         content = content,
+    )
+}
+
+/** A lit hairline just inside the top edge of a glass surface, fading toward its sides. */
+internal fun DrawScope.paintGlassBevel(corner: Float) {
+    val inset = 1.dp.toPx()
+    drawRoundRect(
+        Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.26f), Color.Transparent), startY = 0f, endY = size.height * 0.3f),
+        Offset(inset, inset), Size(size.width - inset * 2f, size.height - inset * 2f), CornerRadius((corner - inset).coerceAtLeast(0f)),
+        style = Stroke(1.dp.toPx()),
     )
 }
 
@@ -559,7 +561,7 @@ const val LOW_TOKENS = 2
 
 /** The 0..1 breathing of the low-token pulse: idle (a constant 0, and no frames run) unless [active]. */
 @Composable
-private fun rememberLowPulse(active: Boolean): State<Float> {
+internal fun rememberLowPulse(active: Boolean): State<Float> {
     if (!active || !UiMotion.enabled) return remember { mutableFloatStateOf(0f) }
     return rememberInfiniteTransition(label = "lowTokens").animateFloat(
         0f, 1f, infiniteRepeatable(tween(820, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "lowTokensPulse",
@@ -567,11 +569,11 @@ private fun rememberLowPulse(active: Boolean): State<Float> {
 }
 
 /**
- * Token and ticket counters shown side by side. The numbers roll like an odometer whenever they
- * change ([RollingNumber]), calling [onTick] as they pass values, and the token count breathes
- * while it is at [LOW_TOKENS] or under and turns red at zero. [tokenIconModifier] and
- * [ticketIconModifier] go on the icons, for a screen that needs to know where they are (a coin
- * flying into a counter).
+ * Token and ticket counters shown side by side, a hairline between them. The numbers roll like
+ * an odometer whenever they change ([RollingNumber]), calling [onTick] as they pass values, and
+ * the token count breathes while it is at [LOW_TOKENS] or under and turns red at zero.
+ * [tokenIconModifier] and [ticketIconModifier] go on the icons, for a screen that needs to know
+ * where they are (a coin flying into a counter).
  */
 @Composable
 fun CurrencyRow(
@@ -593,14 +595,16 @@ fun CurrencyRow(
             },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TokenIcon(unit * 9f, tokenIconModifier)
+            TokenIcon(unit * 9f, tokenIconModifier, twinkle = true)
             Spacer(Modifier.width(6.dp))
-            RollingNumber(tokens, if (tokens == 0) Color(0xFFFF7A66) else Color(0xFFFFD35A), unit, onTick = onTick)
+            RollingNumber(tokens, if (tokens == 0) UiColors.bad else UiColors.token, unit, onTick = onTick)
         }
-        Spacer(Modifier.width(18.dp))
+        Spacer(Modifier.width(UiSpace.md))
+        Box(Modifier.width(UiEdge.hair).height(unit * 6f).background(UiColors.glassEdge))
+        Spacer(Modifier.width(UiSpace.md))
         TicketIcon(unit * 8f, ticketIconModifier)
         Spacer(Modifier.width(6.dp))
-        RollingNumber(tickets, Color(0xFFFFA24A), unit, onTick = onTick)
+        RollingNumber(tickets, UiColors.ticket, unit, onTick = onTick)
     }
 }
 
@@ -637,8 +641,8 @@ fun ArcadeBanner(text: String?, modifier: Modifier = Modifier) {
                 scaleY = sc
             },
         ) {
-            GlassBox(Modifier.background(Color(0xE6120C22), RoundedCornerShape(16.dp)), highlight = Color(Pal.YELLOW)) {
-                ArcadeText(last, unit = 2.2.dp, color = Color(Pal.YELLOW), centered = true)
+            GlassBox(Modifier.background(Color(0xE6120C22), RoundedCornerShape(UiRadius.box)), highlight = Color(Pal.YELLOW)) {
+                ArcadeText(last, UiText.HEADING, color = Color(Pal.YELLOW), centered = true)
             }
         }
     }
