@@ -661,7 +661,7 @@ class CoinPusherGame : BaseMiniGame() {
         for (i in 0 until FX_SLOTS) {
             val lt = landAge[i] / LAND_LIFE
             if (lt < 1f) {
-                SceneFx.shockwave(r, landX[i], SHELF_H + 0.8f, landZ[i], 16f + 46f * easeOutCubic(lt), Pal.CREAM, (1f - lt) * 0.5f)
+                SceneFx.shockwave(r, landX[i], 1.2f, landZ[i], 16f + 46f * easeOutCubic(lt), Pal.CREAM, (1f - lt) * 0.5f)
             }
             val st = spillAge[i] / SPILL_LIFE
             if (st < 1f) {
@@ -751,7 +751,8 @@ class CoinPusherGame : BaseMiniGame() {
                 val c = if ((row + k) % 7 == 3) Pal.YELLOW else Pal.GOLD
                 p.disc(x, y + 0.15f, 0.92f, Color(Pal.shade(Pal.ORANGE, 0.65f)))
                 p.disc(x, y, 0.92f, Color(c))
-                p.disc(x - 0.3f, y - 0.3f, 0.3f, Color.White, 0.3f + 0.4f * shine * shine)
+                // Only the coins that catch the light get a glint, to keep the screen cheap to paint.
+                if (shine > 0.75f) p.disc(x - 0.3f, y - 0.3f, 0.3f, Color.White, 0.3f + 0.5f * shine * shine)
                 x += 1.85f
                 k++
             }

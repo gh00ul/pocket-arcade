@@ -148,7 +148,7 @@ class ClawMachineGame : BaseMiniGame() {
         /** Ceiling lamp centres, light shaft width and strength (additive alpha), dust mote count and strength. */
         val LAMP_XS = floatArrayOf(72f, 180f, 288f)
         const val SHAFT_W = 54f
-        const val SHAFT_ALPHA = 0.07f
+        const val SHAFT_ALPHA = 0.085f
         const val MOTES = 22
         const val MOTE_ALPHA = 0.5f
         /** Alpha of the drifting glare across the front glass and of the bright rims down its sides. */

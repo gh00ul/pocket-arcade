@@ -794,6 +794,15 @@ class SkeeBallGame : BaseMiniGame() {
         }
     }
 
+    /**
+     * The largest reach for a ring centred on lane position ([x], [y]) that still ends on the
+     * board (a shockwave from the corner bonus hole must not spill over the cabinet's sides).
+     */
+    private fun fitOnBoard(x: Float, y: Float, reach: Float): Float {
+        val room = minOf(minOf(x - BOARD_L, BOARD_R - x), minOf((y - (BOARD_TOP - 10f)) / SQUASH, (BOARD_BOTTOM - y) / SQUASH))
+        return reach.coerceAtMost(room).coerceAtLeast(16f)
+    }
+
     /** A soft ring of light lying on the tilted board: a true circle on it once seen through the camera. */
     private fun boardRing(r: Renderer3D, x: Float, y: Float, rx: Float, color: Int, alpha: Float) {
         if (alpha <= 0.004f) return
@@ -813,7 +822,8 @@ class SkeeBallGame : BaseMiniGame() {
             if (t >= 1f) continue
             val e = easeOutCubic(t)
             val big = impactBig[i]
-            boardRing(r, impactX[i], impactY[i], 10f + e * (if (big) 125f else 70f), impactColor[i], (1f - t) * (if (big) 0.8f else 0.55f))
+            val reach = fitOnBoard(impactX[i], impactY[i], if (big) 125f else 70f)
+            boardRing(r, impactX[i], impactY[i], 10f + e * reach, impactColor[i], (1f - t) * (if (big) 0.8f else 0.55f))
             if (big && t < 0.55f) {
                 val k = 1f - t / 0.55f
                 SceneFx.flare(r, impactX[i], boardY(impactY[i]) + 22f, impactY[i], 60f + 60f * e, impactColor[i], k * 0.8f)
