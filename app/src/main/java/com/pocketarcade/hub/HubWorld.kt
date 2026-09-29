@@ -42,8 +42,11 @@ class HubWorld(val games: List<MiniGame>, private val audio: AudioSynth?) {
         const val ASSIST_RATE = 7f
         /** The assist only kicks in if you're facing within this of the machine (radians) or stopping. */
         const val ASSIST_CONE = 1.3f
-        /** Kids are this round (world units) for bumping into in first person. */
-        const val KID_RADIUS = 5f
+        /**
+         * Kids are this round (world units) for bumping into in first person: their big heads,
+         * so one beside you never fills the view.
+         */
+        const val KID_RADIUS = 9f
         /** How much of an overlap with a kid is undone each step: a soft bump, not a wall. */
         const val KID_PUSH = 0.35f
         /** Tap-to-walk stops this far in front of a machine's (or counter's) front. */

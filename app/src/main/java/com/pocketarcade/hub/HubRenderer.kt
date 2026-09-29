@@ -68,8 +68,9 @@ class HubRenderer {
             // Diving into (or out of) a machine: no hints over the screen.
         } else if (fp > 0.5f) {
             if (!world.hasWalked || !world.hasLooked) {
-                ArcadeFont.drawCentered(scope, FP_HINT, sw / 2f, sh * 0.8f, px * 1.2f, Color.White, a, tiny = true)
-                ArcadeFont.drawCentered(scope, FP_TAP_HINT, sw / 2f, sh * 0.8f + px * 12f, px * 1.1f, Color.White, a * 0.8f, tiny = true)
+                // Above where the left thumb and its stick go.
+                ArcadeFont.drawCentered(scope, FP_HINT, sw / 2f, sh * 0.68f, px * 1.2f, Color.White, a, tiny = true)
+                ArcadeFont.drawCentered(scope, FP_TAP_HINT, sw / 2f, sh * 0.68f + px * 12f, px * 1.1f, Color.White, a * 0.8f, tiny = true)
             }
         } else if (!world.hasWalked) {
             ArcadeFont.drawCentered(scope, WALK_HINT, sw / 2f, sh * 0.8f, px * 1.2f, Color.White, a, tiny = true)
