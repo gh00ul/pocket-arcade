@@ -121,7 +121,7 @@ internal object HoopsArt {
                 val step = r * 3.5f
                 val body = Pal.mix(0xFF2A1A4E.toInt(), 0xFF0C0718.toInt(), depth)
                 val skin = Pal.mix(0xFF3A2762.toInt(), 0xFF120B24.toInt(), depth)
-                val rimLit = Pal.mix(0xFF7A55C8.toInt(), 0xFF2A1B52.toInt(), depth)
+                val rimLit = Pal.mix(0xFF60419E.toInt(), 0xFF2A1B52.toInt(), depth)
                 var i = 0
                 var cx = hash01(k, 71) * step
                 while (cx < w + step) {
@@ -194,7 +194,7 @@ internal object HoopsArt {
     val boardFace: Texture by lazy {
         paintTexture(120, 85, 4) {
             // Blue kept low (the lamp and spot add to it) so the glass stays under the bloom threshold.
-            vgrad(0f, 0f, 120f, 85f, 0xFF1A2A62.toInt(), 0xFF0C1332.toInt())
+            vgrad(0f, 0f, 120f, 85f, 0xFF162456.toInt(), 0xFF0A102C.toInt())
             for (x in 0 until 120 step 3) rect(x.toFloat(), 0f, 0.25f, 85f, Pal.withAlpha(Pal.WHITE, 0.035f))
             for (y in 2 until 85 step 4) for (x in 2 until 120 step 4) circle(x.toFloat(), y.toFloat(), 0.42f, Pal.withAlpha(Pal.SKY, 0.16f))
             val dim = Pal.shade(Pal.RED, 0.5f)
