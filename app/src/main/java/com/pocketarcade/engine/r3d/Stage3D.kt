@@ -32,7 +32,8 @@ object GameViewport {
  * Projection and touch helpers are plain math, so games can use them in headless tests too.
  */
 class Stage3D(val fieldW: Int, val fieldH: Int) {
-    val r = Renderer3D(fieldW, fieldH)
+    /** Follows the frame-rate cap: on a fast display, frames the GPU would not draw aren't recorded. */
+    val r = Renderer3D(fieldW, fieldH).also { it.frameCapped = true }
 
     /** The camera in field units; [begin] copies it to the renderer. */
     val cam = Camera3D()

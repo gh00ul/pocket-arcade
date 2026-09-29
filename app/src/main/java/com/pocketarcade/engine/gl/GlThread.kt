@@ -50,8 +50,13 @@ internal class GlThread : Thread("ArcadeGL") {
     private var drawW = 0
     private var drawH = 0
 
-    // Frame pacing for the adaptive resolution.
-    private val pacer = ScalePacer(start = GlRenderer.START_SCALE)
+    // Frame pacing for the adaptive quality ladder, and the frame-rate cap.
+    private val pacer = ScalePacer(start = GlRenderer.START_SCALE, ladder = GfxQuality.LADDER)
+    private val gate = FrameGate()
+    /** A frame is wanted but the cap has held it back for now. */
+    private var wantFrame = false
+    private var appliedTier: GfxQuality.Tier? = null
+    private var rungChosen = false
 
     private class ContextLost : RuntimeException("GL context lost")
 
@@ -147,7 +152,12 @@ internal class GlThread : Thread("ArcadeGL") {
 
     private fun loop() {
         while (!quit) {
-            var needDraw = Gfx.take(current, 250)
+            val cap = GfxQuality.effectiveCap()
+            val hz = GfxQuality.displayHz
+            // A frame the cap is holding back waits only as long as the cap needs; otherwise
+            // rest until there is news.
+            val restMs = if (wantFrame) (gate.waitNs(SystemClock.elapsedRealtimeNanos(), cap, hz) + 999_999L) / 1_000_000L else 250L
+            if (Gfx.take(current, maxOf(1L, restMs))) wantFrame = true
             // The context is built out here, not under the lock: compiling the shaders takes a
             // while, and the UI thread must stay free to resize, attach or release the surface.
             if (context == EGL14.EGL_NO_CONTEXT && hasSurfaceWaiting()) ensureContext()
@@ -162,7 +172,7 @@ internal class GlThread : Thread("ArcadeGL") {
                 if (surfaceChanged && st != null && context != EGL14.EGL_NO_CONTEXT) {
                     surfaceChanged = false
                     if (surface == EGL14.EGL_NO_SURFACE) createSurface(st)
-                    needDraw = true
+                    wantFrame = true
                     // Uploads and shader compiles make the first frames slow: don't judge them.
                     pacer.reset(SystemClock.elapsedRealtimeNanos(), keepScale = true)
                 }
@@ -175,7 +185,10 @@ internal class GlThread : Thread("ArcadeGL") {
                 pacer.reset(SystemClock.elapsedRealtimeNanos())
                 renderer.renderScale = pacer.scale
             }
-            if (!needDraw || surface == EGL14.EGL_NO_SURFACE) continue
+            if (!wantFrame || surface == EGL14.EGL_NO_SURFACE) {
+                wantFrame = false
+                continue
+            }
             if (!EGL14.eglMakeCurrent(display, surface, surface, context)) {
                 if (EGL14.eglGetError() == EGL14.EGL_CONTEXT_LOST) throw ContextLost()
                 continue
@@ -186,6 +199,11 @@ internal class GlThread : Thread("ArcadeGL") {
                 pass.recycle()
                 Gfx.deliver(onReady, bitmap)
             }
+            val now = SystemClock.elapsedRealtimeNanos()
+            if (gate.waitNs(now, cap, hz) > 0L) continue
+            gate.take(now)
+            wantFrame = false
+            syncQuality(cap)
             stats.beginFrame(renderer.generation)
             if (stats.enabled) for (p in current.values) stats.notePass(p)
             renderer.floorReflectOff = stats.noFloorReflect
@@ -196,14 +214,38 @@ internal class GlThread : Thread("ArcadeGL") {
                 if (err == EGL14.EGL_CONTEXT_LOST) throw ContextLost() else if (err == EGL14.EGL_BAD_SURFACE) destroySurface()
             }
             pace()
-            stats.afterSwap(renderer.renderScale)
+            stats.afterSwap(renderer.renderScale, pacer.rung)
         }
     }
 
     /** Whether the UI has handed over a surface that isn't being taken away. */
     private fun hasSurfaceWaiting(): Boolean = synchronized(lock) { surfaceTexture != null && !releaseRequested }
 
-    /** Lowers the render resolution when frames run long and raises it again when there's headroom. */
+    /**
+     * Follows the quality settings before a frame: a new tier confines the ladder, the first
+     * frame on a context picks the starting rung from the device, and the cap sets the pacer's
+     * idea of a good frame time. Then hands the rung's levers to the renderer and the recorder.
+     */
+    private fun syncQuality(cap: Int) {
+        val tier = GfxQuality.tier
+        if (tier != appliedTier) {
+            appliedTier = tier
+            pacer.setLimits(GfxQuality.topRung(tier), GfxQuality.bottomRung(tier))
+        }
+        if (!rungChosen) {
+            rungChosen = true
+            val device = GfxQuality.deviceRung(renderer.glRendererName, GfxQuality.lowRamDevice)
+            Log.i(TAG, "Quality tier $tier, device rung $device")
+            pacer.jumpTo(GfxQuality.startRung(tier, device))
+        }
+        pacer.targetFps = cap
+        // The pinned scale of frame-time comparisons ([FrameStats.pinScale]) pins the picture too.
+        val r = GfxQuality.LADDER[if (stats.pinScale) 0 else pacer.rung]
+        renderer.applyRung(r)
+        if (GfxQuality.lightBudget != r.lights) GfxQuality.lightBudget = r.lights
+    }
+
+    /** Lowers the render resolution (then effects) when frames run long and raises them again when there's headroom. */
     private fun pace() {
         val gpu = stats.takeGpuMs()
         if (stats.pinScale) {

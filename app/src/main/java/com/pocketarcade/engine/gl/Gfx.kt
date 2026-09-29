@@ -45,6 +45,11 @@ object Gfx {
 
     /** Queues [pass] as the next picture for [slot], replacing one the GL thread hasn't taken yet. */
     fun submit(slot: String, pass: RenderPass) {
+        if (pass.skipped) {
+            // A frame the cap skipped: nothing new to draw, so the last picture stays up.
+            pass.recycle()
+            return
+        }
         synchronized(lock) {
             pending.put(slot, pass)?.recycle()
             removed.remove(slot)

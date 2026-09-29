@@ -10,7 +10,7 @@ import com.pocketarcade.engine.r3d.RenderPass
  * `adb shell setprop log.tag.PocketArcade3D DEBUG` (then restart the app). Once a second it logs
  * the UI thread's recording time per pass (startFrame → finishFrame), the GL thread's time to
  * issue a frame, the interval between buffer swaps, the GPU time when the driver has
- * `GL_EXT_disjoint_timer_query`, and the render scale. Nothing is logged or allocated per
+ * `GL_EXT_disjoint_timer_query`, the render scale and the quality rung. Nothing is logged or allocated per
  * frame while logging is off; the GPU timer queries (when the driver has them) always run, since
  * the adaptive resolution uses them ([takeGpuMs]).
  */
@@ -140,7 +140,7 @@ internal class FrameStats {
     }
 
     /** Call after the swap; logs once a second. */
-    fun afterSwap(renderScale: Float) {
+    fun afterSwap(renderScale: Float, rung: Int) {
         if (!enabled) return
         val now = System.nanoTime()
         if (lastSwap != 0L) {
@@ -166,9 +166,9 @@ internal class FrameStats {
             Log.d(
                 TAG,
                 String.format(
-                    "record %.2f ms/pass (%d passes) | gl draw %.2f ms | swap %.2f ms avg, %.2f max (%.1f fps) | gpu %s | scale %.2f",
+                    "record %.2f ms/pass (%d passes) | gl draw %.2f ms | swap %.2f ms avg, %.2f max (%.1f fps) | gpu %s | scale %.2f | rung %d",
                     rec, recordPasses, drawNs / 1e6 / f, swapAvg, swapMax / 1e6,
-                    if (swapAvg > 0) 1000.0 / swapAvg else 0.0, gpu, renderScale,
+                    if (swapAvg > 0) 1000.0 / swapAvg else 0.0, gpu, renderScale, rung,
                 ),
             )
             reset()

@@ -1,5 +1,8 @@
 package com.pocketarcade.engine.r3d
 
+import com.pocketarcade.engine.gl.FrameGate
+import com.pocketarcade.engine.gl.GfxQuality
+import com.pocketarcade.engine.gl.NanoClock
 import java.util.IdentityHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.math.ceil
@@ -104,6 +107,24 @@ class Renderer3D(w: Int, h: Int) {
     var modelsCulled = 0
         private set
 
+    /**
+     * Follow the frame-rate cap ([GfxQuality.frameCap]): [startFrame] may decide this frame is
+     * not wanted, recording then does nothing (drawing calls return at once) and [finishFrame]
+     * hands back an empty pass marked [RenderPass.skipped], which [com.pocketarcade.engine.gl.Gfx]
+     * drops, so the GPU keeps the last picture and the UI thread skips the recording work.
+     * Off by default; off for anything that must render every time (snapshots, thumbnails).
+     */
+    var frameCapped = false
+
+    /** False while a frame the cap skipped is being "recorded". */
+    var recording = true
+        private set
+
+    private val gate = FrameGate()
+
+    /** The clock the cap reads; tests swap it. */
+    internal var clock = NanoClock { System.nanoTime() }
+
     private companion object {
         const val MAXV = 8
         const val S = RenderPass.STRIDE
@@ -144,9 +165,19 @@ class Renderer3D(w: Int, h: Int) {
         height = h.coerceAtLeast(1)
     }
 
-    /** Starts recording a new frame. */
+    /** Starts recording a new frame (or skips it, if [frameCapped] and the cap says so). */
     fun startFrame() {
-        frameStartNs = System.nanoTime()
+        val now = clock.nanos()
+        recording = !frameCapped || gate.due(now, GfxQuality.effectiveCap(), GfxQuality.displayHz)
+        if (!recording) {
+            pass = null
+            return
+        }
+        beginPass(now)
+    }
+
+    private fun beginPass(now: Long) {
+        frameStartNs = now
         val p = pool.poll() ?: RenderPass(pool)
         p.reset()
         pass = p
@@ -166,10 +197,12 @@ class Renderer3D(w: Int, h: Int) {
         fogUsedFloor = 0f
     }
 
-    private fun current(): RenderPass = pass ?: run { startFrame(); pass!! }
+    /** The pass being recorded; drawing without [startFrame] starts one (and always records it). */
+    private fun current(): RenderPass = pass ?: run { recording = true; beginPass(clock.nanos()); pass!! }
 
     /** Clears the background to [argb]. */
     fun clear(argb: Int) {
+        if (!recording) return
         val p = current()
         p.clearColor = argb or -0x1000000
         p.gradientCount = 0
@@ -177,6 +210,7 @@ class Renderer3D(w: Int, h: Int) {
 
     /** Paints rows [y0, y1) of the background (camera image pixels) with a vertical gradient. */
     fun gradient(top: Int, bottom: Int, y0: Int = 0, y1: Int = height) {
+        if (!recording) return
         current().addGradient(top, bottom, y0 / height.toFloat(), y1 / height.toFloat())
     }
 
@@ -268,6 +302,7 @@ class Renderer3D(w: Int, h: Int) {
     }
 
     fun end() {
+        if (!recording) return
         val reg = region ?: return
         if (n < 3) return
         val cam = camera
@@ -394,6 +429,7 @@ class Renderer3D(w: Int, h: Int) {
 
     /** Draws [model] (placed by [xf]); [only] limits it to one blend layer. */
     fun drawModel(model: Model, only: Blend?, emissiveBoost: Float, xf: Xform?, tint: Int) {
+        if (!recording) return
         val p = current()
         if ((cullModels || drawDistance > 0f) && !instanceInView(model, xf)) {
             modelsCulled++
@@ -489,6 +525,13 @@ class Renderer3D(w: Int, h: Int) {
         x: Int, y: Int, w: Int, h: Int,
         clipX0: Int = 0, clipY0: Int = 0, clipX1: Int = 0, clipY1: Int = 0, clip: Boolean = false,
     ): RenderPass {
+        if (!recording) {
+            // A frame the cap skipped: an empty stand-in that Gfx.submit drops.
+            val skipped = pool.poll() ?: RenderPass(pool)
+            skipped.reset()
+            skipped.skipped = true
+            return skipped
+        }
         val p = current()
         pass = null
         p.vx = x; p.vy = y; p.vw = w.coerceAtLeast(1); p.vh = h.coerceAtLeast(1)
@@ -559,13 +602,63 @@ class Renderer3D(w: Int, h: Int) {
     private var cellCount = IntArray(0)
     private var cellWeakest = FloatArray(0)
 
+    // Which of the rig's lights are packed (index into the rig's list per packed light), and the
+    // weights used to choose when there are more than the quality budget allows.
+    private val lightSel = IntArray(RenderPass.MAX_LIGHTS)
+    private val lightWeight = FloatArray(RenderPass.MAX_LIGHTS)
+
+    /**
+     * Chooses the lights to pack, as indices into the rig's list in [lightSel], and returns how
+     * many. Up to the budget ([GfxQuality.lightBudget]) they are all taken in order. Past it, a
+     * full budget keeps the first ones as it always has, and a tighter one (a cheaper quality
+     * rung) keeps the strongest (intensity × radius), still in the rig's order.
+     */
+    private fun pickLights(l: Lighting): Int {
+        val n = l.points.size
+        val budget = GfxQuality.lightBudget.coerceIn(1, RenderPass.MAX_LIGHTS)
+        val sel = lightSel
+        if (n <= budget || budget >= RenderPass.MAX_LIGHTS) {
+            val count = minOf(n, RenderPass.MAX_LIGHTS)
+            for (i in 0 until count) sel[i] = i
+            return count
+        }
+        val w = lightWeight
+        var k = 0
+        for (i in 0 until n) {
+            val pl = l.points[i]
+            val weight = pl.intensity * pl.radius
+            if (k == budget && weight <= w[k - 1]) continue
+            // Insert by weight (strongest first), pushing the weakest out when full.
+            var at = if (k < budget) k++ else k - 1
+            while (at > 0 && w[at - 1] < weight) {
+                w[at] = w[at - 1]
+                sel[at] = sel[at - 1]
+                at--
+            }
+            w[at] = weight
+            sel[at] = i
+        }
+        // Back into the rig's order, so packing looks the same whichever lights were kept.
+        for (a in 1 until k) {
+            val v = sel[a]
+            var b = a - 1
+            while (b >= 0 && sel[b] > v) {
+                sel[b + 1] = sel[b]
+                b--
+            }
+            sel[b + 1] = v
+        }
+        return k
+    }
+
     /** Copies the lights and builds the grid telling each patch of floor which lights reach it. */
     private fun packLights(p: RenderPass) {
         val l = lighting
         p.ambient[0] = l.ambR; p.ambient[1] = l.ambG; p.ambient[2] = l.ambB
         p.dirDir[0] = l.dirX; p.dirDir[1] = l.dirY; p.dirDir[2] = l.dirZ
         p.dirCol[0] = l.dirR; p.dirCol[1] = l.dirG; p.dirCol[2] = l.dirB
-        val count = minOf(l.points.size, RenderPass.MAX_LIGHTS)
+        val count = pickLights(l)
+        val sel = lightSel
         p.lightCount = count
         if (count == 0) return
         var minX = Float.MAX_VALUE
@@ -573,7 +666,7 @@ class Renderer3D(w: Int, h: Int) {
         var minZ = Float.MAX_VALUE
         var maxZ = -Float.MAX_VALUE
         for (i in 0 until count) {
-            val pl = l.points[i]
+            val pl = l.points[sel[i]]
             val o = i * 8
             p.lights[o] = pl.x; p.lights[o + 1] = pl.y; p.lights[o + 2] = pl.z; p.lights[o + 3] = pl.radius
             p.lights[o + 4] = pl.r; p.lights[o + 5] = pl.g; p.lights[o + 6] = pl.b; p.lights[o + 7] = pl.intensity
@@ -600,7 +693,7 @@ class Renderer3D(w: Int, h: Int) {
         val cellWeakest = cellWeakest
         java.util.Arrays.fill(cellCount, 0, gw * gh, 0)
         for (i in 0 until count) {
-            val pl = l.points[i]
+            val pl = l.points[sel[i]]
             if (pl.intensity <= 0f) continue
             val weight = pl.intensity * pl.radius
             val cx0 = floor((pl.x - pl.radius - minX) / cell).toInt().coerceIn(0, gw - 1)
@@ -627,7 +720,7 @@ class Renderer3D(w: Int, h: Int) {
                     var wv = Float.MAX_VALUE
                     for (j in 0 until RenderPass.CELL_LIGHTS) {
                         val li = (p.grid[base + j].toInt() and 255) - 1
-                        val lp = l.points[li]
+                        val lp = l.points[sel[li]]
                         val w = lp.intensity * lp.radius
                         if (w < wv) {
                             wv = w; weakest = j
@@ -637,7 +730,7 @@ class Renderer3D(w: Int, h: Int) {
                     var newWeakest = Float.MAX_VALUE
                     for (j in 0 until RenderPass.CELL_LIGHTS) {
                         val li = (p.grid[base + j].toInt() and 255) - 1
-                        val lp = l.points[li]
+                        val lp = l.points[sel[li]]
                         newWeakest = minOf(newWeakest, lp.intensity * lp.radius)
                     }
                     cellWeakest[ci] = newWeakest

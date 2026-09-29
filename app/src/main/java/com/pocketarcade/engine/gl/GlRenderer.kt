@@ -76,8 +76,24 @@ internal class GlRenderer {
     private var gridTexW = 0
     private var gridTexH = 0
     private var whiteTex = 0
-    private var samples = 0
+    /** The most samples the GPU offers (capped at 4); whether a multisampled target failed to build. */
+    private var maxSamples = 0
+    private var msaaBroken = false
     private var anisotropy = 1f
+
+    /** What the driver calls itself (`GL_RENDERER`), for the first guess at a quality rung. */
+    var glRendererName = ""
+        private set
+
+    // Quality levers (see GfxQuality), set by the GL thread from the current rung. The defaults
+    // are rung 0: how the renderer looked before there were tiers.
+    /** Multisampling wanted (4, 2 or 0); the GPU's own limit still applies. */
+    var msaa = 4
+    /** Bloom octaves wanted, 2..[BLOOM_LEVELS]. */
+    var bloomOctaves = BLOOM_LEVELS
+    var reflections = GfxQuality.Reflections.MIRROR
+    /** Whether the pass being drawn renders into a multisampled target. */
+    private var msActive = false
 
     /** Skips floor reflections whatever the passes ask (for A/B timing from [FrameStats]). */
     var floorReflectOff = false
@@ -85,10 +101,25 @@ internal class GlRenderer {
     /** Fraction of full resolution the scene renders at; eased down if frames run slow. */
     var renderScale = START_SCALE
 
+    /** Sets every quality lever from [r]. */
+    fun applyRung(r: GfxQuality.Rung) {
+        msaa = r.msaa
+        bloomOctaves = r.bloomOctaves
+        reflections = r.reflections
+    }
+
+    /** The multisampling the current levers and the GPU allow: 0 (off) or 2..4. */
+    private fun wantSamples(): Int {
+        val n = if (msaaBroken) 0 else minOf(msaa, maxSamples)
+        return if (n > 1) n else 0
+    }
+
     private class Targets(val w: Int, val h: Int) {
         var msFbo = 0
         var msColor = 0
         var msDepth = 0
+        /** Samples the multisampled buffers were built with (0 = none), or -1 before they exist. */
+        var msSamples = -1
         var sceneFbo = 0
         var sceneTex = 0
         var sceneDepth = 0
@@ -166,7 +197,9 @@ internal class GlRenderer {
         comp = Prog(compProg)
 
         GLES30.glGetIntegerv(GLES30.GL_MAX_SAMPLES, tmp, 0)
-        samples = minOf(4, tmp[0])
+        maxSamples = minOf(4, tmp[0])
+        msaaBroken = false
+        glRendererName = GLES30.glGetString(GLES30.GL_RENDERER) ?: ""
         val ext = GLES30.glGetString(GLES30.GL_EXTENSIONS) ?: ""
         if (ext.contains("GL_EXT_texture_filter_anisotropic")) {
             val f = FloatArray(1)
@@ -174,7 +207,7 @@ internal class GlRenderer {
             anisotropy = minOf(8f, f[0])
         }
         GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
-        Log.i(TAG, "GL ${GLES30.glGetString(GLES30.GL_VERSION)} / ${GLES30.glGetString(GLES30.GL_RENDERER)}, MSAA $samples, aniso $anisotropy")
+        Log.i(TAG, "GL ${GLES30.glGetString(GLES30.GL_VERSION)} / ${GLES30.glGetString(GLES30.GL_RENDERER)}, MSAA $maxSamples, aniso $anisotropy")
 
         // Streaming buffer for immediate geometry.
         GLES30.glGenBuffers(1, tmp, 0); streamVbo = tmp[0]
@@ -469,7 +502,13 @@ internal class GlRenderer {
     }
 
     private fun targetsFor(w: Int, h: Int): Targets {
-        targets.firstOrNull { it.w == w && it.h == h }?.let { it.lastUsed = frameNo; return it }
+        targets.firstOrNull { it.w == w && it.h == h }?.let {
+            it.lastUsed = frameNo
+            // The multisampling lever may have moved since this set was built.
+            val want = wantSamples()
+            if (it.msSamples != want) applyMultisample(it, want)
+            return it
+        }
         // Drop the least recently used set when too many sizes pile up.
         if (targets.size >= 3) {
             val old = targets.minByOrNull { it.lastUsed }!!
@@ -478,36 +517,11 @@ internal class GlRenderer {
         }
         val t = Targets(w, h)
         t.lastUsed = frameNo
-        if (samples > 1) {
-            GLES30.glGenFramebuffers(1, tmp, 0); t.msFbo = tmp[0]
-            GLES30.glGenRenderbuffers(1, tmp, 0); t.msColor = tmp[0]
-            GLES30.glGenRenderbuffers(1, tmp, 0); t.msDepth = tmp[0]
-            GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.msColor)
-            GLES30.glRenderbufferStorageMultisample(GLES30.GL_RENDERBUFFER, samples, GLES30.GL_RGBA8, w, h)
-            GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.msDepth)
-            GLES30.glRenderbufferStorageMultisample(GLES30.GL_RENDERBUFFER, samples, GLES30.GL_DEPTH_COMPONENT24, w, h)
-            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.msFbo)
-            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_RENDERBUFFER, t.msColor)
-            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, t.msDepth)
-            if (GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) != GLES30.GL_FRAMEBUFFER_COMPLETE) {
-                Log.w(TAG, "MSAA framebuffer incomplete; rendering without multisampling")
-                samples = 0
-                tmp[0] = t.msFbo; GLES30.glDeleteFramebuffers(1, tmp, 0)
-                tmp[0] = t.msColor; GLES30.glDeleteRenderbuffers(1, tmp, 0)
-                tmp[0] = t.msDepth; GLES30.glDeleteRenderbuffers(1, tmp, 0)
-                t.msFbo = 0
-            }
-        }
         GLES30.glGenFramebuffers(1, tmp, 0); t.sceneFbo = tmp[0]
         t.sceneTex = colorTexture(w, h)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.sceneFbo)
         GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, t.sceneTex, 0)
-        if (t.msFbo == 0) {
-            GLES30.glGenRenderbuffers(1, tmp, 0); t.sceneDepth = tmp[0]
-            GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.sceneDepth)
-            GLES30.glRenderbufferStorage(GLES30.GL_RENDERBUFFER, GLES30.GL_DEPTH_COMPONENT24, w, h)
-            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, t.sceneDepth)
-        }
+        applyMultisample(t, wantSamples())
         // The bloom chain: each octave half the size of the one before, down to about 1/32.
         var bw = w / 4
         var bh = h / 4
@@ -526,6 +540,54 @@ internal class GlRenderer {
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         targets += t
         return t
+    }
+
+    /**
+     * Gives [t] multisampled buffers of [want] samples, or none (0): the scene is then drawn
+     * straight into the scene target with a depth buffer of its own. Replaces whatever [t] had,
+     * so the multisampling lever can move while the app runs.
+     */
+    private fun applyMultisample(t: Targets, want: Int) {
+        if (t.msFbo != 0) { tmp[0] = t.msFbo; GLES30.glDeleteFramebuffers(1, tmp, 0); t.msFbo = 0 }
+        if (t.msColor != 0) { tmp[0] = t.msColor; GLES30.glDeleteRenderbuffers(1, tmp, 0); t.msColor = 0 }
+        if (t.msDepth != 0) { tmp[0] = t.msDepth; GLES30.glDeleteRenderbuffers(1, tmp, 0); t.msDepth = 0 }
+        if (t.sceneDepth != 0) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.sceneFbo)
+            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, 0)
+            tmp[0] = t.sceneDepth; GLES30.glDeleteRenderbuffers(1, tmp, 0); t.sceneDepth = 0
+        }
+        var n = want
+        if (n > 1) {
+            GLES30.glGenFramebuffers(1, tmp, 0); t.msFbo = tmp[0]
+            GLES30.glGenRenderbuffers(1, tmp, 0); t.msColor = tmp[0]
+            GLES30.glGenRenderbuffers(1, tmp, 0); t.msDepth = tmp[0]
+            GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.msColor)
+            GLES30.glRenderbufferStorageMultisample(GLES30.GL_RENDERBUFFER, n, GLES30.GL_RGBA8, t.w, t.h)
+            GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.msDepth)
+            GLES30.glRenderbufferStorageMultisample(GLES30.GL_RENDERBUFFER, n, GLES30.GL_DEPTH_COMPONENT24, t.w, t.h)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.msFbo)
+            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_RENDERBUFFER, t.msColor)
+            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, t.msDepth)
+            if (GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) != GLES30.GL_FRAMEBUFFER_COMPLETE) {
+                Log.w(TAG, "MSAA framebuffer incomplete; rendering without multisampling")
+                msaaBroken = true
+                tmp[0] = t.msFbo; GLES30.glDeleteFramebuffers(1, tmp, 0)
+                tmp[0] = t.msColor; GLES30.glDeleteRenderbuffers(1, tmp, 0)
+                tmp[0] = t.msDepth; GLES30.glDeleteRenderbuffers(1, tmp, 0)
+                t.msFbo = 0
+                t.msColor = 0
+                t.msDepth = 0
+                n = 0
+            }
+        }
+        if (t.msFbo == 0) {
+            GLES30.glGenRenderbuffers(1, tmp, 0); t.sceneDepth = tmp[0]
+            GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, t.sceneDepth)
+            GLES30.glRenderbufferStorage(GLES30.GL_RENDERBUFFER, GLES30.GL_DEPTH_COMPONENT24, t.w, t.h)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, t.sceneFbo)
+            GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, t.sceneDepth)
+        }
+        t.msSamples = n
     }
 
     private fun colorTexture(w: Int, h: Int): Int {
@@ -679,13 +741,17 @@ internal class GlRenderer {
         val rw = (p.vw * scale).roundToInt().coerceAtLeast(16)
         val rh = (p.vh * scale).roundToInt().coerceAtLeast(16)
         val t = targetsFor(rw, rh)
+        msActive = t.msFbo != 0
+        // Bloom octaves in use this frame: the chain may be longer than the lever asks for.
+        val levels = minOf(t.bloomLevels, bloomOctaves.coerceAtLeast(1))
         reflReady = false
         streamed = false
         passW = rw
         passH = rh
         reflStreak = 0f
-        if ((p.floorReflect > 0f || p.floorReflectMatte > 0f) && !floorReflectOff) {
-            if (p.floorMirror) {
+        if ((p.floorReflect > 0f || p.floorReflectMatte > 0f) && !floorReflectOff && reflections != GfxQuality.Reflections.OFF) {
+            // Real mirror images only where the scene asks and the rung allows; else streaks.
+            if (p.floorMirror && reflections == GfxQuality.Reflections.MIRROR) {
                 if (p.glowDraws > 0) {
                     drawMirror(p, t)
                     reflReady = true
@@ -694,7 +760,7 @@ internal class GlRenderer {
             } else if (t.bloomDone) {
                 // Free streaks: last frame's softened glow (1/8 size) gathered up the screen.
                 reflReady = true
-                reflTex = t.bloomTex[if (t.bloomLevels > 1) 1 else 0]
+                reflTex = t.bloomTex[if (levels > 1) 1 else 0]
                 reflStreak = STREAK
             }
         }
@@ -745,7 +811,6 @@ internal class GlRenderer {
             GLES30.glUniform2f(bright.loc("uTexel"), 1f / rw, 1f / rh)
             GLES30.glUniform1f(bright.loc("uThreshold"), p.bloomThreshold)
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
-            val levels = t.bloomLevels
             GLES30.glUseProgram(downProg)
             GLES30.glUniform1i(down.loc("uTex"), 0)
             for (i in 1 until levels) {
@@ -796,9 +861,9 @@ internal class GlRenderer {
         // (a little more, since the wide halo is fainter per pixel, but not so much that big
         // bright areas such as a daytime sky turn hazy).
         val w = p.bloomRadius
-        var sum = if (t.bloomLevels > 1) BLOOM_CORE else 1f
+        var sum = if (levels > 1) BLOOM_CORE else 1f
         var wk = 1f
-        for (i in 1 until t.bloomLevels) {
+        for (i in 1 until levels) {
             wk *= w
             sum += wk
         }
@@ -1022,7 +1087,7 @@ internal class GlRenderer {
             Blend.OPAQUE.ordinal -> {
                 GLES30.glDisable(GLES30.GL_BLEND)
                 GLES30.glDepthMask(true)
-                val ms = samples > 1 && !mirror
+                val ms = msActive && !mirror
                 if (ms) GLES30.glEnable(GLES30.GL_SAMPLE_ALPHA_TO_COVERAGE)
                 GLES30.glUniform1f(uCut, if (ms) 0.08f else 0.5f)
                 GLES30.glUniform1f(uGlass, 0f)

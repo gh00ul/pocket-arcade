@@ -68,6 +68,14 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
     var recordNs = 0L
     internal var statsTaken = false
 
+    /**
+     * A stand-in returned for a frame the frame-rate cap skipped (see [Renderer3D.frameCapped]):
+     * empty, and dropped by [com.pocketarcade.engine.gl.Gfx.submit] so the GPU keeps showing the
+     * last picture.
+     */
+    var skipped = false
+        internal set
+
     // Light grid over the XZ plane: RGBA bytes, two texels per cell holding 8 light indices + 1.
     var gridW = 0
     var gridH = 0
@@ -96,6 +104,7 @@ class RenderPass internal constructor(private val pool: ConcurrentLinkedQueue<Re
     var instanceCount = 0
 
     internal fun reset() {
+        skipped = false
         clip = false
         near = DEFAULT_NEAR
         clearColor = 0
