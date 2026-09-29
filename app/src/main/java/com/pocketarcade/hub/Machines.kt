@@ -111,7 +111,8 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
             live.texture.full, 0f, 0f, 1f, emissive = 1.15f,
         )
         c.marqueeBox(ix0, ix1, screenTop, h - 1f, z0, cpBack + 3f)
-        b.box(x0, h - 1f, z0, x1, h, cpBack + 4f, BoxFaces(top = art.topper.full, front = art.trimTex.full, frontEmissive = 0.9f, topEmissive = 0.9f, gloss = 0.5f))
+        b.box(x0, h - 1f, z0, x1, h, cpBack + 4f, BoxFaces(top = art.topper.full, front = art.trimTex.full, back = dark, left = dark, right = dark, frontEmissive = 0.9f, topEmissive = 0.9f, gloss = 0.5f))
+        c.rearPanel(ix0, ix1, 1f, screenTop)
         c.coinDoor(cx, 6f, z1 - 1f, 8f)
         // Lit T-molding edges down the screen's sides.
         c.neonStrip(ix0 + 0.2f, panelY + 4f, ix0 + 0.8f, screenTop, cpBack + 0.2f, emissive = 1.3f)
@@ -141,6 +142,8 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         b.box(x0, 0f, z0, x1, baseTop, z1, BoxFaces(front = art.kick.full, left = side, right = side, top = dark, back = dark, gloss = 0.3f))
         b.box(x0 - 0.3f, baseTop - 1f, z0 - 0.3f, x1 + 0.3f, baseTop, z1 + 0.3f, BoxFaces(front = art.trimTex.full, left = art.trimTex.full, right = art.trimTex.full, frontEmissive = 0.9f))
         c.posts(x0, x1, z0, z1, baseTop, glassTop)
+        // A solid back behind the prizes, so the case isn't see-through from behind the bank.
+        c.rearPanel(x0, x1, 1f, glassTop)
         c.coinDoor(cx + 3f, 7f, z1, 8f)
         // Inside: velvet floor and printed back wall.
         b.quad(x0 + 1f, baseTop + 0.3f, z0 + 1f, x1 - 1f, baseTop + 0.3f, z0 + 1f, x1 - 1f, baseTop + 0.3f, z1 - 1f, x0 + 1f, baseTop + 0.3f, z1 - 1f, MachineKit.velvet.full, 0f, 1f, 0f)
@@ -184,7 +187,8 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         val pad = art.trimTex.full
         b.box(x0 - 0.5f, tableY, z1 - 1.5f, x1 + 0.5f, tableY + 1.2f, z1 + 0.5f, BoxFaces(front = pad, top = pad, left = pad, right = pad, gloss = 0.4f))
         // Backboard with the marquee on top and the score display.
-        b.box(x0, tableY, z0, x1, h - 10f, boardZ, BoxFaces(front = art.sideArt.full, top = dark, left = dark, right = dark, back = dark))
+        b.box(x0, 0f, z0, x1, h - 10f, boardZ, BoxFaces(front = art.sideArt.full, top = dark, left = dark, right = dark, back = dark))
+        c.rearPanel(x0, x1, 1f, h - 10f)
         c.display(cx - 9f, cx + 9f, tableY + 16f, tableY + 21f, boardZ + 0.1f)
         c.marqueeBox(x0 - 1f, x1 + 1f, h - 10f, h, z0, boardZ + 1f)
         // Mallets resting on the front corners.
@@ -223,6 +227,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         }
         // Backboard, display and marquee.
         b.box(x0, 0f, z0, x1, h - 12f, boardZ, BoxFaces(front = dark, left = side, right = side, top = dark, back = dark))
+        c.rearPanel(x0, x1, 1f, h - 12f)
         c.display(cx - 8f, cx + 8f, h - 20f, h - 14f, boardZ + 0.1f)
         c.marqueeBox(x0 - 1f, x1 + 1f, h - 12f, h, z0, boardZ + 1f)
         // Netting over the target end.
@@ -251,6 +256,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         b.quad(x0 + 2f, 28f, z0 + 4f, x1 - 2f, 28f, z0 + 4f, x1 - 2f, 20f, z1 - 12f, x0 + 2f, 20f, z1 - 12f, MachineKit.court.full, 0f, 0.99f, 0.1f, gloss = 0.45f)
         // Backboard frame, board, rim and net.
         b.box(x0, 0f, z0, x1, h - 10f, z0 + 4f, BoxFaces(front = dark, left = dark, right = dark, top = dark, back = dark))
+        c.rearPanel(x0, x1, 1f, h - 10f)
         b.quad(cx - 13f, h - 13f, z0 + 4.2f, cx + 13f, h - 13f, z0 + 4.2f, cx + 13f, h - 31f, z0 + 4.2f, cx - 13f, h - 31f, z0 + 4.2f, MachineKit.hoopBoard.full, 0f, 0f, 1f, gloss = 0.9f, emissive = 0.4f)
         val rimY = h - 29f
         val rimZ = z0 + 10f
@@ -282,6 +288,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         val dark = art.darkPaint.full
         b.box(x0, 0f, z0, x1, baseTop, z1, BoxFaces(front = art.kick.full, left = side, right = side, top = dark, back = dark, gloss = 0.3f))
         c.posts(x0, x1, z0, z1, baseTop, glassTop)
+        c.rearPanel(x0, x1, 1f, glassTop)
         c.coinDoor(cx, 8f, z1, 9f)
         b.quad(x0 + 1f, glassTop, z0 + 1.2f, x1 - 1f, glassTop, z0 + 1.2f, x1 - 1f, baseTop, z0 + 1.2f, x0 + 1f, baseTop, z0 + 1.2f, art.sideArt.full, 0f, 0f, 1f, emissive = 0.5f)
         val deckY = baseTop + 3f
@@ -309,6 +316,7 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
             b.box(lx, 0f, lz, lx + 2f, 9f, lz + 2f, leg)
         }
         b.box(x0 + 0.5f, 9f, z0 + 6f, x1 - 0.5f, top, z1, BoxFaces(front = art.kick.full, left = side, right = side, back = dark, gloss = 0.3f))
+        c.rearPanel(x0 + 0.5f, x1 - 0.5f, 9.5f, top, z0 + 6f)
         c.coinDoor(cx, 10.5f, z1, 7.5f)
         val surface = if (hockey) MachineKit.hockeySurface.full else dark
         b.quad(x0 + 2f, top + 0.3f, z0 + 7.5f, x1 - 2f, top + 0.3f, z0 + 7.5f, x1 - 2f, top + 0.3f, z1 - 1.5f, x0 + 2f, top + 0.3f, z1 - 1.5f, surface, 0f, 1f, 0f, emissive = 0.55f, gloss = 0.8f)
@@ -324,11 +332,13 @@ class MachineUnit(val prop: Prop, val game: MiniGame, val art: MachineArt) {
         b.box(cx - 1.5f, top, z0 + 1f, cx + 1.5f, h - 12f, z0 + 4f, leg)
         if (hockey) {
             b.box(x0 - 3f, h - 14f, z0, x1 + 3f, h, z0 + 4f, BoxFaces(front = art.marquee.full, top = dark, left = dark, right = dark, back = dark, frontEmissive = 1.25f))
+            c.underside(x0 - 3f, x1 + 3f, z0, z0 + 4f, h - 14f)
             c.display(cx - 8f, cx + 8f, h - 20f, h - 15f, z0 + 4.2f)
             b.quad(cx - 8f, h - 15f, z0 + 4.1f, cx + 8f, h - 15f, z0 + 4.1f, cx + 8f, h - 20f, z0 + 4.1f, cx - 8f, h - 20f, z0 + 4.1f, dark, 0f, 0f, 1f)
         } else {
             val live = c.liveScreen()
             b.box(x0 - 3f, h - 22f, z0, x1 + 3f, h, z0 + 4f, BoxFaces(front = art.bezel.full, top = dark, left = dark, right = dark, back = dark))
+            c.underside(x0 - 3f, x1 + 3f, z0, z0 + 4f, h - 22f)
             b.quad(x0 - 1f, h - 2f, z0 + 4.15f, x1 + 1f, h - 2f, z0 + 4.15f, x1 + 1f, h - 20f, z0 + 4.15f, x0 - 1f, h - 20f, z0 + 4.15f, live.texture.full, 0f, 0f, 1f, emissive = 1.1f)
         }
         c.bulbRow(x0 - 2f, x1 + 2f, h + 0.6f, z0 + 3.4f, 10)

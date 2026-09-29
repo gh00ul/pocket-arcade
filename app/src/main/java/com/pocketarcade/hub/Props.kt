@@ -49,6 +49,12 @@ object Props {
         return b.build()
     }
 
+    /** A service panel over the back face at depth [z] (facing -z), as on the cabinets. */
+    private fun rearPanel(b: ModelBuilder, xa: Float, xb: Float, y0: Float, y1: Float, z: Float) {
+        val tex = MachineKit.rearPanel(y1 - y0 > (xb - xa) * 1.3f).full
+        b.quad(xb, y1, z - 0.06f, xa, y1, z - 0.06f, xa, y0, z - 0.06f, xb, y0, z - 0.06f, tex, 0f, 0f, -1f, gloss = 0.25f)
+    }
+
     // ------------------------------------------------------------------ prize corner
 
     private val counterFront: Texture by lazy {
@@ -94,6 +100,12 @@ object Props {
         val back = HallArt.paint(0xFF1C1440.toInt(), 0.08f, 0.6f).full
         val shelf = HallArt.wood(0xFFE8E0D0.toInt(), 3).full
         b.box(p.x0, 0f, p.z0, p.x1, p.height, p.z0 + 2f, BoxFaces(front = back, top = back))
+        // End cheeks, so the shelves don't just stop when seen from along the counter.
+        val cheek = HallArt.paint(0xFF2A1E5A.toInt(), 0.1f, 0.6f).full
+        val edge = HallArt.solid(0xFFFF4FA8.toInt()).full
+        for (cx in floatArrayOf(p.x0 - 2.5f, p.x1)) {
+            b.box(cx, 0f, p.z0, cx + 2.5f, p.height + 2f, p.z1 + 1f, BoxFaces(front = edge, left = cheek, right = cheek, top = cheek, frontEmissive = 1.2f, gloss = 0.4f))
+        }
         val shelves = 5
         for (k in 0 until shelves) {
             val y = 14f + k * 17f
@@ -131,6 +143,7 @@ object Props {
         val body = HallArt.paint(0xFF22242E.toInt(), 0.12f, 0.7f).full
         val trim = HallArt.solid(color).full
         b.box(p.x0, 0f, p.z0, p.x1, p.height - 12f, p.z1, BoxFaces(front = body, left = body, right = body, top = body, back = body, gloss = 0.5f))
+        rearPanel(b, p.x0 + 2f, p.x1 - 2f, 4f, p.height - 14f, p.z0)
         // Touch screen.
         val scr = TexPaint(256, 192).let { tp ->
             tp.vgrad(0f, 0f, 256f, 192f, 0xFF1A2A6C.toInt(), 0xFF0A0E24.toInt())
@@ -153,6 +166,7 @@ object Props {
         val color = if (soda) 0xFFD81E2E.toInt() else 0xFF2F5BE0.toInt()
         val body = HallArt.paint(color).full
         b.box(p.x0, 0f, p.z0, p.x1, p.height, p.z1, BoxFaces(left = body, right = body, top = body, back = body, gloss = 0.5f))
+        rearPanel(b, p.x0 + 2f, p.x1 - 2f, 4f, p.height - 4f, p.z0)
         // Front: lit window of products plus a side panel with the buttons.
         val front = TexPaint(192, 384).let { tp ->
             tp.vgrad(0f, 0f, 192f, 384f, lift(color, 0.15f), dim(color, 0.7f))
@@ -213,8 +227,8 @@ object Props {
         val leg = BoxFaces(front = metal, left = metal, right = metal, back = metal)
         b.box(p.x0 + 2f, 0f, p.z0 + 2f, p.x0 + 4f, 8f, p.z1 - 2f, leg)
         b.box(p.x1 - 4f, 0f, p.z0 + 2f, p.x1 - 2f, 8f, p.z1 - 2f, leg)
-        b.box(p.x0, 8f, p.z0, p.x1, 10f, p.z1, BoxFaces(front = wood, top = wood, left = wood, right = wood, gloss = 0.3f))
-        b.box(p.x0, 10f, p.z0, p.x1, 18f, p.z0 + 2f, BoxFaces(front = wood, top = wood, left = wood, right = wood, gloss = 0.3f))
+        b.box(p.x0, 8f, p.z0, p.x1, 10f, p.z1, BoxFaces(front = wood, top = wood, left = wood, right = wood, back = wood, gloss = 0.3f))
+        b.box(p.x0, 10f, p.z0, p.x1, 18f, p.z0 + 2f, BoxFaces(front = wood, top = wood, left = wood, right = wood, back = wood, gloss = 0.3f))
     }
 
     private fun pillar(b: ModelBuilder, p: Prop, lights: MutableList<PointLight>) {
@@ -225,9 +239,13 @@ object Props {
         for ((x, z) in listOf(p.x0 to p.z1, p.x1 to p.z1)) {
             b.box(x - 0.6f, 0f, z - 0.6f, x + 0.6f, p.height, z + 0.6f, BoxFaces(front = led, left = led, right = led, frontEmissive = 1.6f))
         }
+        for (x in floatArrayOf(p.x0, p.x1)) {
+            b.quad(x + 0.6f, p.height, p.z0 - 0.02f, x - 0.6f, p.height, p.z0 - 0.02f, x - 0.6f, 0f, p.z0 - 0.02f, x + 0.6f, 0f, p.z0 - 0.02f, led, 0f, 0f, -1f, emissive = 1.6f)
+        }
         // A wrap-around screen band.
         val band = HallArt.lightbox("PLAY MORE", 0xFF8A4FFF.toInt(), -1, 256, 96, 34f).full
-        b.box(p.x0 - 0.5f, 56f, p.z0 - 0.5f, p.x1 + 0.5f, 66f, p.z1 + 0.5f, BoxFaces(front = band, left = band, right = band, frontEmissive = 1.2f))
+        b.box(p.x0 - 0.5f, 56f, p.z0 - 0.5f, p.x1 + 0.5f, 66f, p.z1 + 0.5f, BoxFaces(front = band, left = band, right = band, back = band, top = paint, frontEmissive = 1.2f))
+        b.quad(p.x0 - 0.5f, 56f, p.z1 + 0.5f, p.x1 + 0.5f, 56f, p.z1 + 0.5f, p.x1 + 0.5f, 56f, p.z0 - 0.5f, p.x0 - 0.5f, 56f, p.z0 - 0.5f, paint, 0f, -1f, 0f)
         lights += light(p.centerX, 50f, p.z1 + 6f, 0xFF7A8CFF.toInt(), 55f, 0.6f)
     }
 
@@ -255,6 +273,7 @@ object Props {
     private fun photoBooth(b: ModelBuilder, p: Prop, lights: MutableList<PointLight>) {
         val body = HallArt.paint(0xFFE8E8F0.toInt(), 0.1f, 0.75f).full
         b.box(p.x0, 0f, p.z0, p.x1, p.height, p.z1 - 18f, BoxFaces(front = body, left = body, right = body, top = body, back = body, gloss = 0.4f))
+        rearPanel(b, p.x0 + 5f, p.x1 - 5f, 8f, p.height - 10f, p.z0)
         val curtain = TexPaint(128, 128).let { tp ->
             for (x in 0 until 128 step 8) tp.hgrad(x.toFloat(), 0f, 8f, 128f, 0xFFB0213A.toInt(), 0xFF6A0A1C.toInt())
             tp.toTexture().also { tp.recycle() }
@@ -369,7 +388,8 @@ object Props {
             }
             DecorStyle.FISH_TANK -> {
                 val stand = HallArt.wood(0xFF3A2A22.toInt(), 3).full
-                b.box(p.x0, 0f, p.z0, p.x1, 18f, p.z1, BoxFaces(front = stand, left = stand, right = stand, top = stand, gloss = 0.4f))
+                b.box(p.x0, 0f, p.z0, p.x1, 18f, p.z1, BoxFaces(front = stand, left = stand, right = stand, top = stand, back = stand, gloss = 0.4f))
+                b.quad(p.x1 - 1f, p.height, p.z0 + 1.1f, p.x0 + 1f, p.height, p.z0 + 1.1f, p.x0 + 1f, 18f, p.z0 + 1.1f, p.x1 - 1f, 18f, p.z0 + 1.1f, HallArt.paint(0xFF123A5A.toInt()).full, 0f, 0f, -1f)
                 b.box(p.x0 + 1f, 18f, p.z0 + 1f, p.x1 - 1f, 20f, p.z1 - 1f, BoxFaces(top = HallArt.solid(0xFFE8D8A0.toInt()).full))
                 b.quad(p.x0 + 1f, p.height, p.z0 + 1.2f, p.x1 - 1f, p.height, p.z0 + 1.2f, p.x1 - 1f, 18f, p.z0 + 1.2f, p.x0 + 1f, 18f, p.z0 + 1.2f, HallArt.paint(0xFF1A6AB0.toInt()).full, 0f, 0f, 1f, emissive = 0.7f)
                 for (k in 0 until 4) b.capsule(p.x0 + 6f + k * 9f, 20f, p.z0 + 5f, p.x0 + 7f + k * 9f, 30f + (k % 2) * 6f, p.z0 + 6f, 0.8f, HallArt.paint(0xFF2E9A3E.toInt()).full, slices = 5)
@@ -404,8 +424,9 @@ object Props {
             }
             DecorStyle.TROPHY_CASE -> {
                 val wood = HallArt.wood(0xFF3A2A22.toInt(), 3).full
-                b.box(p.x0, 0f, p.z0, p.x1, 16f, p.z1, BoxFaces(front = wood, left = wood, right = wood, top = wood, gloss = 0.4f))
-                b.box(p.x0, p.height - 3f, p.z0, p.x1, p.height, p.z1, BoxFaces(front = wood, left = wood, right = wood, top = wood, gloss = 0.4f))
+                b.box(p.x0, 0f, p.z0, p.x1, 16f, p.z1, BoxFaces(front = wood, left = wood, right = wood, top = wood, back = wood, gloss = 0.4f))
+                b.box(p.x0, p.height - 3f, p.z0, p.x1, p.height, p.z1, BoxFaces(front = wood, left = wood, right = wood, top = wood, back = wood, gloss = 0.4f))
+                b.quad(p.x1, p.height - 3f, p.z0, p.x0, p.height - 3f, p.z0, p.x0, 16f, p.z0, p.x1, 16f, p.z0, wood, 0f, 0f, -1f)
                 val gold = HallArt.paint(0xFFFFC83D.toInt(), 0.4f, 0.7f).full
                 for (k in 0 until 3) {
                     val tx = p.x0 + 7f + k * 10f

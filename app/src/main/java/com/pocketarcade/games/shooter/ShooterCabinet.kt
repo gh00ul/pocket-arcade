@@ -133,6 +133,8 @@ object ShooterCabinet : CabinetDesign {
         val ix0 = x0 + st
         val ix1 = x1 - st
         b.box(ix0, DECK_Y, z0, ix1, h - 11f, screenZ, BoxFaces(front = art.bezel.full, top = dark, back = dark, gloss = 0.6f))
+        // The back is closed all the way down (the deck's body is open behind otherwise).
+        c.rearPanel(ix0, ix1, 1f, h - 11f)
         val sy0 = DECK_Y + 7f
         val sy1 = sy0 + 26f
         val live = c.liveScreen()
