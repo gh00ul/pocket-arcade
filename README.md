@@ -7,6 +7,7 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
 <p>
   <img src="docs/screenshots/title.png" width="160" alt="Title screen">
   <img src="docs/screenshots/hall.png" width="160" alt="The arcade hall">
+  <img src="docs/screenshots/cafe.png" width="160" alt="The café">
   <img src="docs/screenshots/prize-counter.png" width="160" alt="Prize counter">
   <img src="docs/screenshots/claw.png" width="160" alt="Claw machine">
   <img src="docs/screenshots/skeeball.png" width="160" alt="Skee-ball">
@@ -32,11 +33,13 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
   - at the back, a prize counter with a wall of plushies, flanked by banks of claw machines and stackers;
   - across the floor, skee-ball and basketball alleys, air hockey tables, a whack-a-mole row, a four-machine coin-pusher island and linked racers in the middle;
   - further toward the doors, a row of light-gun cabinets, pinball tables along the right wall and fishing tubs on the left, with two spare banks ready for new machines;
-  - around the edges, a snack bar with café tables and vending machines, and a photo booth;
+  - on the left, a café: a service counter with a pastry case, slushie and soft-serve machines, a lit menu board and a neon sign, diner booths and tables under pendant lamps, on a checked tile floor;
+  - around the edges, vending machines and a photo booth;
   - by the doors, a token kiosk and kiddie rides.
-- Every cabinet is modelled for its game, from glass claw boxes with a working gantry to long lanes, basketball cages, racer seats and pusher shelves that sweep. Each has a live attract-mode screen, a marquee with chasing bulbs, a neon glow and its own coloured light.
-- Blacklight carpet, terrazzo at the entrance, walls rising into the dark with acoustic panels, uplights and a backlit mural, and the street outside through the cut-away shopfront.
-- 3D kids with a walk cycle, poses for playing, cheering and sitting, and hats. Yours follows a floating joystick that appears wherever your thumb lands. The other kids find their way between machines, play them and sit down at the snack bar.
+- Every cabinet is modelled for its game, from glass claw boxes with a working gantry to long lanes, basketball cages, racer seats and pusher shelves that sweep. Each has a live attract-mode screen, a backlit marquee and topper with the game's emblem, painted side art, a lit coin door, chasing bulbs, a neon glow and its own coloured light.
+- A lighting rig: trusses and wall rails with spotlights that throw beams through the haze and coloured pools in front of every bank, backlit murals, a hung TURBO RACEWAY sign with start lights, and chase bulbs round the entrance.
+- Blacklight carpet that fluoresces, terrazzo at the entrance, walls rising into the dark with acoustic panels, uplights and a backlit mural, and the street outside through the cut-away shopfront.
+- 3D kids with a walk cycle, poses for playing, cheering and sitting, and hats. Yours follows a floating joystick that appears wherever your thumb lands. The other kids find their way between machines, play them, queue at the café till and sit down with a drink or a cone. A barista wipes the counter and makes each order at the slushie, espresso or soft-serve station.
 - Collision against walls, cabinets and furniture, with sliding along edges.
 - Walk up to a machine and a **▶ PLAY (1 token)** prompt pops up. Tap it and the camera flies into the screen of the cabinet you're standing at. Exiting flies you back out to exactly where you stood.
 - An ambient arcade soundscape: mains hum, crowd murmur and distant machine bleeps.
@@ -77,12 +80,13 @@ Everything is made in code. The hall and every machine are rendered on the GPU w
   - Per-pixel: ambient, one directional light and up to 64 coloured point lights. A light grid across the floor keeps the many lights cheap.
   - Glossy highlights with per-material sharpness, rim light that lifts cabinets and kids off the dark floor, darkening fog and filmic tone mapping.
   - Normals are transformed with the inverse-transpose, so squashed and stretched models light correctly.
+- **Reflections.** Glossy materials (chrome, glass, polished paint and tiles) reflect a small arcade room painted into a cube map in code. Neon, screens, marquees and bulbs reflect in the glossy floor, gathered from the previous frame's glow at no extra draw cost.
 - **Models.** They are built from boxes, cylinders, lathes, spheres, capsules and tori, and move as jointed parts: the claw's prongs, the mallet's swing, the kids' limbs.
 - **Image quality.**
   - Scenes render with 4× multisampling, alpha-to-coverage for cut-outs, a multi-scale bloom glow, colour grading with dither, and a vignette.
   - Textures use premultiplied alpha, so cut-outs and glows have no dark fringes.
   - The multisampled buffers are discarded after the resolve, which saves memory bandwidth on tile-based phone GPUs.
-  - The render resolution eases down if frames run long.
+  - The render resolution eases down if frames run long and recovers after a hitch; on fast GPUs with timer queries it can go above the usual 0.8.
 - **Textures.** They are painted with Android's `Canvas` (gradients, real fonts, glows and grain). A texture can be stored at a finer resolution than the texel size the code maps it in. Live textures such as cabinet screens reuse their upload buffers instead of allocating a copy every frame.
 - **Stage3D.** Gives each game a 3D view that maps touches onto world planes and world points back to the screen.
 - **GL context loss.** GPU resources are tagged with a process-wide generation, so models and textures cached for the whole app are re-uploaded after the activity is recreated.
