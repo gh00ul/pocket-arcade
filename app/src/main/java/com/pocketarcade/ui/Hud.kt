@@ -1,6 +1,7 @@
 package com.pocketarcade.ui
 
-import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -21,8 +23,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
@@ -39,8 +46,10 @@ fun SaveState.playerLook(): CharacterLook {
 }
 
 /**
- * Token and ticket counters (ticking up when they change) plus collection and sound buttons, and
- * (given [onToggleView]) the camera button switching the hall between overhead and first person.
+ * Token and ticket counters (rolling like an odometer when they change, with [onTick] for a soft
+ * sound) plus collection and sound buttons, and (given [onToggleView]) the camera button switching
+ * the hall between overhead and first person. Given a [fx], the token icon tells it where it is so
+ * a coin can fly out of it.
  */
 @Composable
 fun Hud(
@@ -50,9 +59,9 @@ fun Hud(
     modifier: Modifier = Modifier,
     firstPerson: Boolean = false,
     onToggleView: (() -> Unit)? = null,
+    onTick: (() -> Unit)? = null,
+    fx: CurrencyFx? = null,
 ) {
-    val tokens by animateIntAsState(save.tokens, tween(500), label = "tokens")
-    val tickets by animateIntAsState(save.tickets, tween(900), label = "tickets")
     val pill = RoundedCornerShape(50)
     Row(
         modifier
@@ -71,7 +80,12 @@ fun Hud(
                 // The counters are numbers beside icons: say what they are, once, with the real totals.
                 .clearAndSetSemantics { contentDescription = "${save.tokens} tokens, ${save.tickets} tickets" },
         ) {
-            CurrencyRow(tokens, tickets, unit = 2.6.dp)
+            CurrencyRow(
+                save.tokens, save.tickets, unit = 2.6.dp, onTick = onTick,
+                tokenIconModifier = Modifier.onGloballyPositioned {
+                    fx?.tokenAnchor = it.positionInRoot() + Offset(it.size.width / 2f, it.size.height / 2f)
+                },
+            )
         }
         Spacer(Modifier.weight(1f))
         if (onToggleView != null) {
@@ -81,6 +95,34 @@ fun Hud(
         RoundButton(UiIcon.TROPHY, onProfile, Color(Pal.PURPLE))
         Spacer(Modifier.width(8.dp))
         RoundButton(if (save.muted) UiIcon.MUTED else UiIcon.SOUND, onToggleMute, Color(Pal.TEAL))
+    }
+}
+
+/**
+ * Fades the hall's interface in and out as [visible] changes instead of popping, keeping it
+ * composed while it fades and swallowing touches once it is on its way out (the buttons must not
+ * work under a dive into a machine). Fades in slower than out.
+ */
+@Composable
+fun HudFade(visible: Boolean, content: @Composable () -> Unit) {
+    val alpha by animateFloatAsState(
+        if (visible) 1f else 0f,
+        tween(if (visible) 320 else 180, easing = FastOutSlowInEasing),
+        label = "hudFade",
+    )
+    if (alpha > 0.001f) {
+        Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }) {
+            content()
+            if (!visible) {
+                Box(
+                    Modifier.fillMaxSize().pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                        }
+                    },
+                )
+            }
+        }
     }
 }
 

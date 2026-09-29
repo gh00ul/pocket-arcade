@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -50,12 +49,14 @@ import com.pocketarcade.hub.HubWorld
 import com.pocketarcade.hub.PhotoWall
 import com.pocketarcade.hub.Spot
 import com.pocketarcade.hub.SpotType
+import com.pocketarcade.ui.ArcadeBanner
+import com.pocketarcade.ui.CurrencyFx
+import com.pocketarcade.ui.CurrencyFxLayer
 import com.pocketarcade.ui.GameHostScreen
 import com.pocketarcade.ui.Hud
+import com.pocketarcade.ui.HudFade
 import com.pocketarcade.ui.HudExtras
 import com.pocketarcade.ui.HudExtrasReach
-import com.pocketarcade.ui.ArcadeText
-import com.pocketarcade.ui.GlassBox
 import com.pocketarcade.ui.MapScreen
 import com.pocketarcade.ui.PhotoBoothScreen
 import com.pocketarcade.ui.PrizeCounterScreen
@@ -132,6 +133,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
     var activeGame by remember { mutableIntStateOf(-1) }
     var busy by remember { mutableStateOf(false) }
     var banner by remember { mutableStateOf<String?>(null) }
+    // Coins arcing out of the HUD counter as a token is spent.
+    val currencyFx = remember { CurrencyFx() }
     var diveSpot by remember { mutableStateOf<Spot?>(null) }
     val dive = remember { Animatable(0f) }
     val fade = remember { Animatable(0f) }
@@ -243,6 +246,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             audio.play(Sfx.TOKEN)
             audio.play(Sfx.WHOOSH, 0.8f)
             services.haptics.hit()
+            // The token leaves the counter and flies toward the machine as the camera dives.
+            currencyFx.launch(CurrencyFx.Kind.TOKEN, currencyFx.tokenAnchor, duration = 0.6f)
             diveSpot = spot
             world.cancelInput()
             val fadeIn = launch {
@@ -359,7 +364,7 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                     inputEnabled = overlay == Overlay.NONE && !busy,
                     onSpotTapped = ::onSpot,
                 )
-                if (!busy && dive.value <= 0.01f) {
+                HudFade(visible = !busy && dive.value <= 0.01f) {
                     Hud(
                         save = save,
                         onProfile = {
@@ -371,6 +376,8 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
                             scope.launch { services.repo.setMuted(!save.muted) }
                         },
                         firstPerson = firstPerson,
+                        onTick = { audio.play(Sfx.BLIP, 0.16f, 1.7f) },
+                        fx = currencyFx,
                         onToggleView = {
                             val on = !firstPerson
                             firstPerson = on
@@ -428,19 +435,16 @@ fun ArcadeApp(services: ArcadeServices, signals: AppSignals) {
             }
         }
 
-        banner?.let { text ->
-            Box(
-                Modifier
-                    .align(Alignment.TopCenter)
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    // Under both rows of HUD buttons.
-                    .padding(top = 132.dp, start = 12.dp, end = 12.dp),
-            ) {
-                GlassBox(Modifier.background(Color(0xE6120C22), RoundedCornerShape(16.dp)), highlight = Color(Pal.YELLOW)) {
-                    ArcadeText(text, unit = 2.2.dp, color = Color(Pal.YELLOW), centered = true)
-                }
-            }
-        }
+        CurrencyFxLayer(currencyFx)
+
+        ArcadeBanner(
+            banner,
+            Modifier
+                .align(Alignment.TopCenter)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                // Under both rows of HUD buttons.
+                .padding(top = 132.dp, start = 12.dp, end = 12.dp),
+        )
 
         if (fade.value > 0.001f) {
             Canvas(Modifier.fillMaxSize()) {

@@ -1,5 +1,14 @@
 package com.pocketarcade.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,7 +31,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +54,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -454,16 +469,92 @@ fun GlassBox(modifier: Modifier = Modifier, highlight: Color? = null, content: @
     )
 }
 
-/** Token and ticket counters shown side by side. */
+/** At this many tokens or fewer the token counter pulses, nudging the player toward the token machine. */
+const val LOW_TOKENS = 2
+
+/** The 0..1 breathing of the low-token pulse: idle (a constant 0, and no frames run) unless [active]. */
 @Composable
-fun CurrencyRow(tokens: Int, tickets: Int, modifier: Modifier = Modifier, unit: Dp = 3.dp) {
+private fun rememberLowPulse(active: Boolean): State<Float> {
+    if (!active || !UiMotion.enabled) return remember { mutableFloatStateOf(0f) }
+    return rememberInfiniteTransition(label = "lowTokens").animateFloat(
+        0f, 1f, infiniteRepeatable(tween(820, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "lowTokensPulse",
+    )
+}
+
+/**
+ * Token and ticket counters shown side by side. The numbers roll like an odometer whenever they
+ * change ([RollingNumber]), calling [onTick] as they pass values, and the token count breathes
+ * while it is at [LOW_TOKENS] or under and turns red at zero. [tokenIconModifier] and
+ * [ticketIconModifier] go on the icons, for a screen that needs to know where they are (a coin
+ * flying into a counter).
+ */
+@Composable
+fun CurrencyRow(
+    tokens: Int,
+    tickets: Int,
+    modifier: Modifier = Modifier,
+    unit: Dp = 3.dp,
+    onTick: (() -> Unit)? = null,
+    tokenIconModifier: Modifier = Modifier,
+    ticketIconModifier: Modifier = Modifier,
+) {
+    val pulse = rememberLowPulse(tokens <= LOW_TOKENS)
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        TokenIcon(unit * 9f)
-        Spacer(Modifier.width(6.dp))
-        ArcadeText(tokens.toString(), color = Color(0xFFFFD35A), unit = unit)
+        Row(
+            Modifier.graphicsLayer {
+                val s = 1f + 0.1f * pulse.value
+                scaleX = s
+                scaleY = s
+            },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TokenIcon(unit * 9f, tokenIconModifier)
+            Spacer(Modifier.width(6.dp))
+            RollingNumber(tokens, if (tokens == 0) Color(0xFFFF7A66) else Color(0xFFFFD35A), unit, onTick = onTick)
+        }
         Spacer(Modifier.width(18.dp))
-        TicketIcon(unit * 8f)
+        TicketIcon(unit * 8f, ticketIconModifier)
         Spacer(Modifier.width(6.dp))
-        ArcadeText(tickets.toString(), color = Color(0xFFFFA24A), unit = unit)
+        RollingNumber(tickets, Color(0xFFFFA24A), unit, onTick = onTick)
+    }
+}
+
+/**
+ * The short notice at the top of the screen ("DAILY BONUS", "COMING SOON"): [text] null hides it.
+ * It drops in with a little spring, and fades away rather than vanishing, keeping the words it
+ * last showed while it goes. A new text while it is up gives it a small pop. Reduce motion cuts
+ * straight between shown and hidden.
+ */
+@Composable
+fun ArcadeBanner(text: String?, modifier: Modifier = Modifier) {
+    var last by remember { mutableStateOf(text ?: "") }
+    if (text != null) last = text
+    val shown = remember { Animatable(if (text != null) 1f else 0f) }
+    LaunchedEffect(text) {
+        if (!UiMotion.enabled) {
+            shown.snapTo(if (text != null) 1f else 0f)
+        } else if (text != null) {
+            // Dropping in from above, or a quick re-pop if it was already up with other words.
+            if (shown.value > 0.5f) shown.snapTo(0.82f)
+            shown.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow))
+        } else {
+            shown.animateTo(0f, tween(240, easing = FastOutSlowInEasing))
+        }
+    }
+    if (text != null || shown.value > 0.002f) {
+        Box(
+            modifier.graphicsLayer {
+                val p = shown.value
+                alpha = p.coerceIn(0f, 1f)
+                translationY = -(1f - p) * 36.dp.toPx()
+                val sc = 0.94f + 0.06f * p
+                scaleX = sc
+                scaleY = sc
+            },
+        ) {
+            GlassBox(Modifier.background(Color(0xE6120C22), RoundedCornerShape(16.dp)), highlight = Color(Pal.YELLOW)) {
+                ArcadeText(last, unit = 2.2.dp, color = Color(Pal.YELLOW), centered = true)
+            }
+        }
     }
 }
