@@ -102,7 +102,7 @@ private fun StatTile(value: String, label: String, color: Color, modifier: Modif
     Column(
         modifier
             .cardFrame(color.copy(alpha = 0.55f), tint = color)
-            .semantics(mergeDescendants = true) { contentDescription = "$value ${label.lowercase()}" }
+            .clearAndSetSemantics { contentDescription = "$value ${label.lowercase()}" }
             .padding(horizontal = 4.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -144,7 +144,7 @@ private fun ScoreRow(game: MiniGame, best: Int, plays: Long) {
             .fillMaxWidth()
             .heightIn(min = 44.dp)
             .padding(vertical = 5.dp)
-            .semantics(mergeDescendants = true) { contentDescription = "${game.title.lowercase()}, ${if (played) "best $best" else "not played yet"}" },
+            .clearAndSetSemantics { contentDescription = "${game.title.lowercase()}, ${if (played) "best $best" else "not played yet"}" },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         EmblemChip(game, 38.dp)

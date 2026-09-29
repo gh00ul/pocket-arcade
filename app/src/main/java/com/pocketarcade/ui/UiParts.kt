@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -167,10 +168,13 @@ fun CountdownRing(
             drawCircle(UiColors.well, d / 2f + t / 2f, center)
             drawArc(UiColors.wellEdge, 0f, 360f, false, tl, Size(d, d), style = Stroke(t))
             if (shown > 0.003f) {
-                drawArc(
-                    Brush.sweepGradient(listOf(color.shade(0.7f), color.lift(0.25f), color.shade(0.7f)), center),
-                    -90f, 360f * shown, false, tl, Size(d, d), style = Stroke(t, cap = StrokeCap.Round),
-                )
+                // The gradient runs round from the arc's start (turned up to 12 o'clock), dim to bright at its head.
+                rotate(-90f, center) {
+                    drawArc(
+                        Brush.sweepGradient(0f to color.shade(0.7f), shown.coerceAtLeast(0.02f) to color.lift(0.22f), 1f to color.lift(0.22f), center = center),
+                        0f, 360f * shown, false, tl, Size(d, d), style = Stroke(t, cap = StrokeCap.Round),
+                    )
+                }
                 // The head of the arc catches the light.
                 val a = Math.toRadians((-90f + 360f * shown).toDouble())
                 val head = Offset(center.x + Math.cos(a).toFloat() * d / 2f, center.y + Math.sin(a).toFloat() * d / 2f)

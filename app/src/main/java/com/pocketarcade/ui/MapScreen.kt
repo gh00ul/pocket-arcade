@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -261,9 +262,14 @@ fun MapScreen(world: HubWorld, onGo: (MapPin) -> Unit, onClose: () -> Unit) {
     val youYaw = remember { world.player.yaw }
     var size by remember { mutableStateOf(IntSize.Zero) }
     // Held as State and read only in the "you" layer's draw, so the pulse redraws that layer and nothing else.
-    val pulse = rememberInfiniteTransition(label = "you").animateFloat(
-        0f, 1f, infiniteRepeatable(tween(YOU_PULSE_MILLIS, easing = LinearEasing), RepeatMode.Restart), label = "pulse",
-    )
+    // With reduce motion the ring rests part-way out instead of pulsing.
+    val pulse = if (UiMotion.enabled) {
+        rememberInfiniteTransition(label = "you").animateFloat(
+            0f, 1f, infiniteRepeatable(tween(YOU_PULSE_MILLIS, easing = LinearEasing), RepeatMode.Restart), label = "pulse",
+        )
+    } else {
+        remember { mutableFloatStateOf(0.35f) }
+    }
 
     // Pin boxes in pixels: labels as wide as their text, dots a fixed size, labels spread apart.
     val boxes = remember(pins, size, density) {

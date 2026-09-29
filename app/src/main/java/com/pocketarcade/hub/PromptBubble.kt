@@ -12,6 +12,7 @@ import com.pocketarcade.engine.ArcadeFont
 import com.pocketarcade.engine.Pal
 import com.pocketarcade.ui.UiColors
 import com.pocketarcade.ui.UiIcon
+import com.pocketarcade.ui.UiMotion
 import com.pocketarcade.ui.drawTicket
 import com.pocketarcade.ui.drawToken
 import com.pocketarcade.ui.drawUiIcon
@@ -131,7 +132,9 @@ internal object PromptBubble {
         val accentC = Color(accent)
         val r = CornerRadius(u * 5f)
         val cx = left + width / 2f
-        val glow = GLOW_REST + GLOW_SWING * sin(t * GLOW_RATE)
+        // The pulses are motion: with reduce motion the bubble holds a steady glow and pill.
+        val moving = UiMotion.enabled
+        val glow = GLOW_REST + if (moving) GLOW_SWING * sin(t * GLOW_RATE) else 0f
         glowRoundRect(accentC, Offset(left, top), Size(width, height), r.x, u * 4.5f, glow)
         drawRoundRect(Color.Black, Offset(left, top + u * 1.5f), Size(width, height), r, alpha = 0.35f)
         val pointer = Path().apply {
@@ -171,7 +174,7 @@ internal object PromptBubble {
         val pillTop = top + pad + badge + gap
         val pillX = left + pad
         val pillW = width - pad * 2f
-        val pulse = 0.5f + 0.5f * sin(t * PILL_RATE)
+        val pulse = if (moving) 0.5f + 0.5f * sin(t * PILL_RATE) else 0.5f
         val face = accentC.lift(0.05f + 0.07f * pulse)
         val sink = if (pressed) u * 0.6f else 0f
         val pr = CornerRadius(pillH / 2f)
@@ -190,7 +193,7 @@ internal object PromptBubble {
 
         // The cost or status line, its currency in front.
         val infoY = pillTop + pillH + gap
-        val infoAlpha = if (infoColor == Pal.RED) 0.5f + 0.5f * sin(t * 10f) else 1f
+        val infoAlpha = if (infoColor == Pal.RED && moving) 0.5f + 0.5f * sin(t * 10f) else 1f
         var x = cx - infoW / 2f
         val iconC = Offset(x + smallH * 0.95f, infoY + smallH / 2f)
         when (cost) {

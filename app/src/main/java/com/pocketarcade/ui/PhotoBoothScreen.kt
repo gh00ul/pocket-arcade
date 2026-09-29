@@ -244,7 +244,7 @@ private fun Booth(shots: List<ImageBitmap?>, running: Boolean, step: PhotoBoothP
             // The status light: green READY, or a blinking red REC.
             val lu = size.width * 0.0055f
             val lightC = Offset(inset + arm * 0.35f, inset + arm + lu * 5f)
-            val recOn = running && (elapsed() * 2f).toInt() % 2 == 0
+            val recOn = running && (!UiMotion.enabled || (elapsed() * 2f).toInt() % 2 == 0)
             val lightColor = if (running) Color(Pal.RED) else Color(Pal.GREEN)
             if (!running || recOn) {
                 glowCircle(lightColor, lightC, lu * 2.2f, lu * 3f, 0.4f)
@@ -254,10 +254,12 @@ private fun Booth(shots: List<ImageBitmap?>, running: Boolean, step: PhotoBoothP
             if (running && step.count > 0) {
                 // Each number swells in and settles over its second, with a focus ring closing in on it.
                 val settle = 1f - (elapsed() % PhotoBoothPlan.TICK) / PhotoBoothPlan.TICK
+                // The focus ring's closing is decoration: with reduce motion it stays on the numeral.
+                val ringSettle = if (UiMotion.enabled) settle else 0f
                 val unit = size.height * 0.5f / ArcadeFont.CAP * (1f + NUMERAL_SWELL * settle * settle)
                 val ringR = size.height * 0.27f
                 drawCircle(Color.Black, ringR * 1.05f, center, alpha = 0.32f)
-                drawCircle(Color(Pal.YELLOW), ringR * (1f + FOCUS_RING_SPREAD * settle), center, alpha = 0.75f * (1f - 0.6f * settle), style = Stroke(3.dp.toPx()))
+                drawCircle(Color(Pal.YELLOW), ringR * (1f + FOCUS_RING_SPREAD * ringSettle), center, alpha = 0.75f * (1f - 0.6f * ringSettle), style = Stroke(3.dp.toPx()))
                 drawCircle(Color(Pal.YELLOW), ringR, center, alpha = 0.4f, style = Stroke(1.5.dp.toPx()))
                 ArcadeFont.drawCentered(this, step.count.toString(), size.width / 2f, size.height / 2f - ArcadeFont.height(unit) / 2f, unit, Color(Pal.YELLOW), alpha = 0.95f)
             }
