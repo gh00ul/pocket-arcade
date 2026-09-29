@@ -24,6 +24,9 @@ enum class Room(val rt60: Float, val damping: Float, val wet: Float, val early: 
 
     /** The title: a big, glossy, mostly-tail space that lets the music bloom. */
     TITLE(rt60 = 3.2f, damping = 0.35f, wet = 1.2f, early = 0.3f),
+
+    /** The music bus's own room, always the same wherever the player stands: lush, not for sound effects. */
+    MUSIC(rt60 = 2f, damping = 0.5f, wet = 0.8f, early = 0.25f),
 }
 
 /**

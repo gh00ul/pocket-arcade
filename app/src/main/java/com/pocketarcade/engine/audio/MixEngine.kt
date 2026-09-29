@@ -57,6 +57,9 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
     /** The room the sound effects sound in; changing it crossfades (see [Reverb]). */
     val reverb = Reverb(sampleRate)
 
+    /** The soundtrack, on its own bus with its own reverb and volume. */
+    val music = Music(sampleRate)
+
     // ------------------------------------------------------------ the listener
 
     @Volatile private var listenerX = 0f
@@ -198,10 +201,15 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
         v.fade = 0
     }
 
-    /** Starts the voice a queued request asks for, taking its send from the sound's own default. */
+    /**
+     * Starts the voice a queued request asks for, taking its send from the sound's own default; a big
+     * sound (a jackpot, a fanfare) also ducks the music, as deep as the sound is loud here.
+     */
     private fun startQueued(i: Int) {
         val sfx = Sfx.entries[qSfx[i]]
         startVoice(sfx, qGainL[i], qGainR[i], SfxMix.sendFor(sfx) * qSend[i], qPitch[i], qPriority[i])
+        val depth = SfxMix.duckDepth(sfx)
+        if (depth > 0f) music.duck(depth * minOf(1f, maxOf(qGainL[i], qGainR[i])), SfxMix.duckHold(sfx))
     }
 
     private fun drainQueue() {
@@ -258,6 +266,7 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
     fun render(out: ShortArray) {
         val n = BLOCK
         drainQueue()
+        music.muted = muted
         if (muted) {
             for (v in voices) {
                 v.sound = null
@@ -265,6 +274,7 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
             }
             if (!wasMuted) reverb.reset()
             wasMuted = true
+            music.render(mixL, mixR, n) // lets it shut down; it adds nothing while muted
             java.util.Arrays.fill(out, 0, n * 2, 0)
             return
         }
@@ -275,6 +285,7 @@ internal class MixEngine(val sampleRate: Int) : VoiceSink {
         ambience.render(mixL, mixR, n, this, ambienceVolume, listenerX, listenerZ, listenerYaw)
         mixVoices(n)
         reverb.process(sendBus, n, mixL, mixR)
+        music.render(mixL, mixR, n)
         for (i in 0 until n) {
             out[2 * i] = limit(mixL[i])
             out[2 * i + 1] = limit(mixR[i])
@@ -305,6 +316,26 @@ internal object SfxMix {
 
     /** Fanfares and big moments get the most room. */
     private const val SEND_BIG = 0.34f
+
+    /** How deeply (0 = not at all) a sound ducks the music while it plays, and for how many seconds. */
+    fun duckDepth(sfx: Sfx): Float = when (sfx) {
+        Sfx.JACKPOT -> 0.55f
+        Sfx.HIGHSCORE -> 0.6f
+        Sfx.WIN, Sfx.FINISH, Sfx.LUCKY -> 0.35f
+        Sfx.EXPLOSION -> 0.4f
+        Sfx.BOMB, Sfx.CRASH, Sfx.PRIZE -> 0.28f
+        Sfx.CHEER -> 0.15f
+        else -> 0f
+    }
+
+    fun duckHold(sfx: Sfx): Float = when (sfx) {
+        Sfx.HIGHSCORE -> 2f
+        Sfx.JACKPOT -> 1.3f
+        Sfx.FINISH -> 1.2f
+        Sfx.WIN, Sfx.LUCKY, Sfx.CHEER -> 0.9f
+        Sfx.EXPLOSION -> 0.7f
+        else -> 0.5f
+    }
 
     /** Reverb send when a sound is played without saying otherwise (0 = dry, 1 = as loud as the sound). */
     fun sendFor(sfx: Sfx): Float = when (sfx) {

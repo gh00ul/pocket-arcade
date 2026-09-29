@@ -6,6 +6,8 @@ import android.media.AudioManager
 import android.media.AudioTrack
 import com.pocketarcade.engine.audio.Attract
 import com.pocketarcade.engine.audio.MixEngine
+import com.pocketarcade.engine.audio.Music
+import com.pocketarcade.engine.audio.MusicScene
 import com.pocketarcade.engine.audio.Room
 
 /** Every sound effect in the game. All of them are synthesized at startup; there are no audio files. */
@@ -77,6 +79,32 @@ class AudioSynth {
         set(v) {
             engine.ambienceVolume = v
         }
+
+    /** The music volume as a gain (0 = off), beside [sfxVolume] and [ambienceVolume]. */
+    var musicVolume: Float
+        get() = engine.music.volume
+        set(v) {
+            engine.music.volume = v
+        }
+
+    /**
+     * The soundtrack: scenes, intensity, stingers and ducking (see [Music]). Silenced by [muted] and
+     * [musicVolume]. Most callers want [enterScene], which also moves the room reverb.
+     */
+    val music: Music get() = engine.music
+
+    /**
+     * Goes to a screen's sound: the theme for [scene] (crossfading) and the room to match (the title's
+     * big glossy space, the hall's, or the dry close room inside a game and its results).
+     */
+    fun enterScene(scene: MusicScene) {
+        engine.music.setScene(scene)
+        room = when (scene) {
+            MusicScene.Title -> Room.TITLE
+            MusicScene.Hall -> Room.HALL
+            else -> Room.GAME
+        }
+    }
 
     /**
      * The room the sound effects sound in (hall, inside a game, the title). Changing it
