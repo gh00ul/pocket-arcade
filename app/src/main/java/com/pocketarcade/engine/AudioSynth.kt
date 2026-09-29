@@ -9,6 +9,7 @@ import com.pocketarcade.engine.audio.MixEngine
 import com.pocketarcade.engine.audio.Music
 import com.pocketarcade.engine.audio.MusicScene
 import com.pocketarcade.engine.audio.Room
+import com.pocketarcade.hub.HallSoundSink
 
 /** Every sound effect in the game. All of them are synthesized at startup; there are no audio files. */
 enum class Sfx {
@@ -41,7 +42,7 @@ enum class Sfx {
  * Any thread may call [play] and [playAt]; the rest of the settings and the listener are plain
  * volatile fields, so the UI thread can update them every frame.
  */
-class AudioSynth {
+class AudioSynth : HallSoundSink {
     private val sampleRate: Int = try {
         AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC).takeIf { it in 16000..96000 } ?: 44100
     } catch (_: Exception) {
@@ -145,28 +146,28 @@ class AudioSynth {
      * left or right by where it is, quieter and wetter the further away, silent (and free) when
      * out of earshot.
      */
-    fun playAt(sfx: Sfx, x: Float, z: Float, volume: Float = 1f, pitch: Float = 1f) =
+    override fun playAt(sfx: Sfx, x: Float, z: Float, volume: Float, pitch: Float) =
         engine.playAt(sfx, x, z, volume, pitch)
 
     /**
      * Puts the listener's ears at world point ([x], [z]) facing [yawRad] (0 faces +z, the
      * entrance; the same yaw as the hall's first-person camera). Cheap: call it every frame.
      */
-    fun setListener(x: Float, z: Float, yawRad: Float) = engine.setListener(x, z, yawRad)
+    override fun setListener(x: Float, z: Float, yawRad: Float) = engine.setListener(x, z, yawRad)
 
     /**
      * Tells the ambience where the machines are, so their attract-mode bleeps come from the
      * cabinets: [count] cabinets at ([xs], [zs]), each with the [Attract.kindFor] palette of its
      * game. The arrays are copied.
      */
-    fun setHallSources(xs: FloatArray, zs: FloatArray, kinds: IntArray, count: Int) =
+    override fun setHallSources(xs: FloatArray, zs: FloatArray, kinds: IntArray, count: Int) =
         engine.ambience.setSources(xs, zs, kinds, count)
 
     /** Tells the ambience where the café counter is (its steam wand and cups sound from there). */
-    fun setCafe(x: Float, z: Float) = engine.ambience.setCafe(x, z)
+    override fun setCafe(x: Float, z: Float) = engine.ambience.setCafe(x, z)
 
     /** How busy the hall is around the player, 0..1: the crowd murmur swells with it. */
-    fun setCrowd(level: Float) {
+    override fun setCrowd(level: Float) {
         engine.ambience.crowd = level.coerceIn(0f, 1f)
     }
 
