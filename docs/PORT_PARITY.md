@@ -115,7 +115,7 @@ Save keys (the DataStore's names, kept as they were): `tokens` · `tickets` · `
 | Item | Godot | Status |
 |---|---|---|
 | Versioned save `user://pocket_arcade_save_v1.json` and settings `user://pocket_arcade_settings_v1.json`: typed values (ints as decimal strings), atomic write (tmp + rename), last good generation kept as `.bak`, corrupt file falls back to backup then defaults | `scripts/data/prefs_store.gd` | done: `tests/data/repository_robustness_test.gd` |
-| Repository rules: tokens, refunds, tickets, shop, equip, daily refill, spare token, high scores, top-5 tables, prizes, stats (saturating Long), unlocks, collectibles, arcade name | `scripts/data/arcade_repository.gd`, `save_state.gd`, `score_tables.gd`, `token_gate.gd` | done: `tests/data/*` (repository 28, codecs 21, extras 22, robustness 11, token gate 3, first person 1) |
+| Repository rules: tokens, refunds, tickets, shop, equip, daily refill, spare token, high scores, top-5 tables, prizes, stats (saturating Long), unlocks, collectibles, arcade name | `scripts/data/arcade_repository.gd`, `save_state.gd`, `score_tables.gd`, `token_gate.gd` | done: `tests/data/*` (repository 28, codecs 20, extras 22, robustness 11, token gate 3, first person 1) |
 | Item catalog: 10 hats, 10 outfits, 9 decor, 11 plushies | `scripts/data/catalog.gd` | done |
 | Migration from build-13's two DataStores (every key) and from 2.0.0's JSON (core fields win, owned merged, max high scores, build-13-only data from the DataStore), old files untouched, runs once | `scripts/data/save_migration.gd` | done: `tests/data/save_migration_test.gd` (10 tests); emulator check todo |
 | Photo strips keep their folder and names (`files/photos/strip-*.png`) so they survive the update | `scripts/share/photo_store.gd` | todo |
@@ -363,7 +363,7 @@ Every Kotlin test file and its @Test count: (107 files, 911 @Test)
 | `data/FirstPersonPrefTest.kt` | 1 | `tests/data/first_person_pref_test.gd` | done (1) |
 | `data/RepositoryRobustnessTest.kt` | 8 | `tests/data/repository_robustness_test.gd` | done (8 + 3 Godot-only) |
 | `data/RepositoryTestBase.kt` | 0 | `tests/data/repository_test_base.gd` | done (fixture: `tests/data/repo_fixture.gd`) |
-| `data/SaveCodecsTest.kt` | 20 | `tests/data/save_codecs_test.gd` | done (21) |
+| `data/SaveCodecsTest.kt` | 20 | `tests/data/save_codecs_test.gd` | done (20) |
 | `data/SaveExtrasTest.kt` | 22 | `tests/data/save_extras_test.gd` | done (22) |
 | `data/SettingsStoreTest.kt` | 10 | `tests/data/settings_store_test.gd` | done (10 + 1 Godot-only) |
 | `data/TokenGateTest.kt` | 3 | `tests/data/token_gate_test.gd` | done (3) |

@@ -46,7 +46,7 @@ static func dist(x1: float, y1: float, x2: float, y2: float) -> float:
 
 ## Kotlin's roundToInt(): rounds half up (floor(x + 0.5)), unlike Godot's roundi (half away from zero).
 static func round_to_int(x: float) -> int:
-	return int(floor(x + 0.5))
+	return int(floorf(x + 0.5))
 
 
 ## Kotlin Float.toInt(): truncates toward zero (same as int()), NaN to 0.
