@@ -124,12 +124,12 @@ Save keys (the DataStore's names, kept as they were): `tokens` · `tickets` · `
 
 | Item | Kotlin | Godot | Status |
 |---|---|---|---|
-| 63 synthesized sound effects (list below), rendered once (cached on disk), played from a pool of players so sounds don't cut each other off; volume, pitch | `engine/AudioSynth.kt`, `engine/audio/SfxBank.kt` | `scripts/engine/audio_synth.gd`, `scripts/engine/audio/sfx_bank.gd` | todo |
-| Mixer: priorities, voice stealing, ducking per sfx, reverb send per sfx, limiter, mute, volumes | `engine/audio/MixEngine.kt`, `engine/audio/Dsp.kt` | `scripts/engine/audio/mix_engine.gd` | todo |
-| Positional sound: listener position/yaw, pan law, distance attenuation and wetness | `engine/audio/Spatial.kt` | `scripts/engine/audio/spatial.gd` | todo |
-| Rooms: TITLE / HALL / GAME reverb with crossfade | `engine/audio/Reverb.kt` | `scripts/engine/audio/reverb.gd` | todo |
-| Music: scenes Title, Hall (intensity layers), Results, one theme per machine + fallback; 5 stingers (COUNTDOWN, GO, TIME_UP, RESULTS, HIGH_SCORE) with ducking; quiet (low-pass) under cards; round music intensity | `engine/audio/Music.kt`, `Tracks.kt`, `Score.kt`, `ScorePlayer.kt`, `MusicVoice.kt`, `Patches.kt`, `RoundMusic.kt` | `scripts/engine/audio/*` | todo |
-| Hall ambience: crowd babble, attract bleeps from each cabinet (palette per game), café steam and cups | `engine/audio/HallAmbience.kt` | `scripts/engine/audio/hall_ambience.gd` | todo |
+| 63 synthesized sound effects (list below), rendered once (cached on disk), played from a pool of players so sounds don't cut each other off; volume, pitch | `engine/AudioSynth.kt`, `engine/audio/SfxBank.kt` | `scripts/engine/audio_synth.gd`, `scripts/engine/audio/sfx_bank.gd`, `audio_cache.gd` | done: every `tone()` call ported with its arguments; buffer lengths and note starts in Kotlin's 32-bit float arithmetic (checked); synthesis takes 0.9 s on a desktop core (threads in parallel), first launch only (`tests/engine/audio_synth_test.gd`) |
+| Mixer: priorities, voice stealing, ducking per sfx, reverb send per sfx, limiter, mute, volumes | `engine/audio/MixEngine.kt`, `engine/audio/Dsp.kt` | `scripts/engine/audio/mix_engine.gd`, `audio_buses.gd`, `sfx_mix.gd` | done: 28 voices, each a dry player on its own panned bus plus a send player on the room bus; build-13's steal order, sends and ducks; checked live on the desktop driver (bus peaks) and in `tests/engine/audio/mix_engine_test.gd` |
+| Positional sound: listener position/yaw, pan law, distance attenuation and wetness | `engine/audio/Spatial.kt` | `scripts/engine/audio/spatial.gd`, `placement.gd` | done: exact; Godot's panner is set so it reproduces each voice's left/right gains exactly (`tests/engine/audio/spatial_test.gd`, `mix_engine_test.gd`) |
+| Rooms: TITLE / HALL / GAME reverb with crossfade | `engine/audio/Reverb.kt` | `scripts/engine/audio/reverb_room.gd` | done: Godot's AudioEffectReverb (the same Freeverb layout) set per room from its source; decay, width, return level and stability checked on an offline copy of Godot's algorithm (`tests/engine/audio/reverb_test.gd`); early reflections dropped (Deviations) |
+| Music: scenes Title, Hall (intensity layers), Results, one theme per machine + fallback; 5 stingers (COUNTDOWN, GO, TIME_UP, RESULTS, HIGH_SCORE) with ducking; quiet (low-pass) under cards; round music intensity | `engine/audio/Music.kt`, `Tracks.kt`, `Score.kt`, `ScorePlayer.kt`, `MusicVoice.kt`, `Patches.kt`, `RoundMusic.kt` | control: `scripts/engine/audio/music_control.gd`, `music_scene.gd`, `stinger.gd`, `round_music.gd`; synthesis: build-13's classes unchanged in the Android plugin | control done (`round_music_test.gd`); synthesis in the plugin: todo (Deviations) |
+| Hall ambience: crowd babble, attract bleeps from each cabinet (palette per game), café steam and cups | `engine/audio/HallAmbience.kt` | `scripts/engine/audio/hall_ambience.gd`, `attract.gd` | done: bleeps and café sounds scheduled exactly as build-13 (the same `Random(99)` sequence); hum and murmur rendered once as seamless loops (`tests/engine/audio/hall_ambience_test.gd`) |
 
 Sound effects: `BLIP` `SELECT` `ERROR` `COIN` `TOKEN` `TICKET` `PRINT` `WIN` `JACKPOT` `LOSE`
 `WHACK` `BONK` `BOMB` `POP` `SWISH` `RIM` `BOUNCE` `THUD` `ROLL` `CLAW_MOTOR` `CLAW_GRAB` `DROP`
@@ -189,20 +189,20 @@ Every Kotlin source file (the map is checked by `tools/parity_inventory.py`): (1
 | `data/SettingsStore.kt` | 188 | `scripts/data/settings_store.gd` + `game_settings.gd` + `step_range.gd` | done |
 | `data/TokenGate.kt` | 29 | `scripts/data/token_gate.gd` | done |
 | `engine/ArcadeFont.kt` | 286 | `scripts/engine/arcade_font.gd` | todo |
-| `engine/audio/Dsp.kt` | 51 | `scripts/engine/audio/dsp.gd` | todo |
-| `engine/audio/HallAmbience.kt` | 304 | `scripts/engine/audio/hall_ambience.gd` | todo |
-| `engine/audio/MixEngine.kt` | 355 | `scripts/engine/audio/mix_engine.gd` | todo |
-| `engine/audio/Music.kt` | 376 | `scripts/engine/audio/music.gd` | todo |
-| `engine/audio/MusicVoice.kt` | 352 | `scripts/engine/audio/music_voice.gd` | todo |
-| `engine/audio/Patches.kt` | 262 | `scripts/engine/audio/patches.gd` | todo |
-| `engine/audio/Reverb.kt` | 266 | `scripts/engine/audio/reverb.gd` | todo |
-| `engine/audio/RoundMusic.kt` | 70 | `scripts/engine/audio/round_music.gd` | todo |
-| `engine/audio/Score.kt` | 373 | `scripts/engine/audio/score.gd` | todo |
-| `engine/audio/ScorePlayer.kt` | 212 | `scripts/engine/audio/score_player.gd` | todo |
-| `engine/audio/SfxBank.kt` | 397 | `scripts/engine/audio/sfx_bank.gd` | todo |
-| `engine/audio/Spatial.kt` | 129 | `scripts/engine/audio/spatial.gd` | todo |
-| `engine/audio/Tracks.kt` | 481 | `scripts/engine/audio/tracks.gd` | todo |
-| `engine/AudioSynth.kt` | 254 | `scripts/engine/audio_synth.gd` | todo |
+| `engine/audio/Dsp.kt` | 51 | `scripts/engine/audio/dsp.gd` | done |
+| `engine/audio/HallAmbience.kt` | 304 | `scripts/engine/audio/hall_ambience.gd` | done (loops pre-rendered; see Deviations) |
+| `engine/audio/MixEngine.kt` | 355 | `scripts/engine/audio/mix_engine.gd, audio_buses.gd, sfx_mix.gd, audio_priority.gd, attract.gd` | done (Godot players and buses; see Deviations) |
+| `engine/audio/Music.kt` | 376 | `android-plugin: build-13's Music.kt unchanged; control in scripts/engine/audio/music_control.gd` | kept in Kotlin (plugin) |
+| `engine/audio/MusicVoice.kt` | 352 | `android-plugin: build-13's MusicVoice.kt unchanged; control in scripts/engine/audio/music_control.gd` | kept in Kotlin (plugin) |
+| `engine/audio/Patches.kt` | 262 | `android-plugin: build-13's Patches.kt unchanged; control in scripts/engine/audio/music_control.gd` | kept in Kotlin (plugin) |
+| `engine/audio/Reverb.kt` | 266 | `scripts/engine/audio/reverb_room.gd` | done (AudioEffectReverb mapped; see Deviations) |
+| `engine/audio/RoundMusic.kt` | 70 | `scripts/engine/audio/round_music.gd` | done |
+| `engine/audio/Score.kt` | 373 | `android-plugin: build-13's Score.kt unchanged; control in scripts/engine/audio/music_control.gd` | kept in Kotlin (plugin) |
+| `engine/audio/ScorePlayer.kt` | 212 | `android-plugin: build-13's ScorePlayer.kt unchanged; control in scripts/engine/audio/music_control.gd` | kept in Kotlin (plugin) |
+| `engine/audio/SfxBank.kt` | 397 | `scripts/engine/audio/sfx_bank.gd, sfx.gd, audio_cache.gd` | done |
+| `engine/audio/Spatial.kt` | 129 | `scripts/engine/audio/spatial.gd, placement.gd` | done |
+| `engine/audio/Tracks.kt` | 481 | `android-plugin: build-13's Tracks.kt unchanged; control in scripts/engine/audio/music_control.gd` | kept in Kotlin (plugin) |
+| `engine/AudioSynth.kt` | 254 | `scripts/engine/audio_synth.gd` | done |
 | `engine/GameLoop.kt` | 85 | `scripts/engine/game_loop.gd` | todo |
 | `engine/gl/FrameStats.kt` | 205 | `scripts/engine/gl/frame_stats.gd` | todo |
 | `engine/gl/Gfx.kt` | 121 | `scripts/engine/gl/gfx.gd` | todo |
@@ -367,13 +367,13 @@ Every Kotlin test file and its @Test count: (107 files, 911 @Test)
 | `data/SaveExtrasTest.kt` | 22 | `tests/data/save_extras_test.gd` | done (22) |
 | `data/SettingsStoreTest.kt` | 10 | `tests/data/settings_store_test.gd` | done (10 + 1 Godot-only) |
 | `data/TokenGateTest.kt` | 3 | `tests/data/token_gate_test.gd` | done (3) |
-| `engine/audio/HallAmbienceTest.kt` | 8 | `tests/engine/audio/hall_ambience_test.gd` | todo |
-| `engine/audio/MixEngineTest.kt` | 12 | `tests/engine/audio/mix_engine_test.gd` | todo |
-| `engine/audio/MusicTest.kt` | 21 | `tests/engine/audio/music_test.gd` | todo |
-| `engine/audio/ReverbTest.kt` | 8 | `tests/engine/audio/reverb_test.gd` | todo |
-| `engine/audio/RoundMusicTest.kt` | 4 | `tests/engine/audio/round_music_test.gd` | todo |
-| `engine/audio/SpatialTest.kt` | 11 | `tests/engine/audio/spatial_test.gd` | todo |
-| `engine/AudioSynthTest.kt` | 1 | `tests/engine/audio_synth_test.gd` | todo |
+| `engine/audio/HallAmbienceTest.kt` | 8 | `tests/engine/audio/hall_ambience_test.gd` | done (8 + 1 Godot) |
+| `engine/audio/MixEngineTest.kt` | 12 | `tests/engine/audio/mix_engine_test.gd` | adapted (12 + 4 Godot; see section 11 note) |
+| `engine/audio/MusicTest.kt` | 21 | `android-plugin/src/test (build-13's MusicTest.kt unchanged)` | kept in Kotlin: runs on the JVM in CI with the plugin's music |
+| `engine/audio/ReverbTest.kt` | 8 | `tests/engine/audio/reverb_test.gd` | adapted (7 of 8 on a copy of Godot's reverb + 1 Godot; idle-cost test dropped) |
+| `engine/audio/RoundMusicTest.kt` | 4 | `tests/engine/audio/round_music_test.gd` | done (4 + 1 Godot) |
+| `engine/audio/SpatialTest.kt` | 11 | `tests/engine/audio/spatial_test.gd` | done (11) |
+| `engine/AudioSynthTest.kt` | 1 | `tests/engine/audio_synth_test.gd` | done (1 + 5 Godot) |
 | `engine/CameraPunchTest.kt` | 11 | `tests/engine/camera_punch_test.gd` | todo |
 | `engine/FlickTrackerTest.kt` | 5 | `tests/engine/flick_tracker_test.gd` | todo |
 | `engine/gl/GfxQualityTest.kt` | 15 | `tests/engine/gl/gfx_quality_test.gd` | todo |
@@ -492,3 +492,10 @@ Decisions made without stopping to ask, and anything that could not be matched e
 | Randomness | `KRandom` is a bit-exact port of Kotlin's `XorWowRandom` (checked against kotlin-stdlib 2.2.20); `MathUtil.hash01` emulates 32-bit Int overflow. | Seeded rounds, bot simulations and procedural art make the same choices as build-13. Float maths is 64-bit in GDScript (32-bit in Kotlin), so long simulations can drift by rounding; tests compare behaviour and thresholds, not bit-exact trajectories. |
 | Tests | Kotlin tests of DataStore internals (custom corruption handler disabled) are ported against the Godot store's equivalent failure (writes refused). | Same promise (never crash, report failure), different storage. |
 | Tests | `tools/run_tests.sh` imports the project then runs `res://tests/run_tests.tscn`. | New `class_name` scripts are only resolvable after an import. |
+| Sound | The soundtrack is build-13's own synthesizer (`Music`, `ScorePlayer`, `MusicVoice`, `Patches`, `Score`, `Tracks` and its `Reverb`, unchanged) running natively in the Android plugin on its own low-latency AudioTrack, as build-13 ran it; GDScript drives it through `MusicControl`. Desktop runs have no music. build-13's `MusicTest` runs on the JVM in CI against those same classes. | A themed loop holds 20 to 30 subtractive voices at once. A MusicVoice-shaped loop measured 2.0M voice-samples/s on one desktop core in GDScript; a phone is 3 to 4 times slower and the music needs about 1M/s at a busy moment, so real-time GDScript music would take a whole phone core. Pre-rendering every theme's layers instead would take minutes on a phone and hundreds of MB (about 400 s of music in 3 stereo layers), and MusicTest renders minutes of music, which would take GDScript many minutes per run. |
+| Sound | Sound effects and ambience are rendered once in GDScript and played by Godot's mixer: each voice is a dry player on its own bus with an AudioEffectPanner (pan and volume chosen so its left and right gains equal build-13's exactly) and a send player on the reverb bus. A stolen voice's player is restarted and Godot fades the old sound over 64 samples (build-13: a 96-frame fade in a spare slot). | The requested design (pre-rendered once, played from a player pool); Godot does the per-sample mixing natively. |
+| Sound | Room reverb is Godot's AudioEffectReverb, set from 4.6.2's `reverb_filter.cpp`: comb feedback from the room's rt60 (Godot's shortest tail is about 0.6 s, so GAME rings for 0.6 s instead of 0.5 s), damping and wet matched to build-13's filter coefficient and return level, a 16 ms AudioEffectDelay as the pre-delay, and the 140 Hz high-pass. Rooms still glide (0.35 s time constant). build-13's five early-reflection taps per ear are not reproduced. | Godot's reverb is the same Freeverb design but has no early-reflection stage; building one would need a third player per voice. |
+| Sound | build-13's soft clip (`x - x^3/6.75` after the 0.85 master gain) is an AudioEffectAmplify (0.85) and an AudioEffectHardLimiter (ceiling -0.3 dB) on the output bus. | Godot has no cubic soft clipper; the limiter stops stacked voices from clipping, which was the clip's job. |
+| Sound | The hum (20 s, whole cycles of 55/110/165.3 Hz) and the crowd murmur (two cycles of its 0.11 Hz swell, about 18 s, the end crossfaded into the start) are pre-rendered loops; their levels (target, crowd, ambience volume) follow build-13's per-block easing exactly. The murmur's noise comes from Godot's RandomNumberGenerator with build-13's seeds, not Kotlin's Random. | build-13 synthesized them live. Kotlin's Random ported to GDScript made the loop take 4.7 s to render; Godot's generator takes 0.4 s, and the murmur is noise either way. |
+| Sound | Synthesis runs in 64-bit floats; buffer lengths and note start samples use Kotlin's 32-bit float arithmetic (so the jackpot's buffer is 62401 samples, as in build-13). Noise in the sound effects comes from the same seeded Random, so the sequence is the same, though a phase wrap can land a sample apart. | Bit-exact 32-bit synthesis isn't practical in GDScript; the sounds are the same to the ear. |
+| Sound | The sounds are synthesized on worker threads at first launch (about 0.9 s on a desktop core, an estimated 3 s on a phone) and cached in `user://cache` (16-bit PCM, about 7 MB, magic word and hash checked); later launches load them. Requests before they are ready are ignored, as build-13's were before its bank existed. | build-13 synthesized everything natively at every start (about 0.2 s); GDScript is slower, so the work is kept off the main thread and done once. |
