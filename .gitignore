@@ -29,3 +29,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Godot
+godot/.godot/
+godot/android/
+godot/addons/pocket_arcade_android/bin/
+*.tmp

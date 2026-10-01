@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="432" height="432" viewBox="0 0 108 108">
+<!-- The adaptive icon's foreground layer: res/drawable/ic_launcher_foreground.xml, path for path. -->
+<path fill="#FF3FA4" d="M30,22h48v12h-48z"/>
+<path fill="#FFE14D" d="M34,26h4v4h-4z M42,26h4v4h-4z M50,26h4v4h-4z M58,26h4v4h-4z M66,26h4v4h-4z"/>
+<path fill="#7B3FE4" d="M30,34h48v52h-48z"/>
+<path fill="#5224A8" d="M30,34h4v52h-4z M74,34h4v52h-4z"/>
+<path fill="#1A1030" d="M34,38h40v24h-40z"/>
+<path fill="#0B2A3A" d="M38,42h32v16h-32z"/>
+<path fill="#3DF5FF" d="M47,42h2v2h-2z M59,42h2v2h-2z M49,44h2v2h-2z M57,44h2v2h-2z M47,46h14v2h-14z M45,48h4v2h-4z M51,48h6v2h-6z M59,48h4v2h-4z M43,50h22v2h-22z M43,52h2v2h-2z M47,52h14v2h-14z M63,52h2v2h-2z M43,54h2v2h-2z M47,54h2v2h-2z M59,54h2v2h-2z M63,54h2v2h-2z M49,56h4v2h-4z M55,56h4v2h-4z"/>
+<path fill="#3A1A7A" d="M26,62h56v8h-56z"/>
+<path fill="#101010" d="M40,64h2v4h-2z"/>
+<path fill="#FF4D4D" d="M38,59h6v6h-6z"/>
+<path fill="#FFE14D" d="M54,64h4v4h-4z"/>
+<path fill="#3DF5FF" d="M62,64h4v4h-4z"/>
+<path fill="#2A1460" d="M46,70h16v12h-16z M30,82h48v4h-48z"/>
+<path fill="#FFC83D" d="M52,73h4v6h-4z"/>
+</svg>
