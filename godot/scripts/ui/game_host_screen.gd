@@ -175,17 +175,31 @@ func _draw() -> void:
 	_draw_close_button(ds)
 
 
+## build-13's drawHost layout for a screen of [param screen] dp with safe-area [param insets]
+## (left, top, right, bottom, dp) at [param px_per_dp]: the top bar's height, then the field's left,
+## top and scale (dp per field unit) as (bar_h, gx, gy, gs). The field fills the width or the height
+## left under the bar, whichever is smaller, centred: at any aspect the rest is bezel.
+static func field_layout(screen: Vector2, insets: Vector4, px_per_dp: float) -> Vector4:
+	var unit := maxf(floorf(2.0 * px_per_dp), 2.0) / px_per_dp
+	var bar_h := insets.y + 42.0 * unit
+	var avail_h := screen.y - bar_h - insets.w - 6.0 * unit
+	var gs := minf(screen.x / MiniGame.GAME_W, avail_h / MiniGame.GAME_H)
+	var gx := (screen.x - MiniGame.GAME_W * gs) / 2.0
+	var gy := bar_h + maxf((avail_h - MiniGame.GAME_H * gs) / 2.0, 0.0)
+	return Vector4(bar_h, gx, gy, gs)
+
+
 func _draw_host(ds: DrawScope) -> void:
 	var w := size.x
 	var h := size.y
 	var unit := maxf(floorf(2.0 * Display.density), 2.0) / Display.density
-	var bar_h := _top_inset + 42.0 * unit
-	var avail_h := h - bar_h - _bottom_inset - 6.0 * unit
-	var gs := minf(w / MiniGame.GAME_W, avail_h / MiniGame.GAME_H)
+	var lay := field_layout(size, Vector4(0.0, _top_inset, 0.0, _bottom_inset), Display.density)
+	var bar_h := lay.x
+	var gs := lay.w
 	var gw := MiniGame.GAME_W * gs
 	var gh := MiniGame.GAME_H * gs
-	var gx := (w - gw) / 2.0
-	var gy := bar_h + maxf((avail_h - gh) / 2.0, 0.0)
+	var gx := lay.y
+	var gy := lay.z
 	round.gx = gx
 	round.gy = gy
 	round.gs = gs
