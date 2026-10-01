@@ -8,6 +8,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the APK as a GitHub Release (off to only build and test)
+        type: boolean
+        default: true
 
 concurrency:
   group: build-apk-${{ github.ref }}
@@ -144,6 +149,7 @@ jobs:
             releases/SHA256SUMS.txt
 
       - name: Publish GitHub Release
+        if: github.event_name == 'push' || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

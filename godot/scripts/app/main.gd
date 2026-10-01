@@ -26,6 +26,8 @@ var back_handler: Callable = Callable()
 var launch_game := ""
 ## Where screens go.
 var app_root: Control
+## Where the 3D pictures go (Gfx.host), under the screens.
+var gfx_layer: Control
 
 
 func _enter_tree() -> void:
@@ -50,9 +52,16 @@ func _ready() -> void:
 		audio.start()
 	services = ArcadeServices.open(user_dir, audio)
 	launch_game = AndroidBridge.take_launch_game()
+	# The 3D pictures (hall, title, machines) draw in this layer, under every piece of UI.
+	gfx_layer = Control.new()
+	gfx_layer.name = "Gfx"
+	gfx_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gfx_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(gfx_layer)
+	Gfx.host = gfx_layer
 	app_root = Control.new()
 	app_root.name = "App"
-	app_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	app_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(app_root)
 	_start_app()
 
@@ -68,7 +77,7 @@ func _start_app() -> void:
 		return
 	var check := FoundationCheck.new()
 	check.main = self
-	check.set_anchors_preset(Control.PRESET_FULL_RECT)
+	check.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	app_root.add_child(check)
 
 
@@ -111,11 +120,11 @@ class FoundationCheck:
 	func _ready() -> void:
 		var bg := ColorRect.new()
 		bg.color = Pal.c(Pal.NIGHT)
-		bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		add_child(bg)
 		_label = Label.new()
-		_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
