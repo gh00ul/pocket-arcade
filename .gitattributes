@@ -1,5 +1,8 @@
-* text=auto
-gradlew text eol=lf
-*.bat text eol=crlf
-*.jar binary
+# Keep LF everywhere (Godot, shell, Python); the Kotlin tree is left as it is.
+godot/** text eol=lf
+tools/** text eol=lf
+docs/** text eol=lf
+.github/** text eol=lf
+*.png binary
+*.jks binary
 *.keystore binary

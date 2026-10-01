@@ -25,8 +25,10 @@ var version := 0
 ## Bumped whenever [method gpu] would hand out a different texture object.
 var gpu_version := 0
 
-## Straight-alpha RGBA8 pixels at the stored size, or null while a painter hasn't delivered them.
+## RGBA8 pixels at the stored size, or null while a painter hasn't delivered them.
 var image: Image = null
+## Whether [member image] is already premultiplied (a painter's read-back) or straight alpha.
+var premultiplied := false
 var _gpu: Texture2D = null
 var _uploaded := -1
 var _full: Region = null
@@ -107,6 +109,12 @@ func touch() -> void:
 	version += 1
 
 
+## A live texture's painter repainted it in place (the GPU image is the painter's viewport).
+func touch_live() -> void:
+	version += 1
+	_uploaded = version
+
+
 ## Hands the texture a GPU image made elsewhere (a painter's viewport while it is read back).
 func set_gpu(t: Texture2D) -> void:
 	_gpu = t
@@ -120,7 +128,8 @@ func gpu() -> Texture2D:
 		var img := image.duplicate() as Image
 		if img.get_format() != Image.FORMAT_RGBA8:
 			img.convert(Image.FORMAT_RGBA8)
-		img.premultiply_alpha()
+		if not premultiplied:
+			img.premultiply_alpha()
 		if smooth:
 			img.generate_mipmaps()
 		if _gpu is ImageTexture and _gpu.get_width() == img.get_width() and _gpu.get_height() == img.get_height() and (_gpu as ImageTexture).get_format() == img.get_format() and img.has_mipmaps() == _gpu_has_mips:

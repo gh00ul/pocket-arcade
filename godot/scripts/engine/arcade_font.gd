@@ -169,7 +169,7 @@ static func _run(ci: CanvasItem, xf: Transform2D, s: String, x: float, y: float,
 			continue
 		# Glyphs are drawn at an integer size scaled to the exact fractional one.
 		ci.draw_set_transform_matrix(xf * Transform2D(0.0, Vector2(k, k), 0.0, Vector2(pen, baseline)))
-		font.draw_char(ci, Vector2.ZERO, ch.unicode_at(0), fsize, col)
+		font.draw_char(ci.get_canvas_item(), Vector2.ZERO, ch.unicode_at(0), fsize, col)
 		pen += _advance(font, ch, size) + sp
 	ci.draw_set_transform_matrix(xf)
 

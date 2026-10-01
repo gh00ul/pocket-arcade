@@ -145,7 +145,7 @@ func _fill(pts: PackedVector2Array, paint: Variant, alpha: float) -> void:
 		var uvs := PackedVector2Array()
 		uvs.resize(pts.size())
 		for i in pts.size():
-			uvs[i] = Vector2(b.coord(pts[i], bounds), 0.5)
+			uvs[i] = b.uv(pts[i], bounds)
 		ci.draw_polygon(pts, PackedColorArray([Color(1, 1, 1, alpha)]), uvs, b.texture())
 	else:
 		ci.draw_colored_polygon(pts, _color(paint, alpha))
