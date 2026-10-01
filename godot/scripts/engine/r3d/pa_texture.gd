@@ -59,6 +59,14 @@ static func from_argb(w: int, h: int, argb: PackedInt32Array, s: int = 1) -> PaT
 	return t
 
 
+## The ARGB value of stored pixel ([param x], [param y]), straight alpha (tests and pixel art checks).
+func argb_at(x: int, y: int) -> int:
+	if image == null:
+		return 0
+	var c := image.get_pixel(x, y)
+	return (c.a8 << 24) | (c.r8 << 16) | (c.g8 << 8) | c.b8
+
+
 ## A texture of one colour (TexKit.solid).
 static func solid(w: int, h: int, argb_color: int) -> PaTexture:
 	var img := Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
