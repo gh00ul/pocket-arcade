@@ -35,3 +35,7 @@ godot/.godot/
 godot/android/
 godot/addons/pocket_arcade_android/bin/
 *.tmp
+
+# Reference screenshots of build-13 (large; kept locally for comparison work)
+docs/parity/ref/
+releases/

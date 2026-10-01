@@ -161,11 +161,11 @@ Sound effects: `BLIP` `SELECT` `ERROR` `COIN` `TOKEN` `TICKET` `PRINT` `WIN` `JA
 | Item | Kotlin | Godot | Status |
 |---|---|---|---|
 | Multi-touch DOWN/MOVE/UP in field units, pointer ids, `cancelInput` on pause/end | `GameHostScreen.kt` | `scripts/ui/game_host_screen.gd` | todo |
-| Every batched (historical) touch sample delivered with its own time; unbuffered dispatch while playing | `GameHostScreen.kt` | `android-plugin/` + `scripts/engine/touch_input.gd` | todo |
-| `FlickTracker` (90 ms window) | `engine/Touch.kt` | `scripts/engine/flick_tracker.gd` | todo |
-| Back-gesture exclusion: 80 × 200 dp at the bottom of each side, game screen only | `engine/Touch.kt` | `android-plugin/` | todo |
-| Haptics: tick, hit, heavy, soft, bump, rumble, win, jackpot; primitives (API 30+) or waveforms; strength scaling; rate limits | `engine/Haptics.kt` | `scripts/engine/haptics.gd` + `android-plugin/` | todo |
-| Tilt steering: game rotation vector or accelerometer, dead zone, curve | `engine/TiltSteer.kt` | `scripts/engine/tilt_steer.gd` | todo |
+| Every batched (historical) touch sample delivered with its own time; unbuffered dispatch while playing | `GameHostScreen.kt` | `android-plugin/.../TouchRecorder.kt` + `scripts/engine/touch_input.gd` | done: the plugin records every MotionEvent sample (history first, each at its event time, only moved pointers) and the host reads them in order on Godot's clock; desktop uses Godot's touch events (`tests/engine/touch_input_test.gd`); exercised in a round on the emulator: todo |
+| `FlickTracker` (90 ms window) | `engine/Touch.kt` | `scripts/engine/flick_tracker.gd` | done (`tests/engine/flick_tracker_test.gd`, 5) |
+| Back-gesture exclusion: 80 × 200 dp at the bottom of each side, game screen only | `engine/Touch.kt` | `TouchInput.thumb_zones` + plugin `setGestureExclusion` (API 29+) | done: zones match build-13's (`touch_input_test.gd`); the host sets them: todo |
+| Haptics: tick, hit, heavy, soft, bump, rumble, win, jackpot; primitives (API 30+) or waveforms; strength scaling; rate limits | `engine/Haptics.kt` | `scripts/engine/haptics.gd` + `android-plugin/` | done: every pattern, fallback, strength and gap as build-13 (`tests/engine/haptics_test.gd`, 11); on the emulator a hit played `Primitive=CLICK(scale=0.70)` with usage TOUCH (`dumpsys vibrator_manager`) |
+| Tilt steering: game rotation vector or accelerometer, dead zone, curve | `engine/TiltSteer.kt` | `scripts/engine/tilt_steer.gd`, `tilt_math.gd` + plugin `TiltReader.kt` | done (`tests/engine/tilt_math_test.gd`, 6); on a real phone: todo |
 | Safe area (cutouts) and edge-to-edge 16:9 … 21:9 | Compose insets | `scripts/app/display.gd` | todo |
 
 ## 9. Accessibility
@@ -218,7 +218,7 @@ Every Kotlin source file (the map is checked by `tools/parity_inventory.py`): (1
 | `engine/gl/RestartPolicy.kt` | 48 | `dropped: Godot owns the GL context and its loss` | todo |
 | `engine/gl/ScalePacer.kt` | 219 | `scripts/engine/gl/scale_pacer.gd` | todo |
 | `engine/gl/Warmup.kt` | 75 | `scripts/engine/gl/warmup.gd` | todo |
-| `engine/Haptics.kt` | 256 | `scripts/engine/haptics.gd` | todo |
+| `engine/Haptics.kt` | 256 | `scripts/engine/haptics.gd` | done |
 | `engine/Juice.kt` | 339 | `scripts/engine/juice.gd` | todo |
 | `engine/MathUtil.kt` | 59 | `scripts/engine/math_util.gd` | wip: `math_util.gd`, `k_random.gd`, `k_parse.gd` |
 | `engine/Painter.kt` | 26 | `scripts/engine/painter.gd` | todo |
@@ -236,8 +236,8 @@ Every Kotlin source file (the map is checked by `tools/parity_inventory.py`): (1
 | `engine/r3d/TexKit.kt` | 34 | `scripts/engine/r3d/tex_kit.gd` | todo |
 | `engine/r3d/TexPaint.kt` | 361 | `scripts/engine/r3d/tex_paint.gd` | todo |
 | `engine/r3d/Texture.kt` | 112 | `scripts/engine/r3d/texture.gd` | todo |
-| `engine/TiltSteer.kt` | 121 | `scripts/engine/tilt_steer.gd` | todo |
-| `engine/Touch.kt` | 98 | `scripts/engine/touch.gd` | todo |
+| `engine/TiltSteer.kt` | 121 | `scripts/engine/tilt_steer.gd, tilt_math.gd + android-plugin TiltReader.kt` | done |
+| `engine/Touch.kt` | 98 | `scripts/engine/touch_type.gd, flick_tracker.gd, touch_input.gd` | done (TouchType, FlickTracker, thumb zones) |
 | `games/airhockey/AirHockeyGame.kt` | 561 | `scripts/games/airhockey/air_hockey_game.gd` | todo |
 | `games/airhockey/HockeyArt.kt` | 219 | `scripts/games/airhockey/hockey_art.gd` | todo |
 | `games/airhockey/HockeyScene.kt` | 513 | `scripts/games/airhockey/hockey_scene.gd` | todo |
@@ -318,8 +318,8 @@ Every Kotlin source file (the map is checked by `tools/parity_inventory.py`): (1
 | `hub/TitleShowcase.kt` | 179 | `scripts/hub/title_showcase.gd` | todo |
 | `hub/TitleUnits.kt` | 87 | `scripts/hub/title_units.gd` | todo |
 | `hub/WalkRoute.kt` | 169 | `scripts/hub/walk_route.gd` | todo |
-| `MainActivity.kt` | 77 | `scripts/app/main.gd + android plugin (lifecycle, immersive mode, `play` extra)` | todo |
-| `share/PhotoShare.kt` | 46 | `scripts/share/photo_share.gd` | todo |
+| `MainActivity.kt` | 77 | `scripts/app/main.gd + android plugin` | done (Back, pause/resume, play extra, immersive via export) |
+| `share/PhotoShare.kt` | 46 | `android-plugin PocketArcadePlugin.sharePng + AndroidBridge.share_png` | done (plugin sharePng, PhotoProvider) |
 | `share/PhotoStore.kt` | 65 | `scripts/share/photo_store.gd` | todo |
 | `share/PhotoStrip.kt` | 103 | `scripts/share/photo_strip.gd` | todo |
 | `share/PhotoStripArt.kt` | 86 | `scripts/share/photo_strip_art.gd` | todo |
@@ -375,7 +375,7 @@ Every Kotlin test file and its @Test count: (107 files, 911 @Test)
 | `engine/audio/SpatialTest.kt` | 11 | `tests/engine/audio/spatial_test.gd` | done (11) |
 | `engine/AudioSynthTest.kt` | 1 | `tests/engine/audio_synth_test.gd` | done (1 + 5 Godot) |
 | `engine/CameraPunchTest.kt` | 11 | `tests/engine/camera_punch_test.gd` | todo |
-| `engine/FlickTrackerTest.kt` | 5 | `tests/engine/flick_tracker_test.gd` | todo |
+| `engine/FlickTrackerTest.kt` | 5 | `tests/engine/flick_tracker_test.gd` | done (5) |
 | `engine/gl/GfxQualityTest.kt` | 15 | `tests/engine/gl/gfx_quality_test.gd` | todo |
 | `engine/gl/GfxTakeTest.kt` | 3 | `tests/engine/gl/gfx_take_test.gd` | todo |
 | `engine/gl/GlGenerationTest.kt` | 3 | `tests/engine/gl/gl_generation_test.gd` | todo |
@@ -383,7 +383,7 @@ Every Kotlin test file and its @Test count: (107 files, 911 @Test)
 | `engine/gl/HdrPlanTest.kt` | 11 | `tests/engine/gl/hdr_plan_test.gd` | todo |
 | `engine/gl/RestartPolicyTest.kt` | 5 | `tests/engine/gl/restart_policy_test.gd` | todo |
 | `engine/gl/ScalePacerTest.kt` | 16 | `tests/engine/gl/scale_pacer_test.gd` | todo |
-| `engine/HapticsTest.kt` | 5 | `tests/engine/haptics_test.gd` | todo |
+| `engine/HapticsTest.kt` | 5 | `tests/engine/haptics_test.gd` | done (5 + 6 Godot) |
 | `engine/ParticlesGlTest.kt` | 12 | `tests/engine/particles_gl_test.gd` | todo |
 | `engine/r3d/EngineFixesTest.kt` | 8 | `tests/engine/r3d/engine_fixes_test.gd` | todo |
 | `engine/r3d/FrustumTest.kt` | 6 | `tests/engine/r3d/frustum_test.gd` | todo |
@@ -392,7 +392,7 @@ Every Kotlin test file and its @Test count: (107 files, 911 @Test)
 | `engine/r3d/ReflectionTest.kt` | 7 | `tests/engine/r3d/reflection_test.gd` | todo |
 | `engine/r3d/Renderer3DTest.kt` | 6 | `tests/engine/r3d/renderer3_d_test.gd` | todo |
 | `engine/SimClockTest.kt` | 5 | `tests/engine/sim_clock_test.gd` | todo |
-| `engine/TiltMathTest.kt` | 5 | `tests/engine/tilt_math_test.gd` | todo |
+| `engine/TiltMathTest.kt` | 5 | `tests/engine/tilt_math_test.gd` | done (5 + 1 Godot) |
 | `engine/TimeScaleTest.kt` | 17 | `tests/engine/time_scale_test.gd` | todo |
 | `games/airhockey/AirHockeyBuzzerTest.kt` | 3 | `tests/games/airhockey/air_hockey_buzzer_test.gd` | todo |
 | `games/airhockey/HockeySceneTest.kt` | 3 | `tests/games/airhockey/hockey_scene_test.gd` | todo |
@@ -470,16 +470,16 @@ Every Kotlin test file and its @Test count: (107 files, 911 @Test)
 
 | # | Bug in 2.0.0 | Regression test | Status |
 |---|---|---|---|
-| 1 | Android Back quit the app (`quit_on_go_back` left true; the test called the handler directly) | `tests/bugs/back_button_test.gd`: asserts the project setting and the tree flag, drives Back through the root window's `go_back_requested` | todo |
+| 1 | Android Back quit the app (`quit_on_go_back` left true; the test called the handler directly) | `tests/bugs/back_button_test.gd`: asserts the project setting, drives Back through the root window's `go_back_requested`, a screen claims it or the app goes to the background | done; on the emulator Back sent the app to the background (same process, audio paused) and it resumed |
 | 2 | Numbers came back as decimals ("0.0 tickets", "BEST 450.0") | `tests/data/repository_robustness_test.gd::test_every_number_comes_back_as_an_int`, `tests/data/save_migration_test.gd::test_a_2_0_0_save_comes_back_with_whole_numbers`, `tests/bugs/numbers_test.gd` (UI strings) | partly done |
 | 3 | Black bars on tall phones (540×960, aspect `keep`) | `tests/bugs/edge_to_edge_test.gd`: 16:9 … 21:9 fill the window, touch UI inside the safe area | todo |
 | 4 | Hall cabinet high scores stale after a round | `tests/bugs/hall_labels_test.gd` | todo |
-| 5 | 76 MB APK (three ABIs) | CI: arm64-v8a only, size reported | todo |
+| 5 | 76 MB APK (three ABIs) | CI: arm64-v8a only (fails on any other ABI's code), size reported in the job summary | done: 26.1 MB (Godot's engine library is 67.6 MB uncompressed, 22 MB compressed; build-13 was 7.6 MB) |
 | 6 | One material and mesh per object (583 hall / 1,201 racer draw calls) | `tests/bugs/draw_call_budget_test.gd` + measured budgets per scene | todo |
-| 7 | Fixed version numbers | CI patches `version/code = 20000 + run`, `version/name = 2.1.<run>`, release named from them | todo |
-| 8 | All audio was one sine beep | `tests/engine/audio/*` (every Sfx rendered and distinct, pool doesn't cut off) | todo |
+| 7 | Fixed version numbers | CI patches `version/code = 20000 + run`, `version/name = 2.1.<run>`, release named from them | done in `.github/workflows/build.yml`; first run: todo |
+| 8 | All audio was one sine beep | `tests/engine/audio_synth_test.gd`, `tests/engine/audio/*` | done: 63 sounds synthesized from build-13's recipes, the pool, reverb and ambience; build-13's music in the plugin with its tests |
 | 9 | Flaky GUI test tied to frame timing | Deterministic tests: seeded `KRandom`, fixed steps, no wall clock, `frames()` waits for layout | wip |
-| 10 | Broken image links in `docs/KOTLIN_VERSION.md` | `tools/check_doc_links.py` in CI | todo |
+| 10 | Broken image links in `docs/KOTLIN_VERSION.md` | `tools/check_doc_links.py` in CI | checker done and in CI; the fixed Kotlin doc: todo |
 
 ## Deviations and decisions
 
@@ -499,3 +499,9 @@ Decisions made without stopping to ask, and anything that could not be matched e
 | Sound | The hum (20 s, whole cycles of 55/110/165.3 Hz) and the crowd murmur (two cycles of its 0.11 Hz swell, about 18 s, the end crossfaded into the start) are pre-rendered loops; their levels (target, crowd, ambience volume) follow build-13's per-block easing exactly. The murmur's noise comes from Godot's RandomNumberGenerator with build-13's seeds, not Kotlin's Random. | build-13 synthesized them live. Kotlin's Random ported to GDScript made the loop take 4.7 s to render; Godot's generator takes 0.4 s, and the murmur is noise either way. |
 | Sound | Synthesis runs in 64-bit floats; buffer lengths and note start samples use Kotlin's 32-bit float arithmetic (so the jackpot's buffer is 62401 samples, as in build-13). Noise in the sound effects comes from the same seeded Random, so the sequence is the same, though a phase wrap can land a sample apart. | Bit-exact 32-bit synthesis isn't practical in GDScript; the sounds are the same to the ear. |
 | Sound | The sounds are synthesized on worker threads at first launch (about 0.9 s on a desktop core, an estimated 3 s on a phone) and cached in `user://cache` (16-bit PCM, about 7 MB, magic word and hash checked); later launches load them. Requests before they are ready are ignored, as build-13's were before its bank existed. | build-13 synthesized everything natively at every start (about 0.2 s); GDScript is slower, so the work is kept off the main thread and done once. |
+| Sound | Godot 4.6.2's only Android audio driver is OpenSL ES at a fixed 44.1 kHz (two 1024-frame buffers), so the sound effects can't take Android's low-latency path that build-13's AudioTrack (USAGE_GAME, low-latency mode, the device's rate) used; the soundtrack still does (the plugin's AudioTrack). The effects are synthesized at Godot's mix rate so nothing is resampled. On the emulator both streams measured about 175 ms, so the difference needs a real phone to judge. | Engine limit; replacing Godot's audio output would mean mixing the effects in the plugin too. |
+| Input | The raw touch stream comes from the plugin (an OnTouchListener on Godot's view that records every sample, historical ones included, with its event time, and never consumes the event); Godot's own touch events still drive the UI. | Godot's Android input drops MotionEvent history and timestamps; build-13's flicks are measured on every sample. |
+| Platform | The plugin's FileProvider is a subclass (`com.pocketarcade.godot.PhotoProvider`) with build-13's authority `<package>.photos` and folder `files/photos`. | Godot's library already declares androidx's FileProvider; the manifest merger allows one element per provider class. |
+| Platform | The launcher activity is Godot's (`com.godot.game.GodotAppLauncher`), not `com.pocketarcade.MainActivity`; the "play" extra is read from whichever intent started or resumed the app. | Godot owns the activity. Launchers re-resolve the app's launcher activity after an update. |
+| Platform | The APK is 26.1 MB (arm64-v8a only, native libraries compressed): Godot's engine library alone is 67.6 MB uncompressed, 22 MB compressed. build-13 was 7.6 MB. A smaller APK would need a custom-built engine with unused modules removed. | Not attempted yet (see the final report). |
+| Build | Exports run Gradle with `-Dorg.gradle.daemon=false`. | A Gradle daemon keeps Godot's output open after the build, so the export never returns. |

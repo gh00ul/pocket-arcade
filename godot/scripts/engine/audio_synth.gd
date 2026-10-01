@@ -23,6 +23,10 @@ func _init() -> void:
 	engine = MixEngine.new()
 	engine.name = "MixEngine"
 	add_child(engine)
+	# The soundtrack plays in the Android plugin where there is one (see MusicControl).
+	var plugin_music := PluginMusic.create()
+	if plugin_music != null:
+		engine.music.attach(plugin_music)
 
 
 func _enter_tree() -> void:

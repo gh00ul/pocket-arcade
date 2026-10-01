@@ -50,6 +50,10 @@ window/stretch/mode="disabled"
 window/handheld/orientation=1
 window/vsync/vsync_mode=1
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/pocket_arcade_android/plugin.cfg")
+
 [gui]
 
 common/snap_controls_to_pixels=true

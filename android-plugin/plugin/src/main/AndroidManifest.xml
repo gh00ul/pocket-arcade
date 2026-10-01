@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <application>
+        <!-- Godot's v2 plugin registration: the singleton "PocketArcade". -->
+        <meta-data
+            android:name="org.godotengine.plugin.v2.PocketArcade"
+            android:value="com.pocketarcade.godot.PocketArcadePlugin" />
+
+        <!-- Shares a saved photo strip (see PocketArcadePlugin.sharePng) without any storage
+             permission: build-13's provider, authority and folder. -->
+        <provider
+            android:name="com.pocketarcade.godot.PhotoProvider"
+            android:authorities="${applicationId}.photos"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/pa_file_paths" />
+        </provider>
+    </application>
+
+</manifest>

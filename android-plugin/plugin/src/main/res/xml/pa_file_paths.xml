@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The only folder the share sheet can read from: the saved photo strips (user://photos, which is
+     the app's files/photos as in build-13). -->
+<paths>
+    <files-path name="photos" path="photos/" />
+</paths>

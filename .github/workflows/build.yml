@@ -1,7 +1,8 @@
 name: Build APK
 
-# Every push to main builds the debug APK and publishes it as a GitHub Release, so it can be
-# installed straight from a phone. The newest build is always at:
+# Builds the Godot edition: the Android plugin (and build-13's music tests), the headless Godot
+# test suite, then a signed arm64 APK published as a GitHub Release. Every push to main releases;
+# other branches build on demand (workflow_dispatch). The newest build is always at:
 # https://github.com/<owner>/pocket-arcade/releases/latest/download/PocketArcade.apk
 on:
   push:
@@ -18,6 +19,16 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GODOT_VERSION: 4.6.2
+      BUILD_TOOLS_VERSION: 35.0.1
+      # app/debug.keystore's certificate: every build must be signed with it to install over
+      # build-13 and 2.0.0.
+      EXPECTED_CERT_SHA256: "16:52:15:CB:81:4C:66:28:67:B5:7F:B6:72:50:5B:DE:10:0A:C7:B8:DA:66:11:77:21:47:F8:E2:47:90:01:62"
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v5
 
@@ -26,30 +37,119 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: gradle/actions/setup-gradle@v5
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
 
-      - name: Run the payout simulation and build the debug APK
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;${BUILD_TOOLS_VERSION}"
+
+      - name: Check the repository
+        run: |
+          python3 tools/check_nul.py
+          python3 tools/check_doc_links.py
+
+      - name: Build the Android plugin and run build-13's music tests
+        working-directory: android-plugin
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest assembleDebug --stacktrace
+          ./gradlew --no-daemon :plugin:assembleRelease :plugin:testReleaseUnitTest
+          mkdir -p ../godot/addons/pocket_arcade_android/bin
+          cp plugin/build/outputs/aar/plugin-release.aar ../godot/addons/pocket_arcade_android/bin/pocket_arcade_android-release.aar
 
-      - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk PocketArcade.apk
+      - name: Install Godot and its Android build template
+        run: |
+          RELEASE_URL="https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable"
+          ENGINE_ZIP="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl --fail --location --retry 3 "${RELEASE_URL}/${ENGINE_ZIP}" --output "${RUNNER_TEMP}/godot.zip"
+          unzip -q "${RUNNER_TEMP}/godot.zip" -d "${RUNNER_TEMP}/godot-engine"
+          mkdir -p "${HOME}/.local/bin"
+          install -m 0755 "${RUNNER_TEMP}/godot-engine/Godot_v${GODOT_VERSION}-stable_linux.x86_64" "${HOME}/.local/bin/godot"
+          echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
+          # The Gradle export builds from the template in godot/android/build (read straight out of
+          # the export templates archive, without downloading all of it).
+          python3 tools/fetch_android_template.py --version "${GODOT_VERSION}"
+
+      - name: Configure Android export paths
+        run: |
+          mkdir -p "${HOME}/.config/godot"
+          cat > "${HOME}/.config/godot/editor_settings-4.6.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/java_sdk_path = "${JAVA_HOME}"
+          export/android/android_sdk_path = "${ANDROID_HOME}"
+          EOF
+
+      - name: Run the Godot test suite
+        run: |
+          GODOT=godot bash tools/run_tests.sh
+
+      - name: Set the version
+        run: |
+          CODE=$((20000 + GITHUB_RUN_NUMBER))
+          NAME="2.1.${GITHUB_RUN_NUMBER}"
+          sed -i "s/^version\/code=.*/version\/code=${CODE}/" godot/export_presets.cfg
+          sed -i "s/^version\/name=.*/version\/name=\"${NAME}\"/" godot/export_presets.cfg
+          grep -E "^version/(code|name)=" godot/export_presets.cfg
+          echo "VERSION_CODE=${CODE}" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=${NAME}" >> "$GITHUB_ENV"
+
+      - name: Export the signed release APK (arm64-v8a)
+        env:
+          # No Gradle daemon: it would hold Godot's output open after the build finishes.
+          GRADLE_OPTS: -Dorg.gradle.daemon=false
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ github.workspace }}/app/debug.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
+        run: |
+          mkdir -p releases
+          godot --headless --path godot --export-release Android ../releases/PocketArcade.apk
+          test -s releases/PocketArcade.apk
+
+      - name: Verify the signature, report the size and generate the checksum
+        run: |
+          APKSIGNER="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}/apksigner"
+          "$APKSIGNER" verify --verbose --print-certs releases/PocketArcade.apk | tee releases/signature.txt
+          DIGEST=$(grep -m1 "certificate SHA-256 digest" releases/signature.txt | sed 's/.*digest: //' | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//')
+          echo "certificate SHA-256: ${DIGEST}"
+          if [ "${DIGEST}" != "${EXPECTED_CERT_SHA256}" ]; then
+            echo "::error::APK is signed with ${DIGEST}, expected ${EXPECTED_CERT_SHA256}"
+            exit 1
+          fi
+          # Only arm64-v8a native code.
+          unzip -l releases/PocketArcade.apk | grep "lib/" | tee releases/libs.txt
+          if grep -v "lib/arm64-v8a/" releases/libs.txt | grep -q "\.so"; then
+            echo "::error::APK contains native code for another ABI"
+            exit 1
+          fi
+          SIZE=$(stat -c %s releases/PocketArcade.apk)
+          echo "APK size: ${SIZE} bytes ($((SIZE / 1024 / 1024)) MB)"
+          {
+            echo "### Pocket Arcade ${VERSION_NAME} (versionCode ${VERSION_CODE})"
+            echo "APK size: ${SIZE} bytes, arm64-v8a only"
+            echo "Certificate SHA-256: ${DIGEST}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cd releases
+          sha256sum PocketArcade.apk > SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v6
         with:
           name: PocketArcade-apk
-          path: PocketArcade.apk
+          if-no-files-found: error
+          path: |
+            releases/PocketArcade.apk
+            releases/SHA256SUMS.txt
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="build-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" PocketArcade.apk \
+          TAG="v${VERSION_NAME}"
+          gh release create "$TAG" releases/PocketArcade.apk releases/SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
-            --title "Pocket Arcade 1.0.${GITHUB_RUN_NUMBER}" \
+            --title "Pocket Arcade ${VERSION_NAME}" \
             --latest \
-            --notes "Debug APK built from ${GITHUB_SHA::7}: $(git log -1 --pretty=%s)
-
-          Open this page on your Android phone, tap **PocketArcade.apk**, and allow installs from your browser when asked. Newer builds install over older ones and keep your tokens, tickets and prizes."
+            --notes-file docs/GODOT_RELEASE.md
