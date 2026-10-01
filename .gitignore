@@ -27,5 +27,12 @@ local.properties
 .DS_Store
 Thumbs.db
 
+# Godot and local tooling
+.tools/
+godot/.godot/
+godot/.godot-test-data/
+godot/export_credentials.cfg
+releases/
+
 # Logs
 *.log
