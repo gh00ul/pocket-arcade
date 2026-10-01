@@ -19,7 +19,7 @@ func _ready() -> void:
 		if a == "--ldr":
 			GfxQuality.rung = 2
 	Display.configure(get_window())
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	Gfx.host = self
 	stage = Stage3D.new(360, 640)
 	var white := TexKit.white().full()
