@@ -1,21 +1,20 @@
 extends PaTest
 ## share/PhotoStoreTest.kt: keeping only the newest four photo strips, on a scratch folder and as
-## plain names. (Kotlin's TemporaryFolder is a folder under user://test_tmp; java.util.Random's
+## plain names. (Kotlin's TemporaryFolder is the repository tests' scratch folder; java.util.Random's
 ## shuffle is KRandom's, the order does not matter to the assertion; the writer that threw
 ## IOException("disk full") returns "disk full".) Plus Godot-only checks marked as such.
 
-const ROOT := "user://test_tmp"
-
+var fixture: RepoFixture
 var tmp := ""
 
 
 func before_each() -> void:
-	tmp = "%s/photos_%d_%d" % [ROOT, Time.get_ticks_usec(), randi() % 100000]
-	DirAccess.make_dir_recursive_absolute(tmp)
+	fixture = RepoFixture.new()
+	tmp = fixture.dir
 
 
 func after_each() -> void:
-	RepoFixture._remove(tmp)
+	fixture.cleanup()
 
 
 func _name(second: int) -> String:
