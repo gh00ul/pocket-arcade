@@ -28,15 +28,17 @@ var focus_set_back := 0.0
 var screen_units: Variant = null
 
 
-## Builds one copy of the cabinet into [param c] (a CabinetBuild): model parts through its builder
-## `b` and the helpers, lights with `light` (2 or 3 per cabinet: the hall has a light budget) and
-## the live screen with `live_screen`. Called once per copy.
-func build(_c: Object) -> void:
+## Builds one copy of the cabinet into [param c]: model parts through [member CabinetBuild.b] and the
+## helpers, lights with [method CabinetBuild.light] (2 or 3 per cabinet: the hall has a light budget)
+## and the live screen with [method CabinetBuild.live_screen]. Called once per copy. A part that
+## differs from copy to copy (seeded by `c.seed_value` or `c.variant`) can be bracketed by
+## [method CabinetBuild.begin_own] / [method CabinetBuild.end_own] so the hall still shares the rest
+## of the bank's model (a texture only one copy uses is found on its own).
+func build(_c: CabinetBuild) -> void:
 	pass
 
 
 ## Draws the parts that move in attract mode (a patrolling claw, a sweeping shelf) every frame the
-## cabinet is on screen, at hall time [param t]; [param c] is the copy's CabinetBox. Draw opaque
-## parts only; must not allocate.
-func animate(_r: Renderer3D, _c: Object, _t: float) -> void:
+## cabinet is on screen, at hall time [param t]. Draw opaque parts only; must not allocate.
+func animate(_r: Renderer3D, _c: CabinetBox, _t: float) -> void:
 	pass
