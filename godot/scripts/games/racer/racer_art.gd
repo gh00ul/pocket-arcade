@@ -51,6 +51,9 @@ static func sun() -> PaTexture:
 			while band < n:
 				var p := tp.paint.reset()
 				p.xfer = PaPaint.Xfer.CLEAR
+				# CLEAR ignores the colour on Android; TexPaint's clear layer multiplies by it, so it
+				# is transparent here to clear to nothing.
+				p.color = 0
 				tp.c_draw_rect(0.0, band, float(n), band + gap, p)
 				p.xfer = PaPaint.Xfer.NONE
 				band += gap + 6.0
@@ -60,10 +63,19 @@ static func sun() -> PaTexture:
 
 
 static func _vgrad_circle(tp: TexPaint, cx: float, cy: float, r: float) -> void:
-	var p := tp.paint.reset()
+	var p := _shader_paint(tp)
 	p.shader = PaBrush.linear([Pal.YELLOW, Pal.PINK], Vector2(0.0, cy - r), Vector2(0.0, cy + r))
 	tp.c_draw_circle(cx, cy, r, p)
 	p.shader = null
+
+
+## Kotlin's `paint.reset()` before setting a gradient shader. Android paints a shader's colours and
+## takes only the alpha of the paint's colour (opaque after a reset); TexPaint's layers multiply the
+## gradient by the whole colour, so the paint is made opaque white to come out the same.
+static func _shader_paint(tp: TexPaint) -> PaPaint:
+	var p := tp.paint.reset()
+	p.color = Pal.WHITE
+	return p
 
 
 ## City skyline silhouette for the horizon: plum towers rim-lit in magenta on their right edge,
@@ -124,13 +136,17 @@ static func mountains() -> PaTexture:
 				x += 1.0
 			pts.append(256.0)
 			pts.append(40.0)
-			var p := tp.paint.reset()
+			var p := _shader_paint(tp)
 			p.shader = PaBrush.linear([Pal.mix(Pal.INDIGO, Pal.VIOLET, 0.4), Pal.INDIGO], Vector2(0.0, 5.0), Vector2(0.0, 40.0))
+			# Near x = 200 the ridge dips a little below the texture's bottom edge, which crosses the
+			# path's closing edge: Android fills that by winding, Godot can't triangulate it. Only the
+			# outline's part inside the texture shows, so the fill keeps it there (39.99 leaves no
+			# overlapping edges); the ridge line below is drawn from the true profile.
 			var path := PaPath.new()
 			path.move_to(pts[0], pts[1])
 			var i := 2
 			while i < pts.size():
-				path.line_to(pts[i], pts[i + 1])
+				path.line_to(pts[i], minf(pts[i + 1], 39.99) if i + 2 < pts.size() else pts[i + 1])
 				i += 2
 			path.close()
 			tp.c_draw_path(path, p)
@@ -376,7 +392,7 @@ static func token() -> PaTexture:
 		_token = TexPaint.paint_texture(14, 14, 10, func(tp: TexPaint) -> void:
 			tp.clear(0)
 			tp.circle(7.0, 7.0, 6.6, Pal.ORANGE)
-			var p := tp.paint.reset()
+			var p := _shader_paint(tp)
 			p.shader = PaBrush.radial([Pal.mix(Pal.GOLD, Pal.WHITE, 0.35), Pal.GOLD], Vector2(5.5, 5.0), 9.0)
 			tp.c_draw_circle(7.0, 7.0, 5.2, p)
 			p.shader = null
@@ -467,7 +483,7 @@ static func plume() -> PaTexture:
 		_plume = TexPaint.paint_texture(16, 32, 3, func(tp: TexPaint) -> void:
 			tp.clear(0)
 			tp.hgrad(0.0, 0.0, 16.0, 32.0, [CLEAR_WHITE, Pal.WHITE, CLEAR_WHITE])
-			var p := tp.paint.reset()
+			var p := _shader_paint(tp)
 			p.xfer = PaPaint.Xfer.DST_IN
 			p.shader = PaBrush.linear([Pal.WHITE, CLEAR_WHITE], Vector2(0.0, 0.0), Vector2(0.0, 32.0))
 			tp.c_draw_rect(0.0, 0.0, 16.0, 32.0, p)
