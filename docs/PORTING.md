@@ -127,6 +127,8 @@ of this guide that apply to you before writing code.
   Android/Compose/GL-internal tests may be dropped, and each drop is reported with a reason.
 - Deterministic only: seeded `KRandom`, fixed steps (`GameLoop.FIXED_DT`), no wall clock, no
   sleeping; `await frames(n)` only to let layout or the scene tree settle.
+  `tests/bugs/frame_timing_test.gd` fails on any test that reads the clock; profiling that times
+  hot loops goes in `tests/perf/`, which it allows.
 - Test base class `PaTest` (`tests/framework/pa_test.gd`): `assert_true/false`, `assert_eq` (strict:
   an int never equals a float), `assert_ne`, `assert_near(expected, actual, tolerance)`,
   `assert_gt/ge/lt/le`, `assert_null/not_null`, `assert_is_int`, `assert_has/not_has`,

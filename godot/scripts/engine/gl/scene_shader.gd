@@ -1,35 +1,54 @@
 class_name SceneShader
 extends RefCounted
-## engine/gl/GlShaders.kt SCENE_VS + SCENE_FS as Godot spatial shaders: the per-pixel lighting of
-## every 3D picture. Compiled in variants (blend layer, culling, filtering, repeat, instanced),
-## since Godot fixes those per shader; everything that changes per frame (lights, light grid,
-## ambient, fog, exposure, the HDR switch...) comes from the slot's data texture, so a material
-## never needs a parameter set per frame.
+## engine/gl/GlShaders.kt SCENE_VS + SCENE_FS (and SCENE_FS_HDR) as Godot spatial shaders: the
+## per-pixel lighting of every 3D picture. Compiled in variants (blend layer, culling, filtering,
+## repeat, instanced, floor mirror), since Godot fixes those per shader; everything that changes per
+## frame (lights, light grid, ambient, fog, exposure, the HDR switch, the floor reflections...) comes
+## from the slot's data texture, so a material never needs a parameter set per frame. The LDR and
+## HDR pictures share one source: build-13 compiled it twice (HDR_OUT defined or not), here the
+## data texture's HDR flag picks the path at run time.
 ##
 ## Data texture (RGBA32F, DATA_W × 3): row 0 light positions (x, y, z, radius), row 1 light
 ## colours (r, g, b, intensity), row 2 globals (see GfxSlot._write_globals).
+##
+## Godot's Compatibility renderer converts a spatial shader's ALBEDO from sRGB to linear and back on
+## output (two approximations that do not cancel: values under 0.027 come out black). Every colour
+## written here goes through [method PostShaders.out_glsl] first, so the target holds exactly what
+## build-13's shader wrote.
 
 const DATA_W := 64
 
 static var _cache := {}
 
 
-static func key(blend: int, cull: bool, smooth: bool, repeat: bool, instanced: bool) -> String:
-	return "%d%d%d%d%d" % [blend, int(cull), int(smooth), int(repeat), int(instanced)]
+static func key(blend: int, cull: bool, smooth: bool, repeat: bool, instanced: bool, mirror: bool = false) -> String:
+	return "%d%d%d%d%d%d" % [blend, int(cull), int(smooth), int(repeat), int(instanced), int(mirror)]
 
 
 ## The shader for one variant (cached).
-static func get_shader(blend: int, cull: bool, smooth: bool, repeat: bool, instanced: bool) -> Shader:
-	var k := key(blend, cull, smooth, repeat, instanced)
+static func get_shader(blend: int, cull: bool, smooth: bool, repeat: bool, instanced: bool, mirror: bool = false) -> Shader:
+	var k := key(blend, cull, smooth, repeat, instanced, mirror)
 	var s: Shader = _cache.get(k)
 	if s == null:
 		s = Shader.new()
-		s.code = code(blend, cull, smooth, repeat, instanced)
+		s.code = code(blend, cull, smooth, repeat, instanced, mirror)
 		_cache[k] = s
 	return s
 
 
-static func code(blend: int, cull: bool, smooth: bool, repeat: bool, instanced: bool) -> String:
+## Every variant the renderer can ask for (the warm-up compiles them all).
+static func variants() -> Array:
+	var out: Array = []
+	for blend in [Blend.OPAQUE, Blend.ALPHA, Blend.ADD]:
+		for cull in [false, true]:
+			for smooth in [false, true]:
+				for repeat in [false, true]:
+					for instanced in [false, true]:
+						out.append([blend, cull, smooth, repeat, instanced, false])
+	return out
+
+
+static func code(blend: int, cull: bool, smooth: bool, repeat: bool, instanced: bool, mirror: bool = false) -> String:
 	var modes := ["unshaded", "skip_vertex_transform", "cull_back" if cull else "cull_disabled"]
 	if blend == Blend.OPAQUE:
 		modes.append("blend_mix")
@@ -42,12 +61,21 @@ static func code(blend: int, cull: bool, smooth: bool, repeat: bool, instanced: 
 		modes.append("depth_draw_never")
 	var filt := "filter_linear_mipmap_anisotropic" if smooth else "filter_nearest"
 	var rep := "repeat_enable" if repeat else "repeat_disable"
-	var src := TEMPLATE
+	var src := template()
 	src = src.replace("$MODES", ", ".join(PackedStringArray(modes)))
 	src = src.replace("$FILTER", filt).replace("$REPEAT", rep)
 	src = src.replace("$INSTANCED", "1" if instanced else "0")
+	src = src.replace("$MIRROR", "1" if mirror else "0")
 	src = src.replace("$BLEND", str(blend))
 	return src
+
+
+## The shader source with the [HdrLook] numbers in place (its variant switches still $-marked).
+static func template() -> String:
+	return TEMPLATE.replace("$HDR_GLSL", PostShaders.hdr_glsl()).replace("$OUT_GLSL", PostShaders.out_glsl()) \
+		.replace("$EMISSIVE_GAIN", PostShaders.f(HdrLook.EMISSIVE_GAIN)) \
+		.replace("$LIT_START", PostShaders.f(HdrLook.LIT_START)) \
+		.replace("$LIT_CAP", "%s, %s" % [PostShaders.f(HdrLook.LIT_CEILING), PostShaders.f(HdrLook.LIT_START)])
 
 
 const TEMPLATE := """shader_type spatial;
@@ -67,22 +95,14 @@ varying vec3 v_normal;
 varying vec4 v_extra;
 varying float v_depth;
 
-const float ENC_MAX = 0.96;
-const float EMISSIVE_GAIN = 1.2;
-const float LIT_CEILING = 1.05;
-const float LIT_START = 0.6;
-
-float max3(vec3 v) { return max(v.r, max(v.g, v.b)); }
-vec3 hdr_encode(vec3 c) {
-	c = max(c, vec3(0.0));
-	return c / (1.0 + max3(c));
-}
-float soft_cap(float x, float cap, float start) {
-	float r = max(cap - start, 1e-4);
-	return x <= start ? x : start + r * (1.0 - exp(-(x - start) / r));
-}
-float aces_s(float c) {
-	return clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
+$HDR_GLSL
+$OUT_GLSL
+const float EMISSIVE_GAIN = $EMISSIVE_GAIN;
+// Lit paint (not glints, not reflections) may not climb past a ceiling in exposed linear light,
+// so a pale surface under many lamps can never cross the bloom threshold and glow white.
+vec3 limit_lit(vec3 c, float exposure) {
+	float m = max3(c) * exposure;
+	return m > $LIT_START ? c * (soft_cap(m, $LIT_CAP) / m) : c;
 }
 vec3 tonemap(vec3 c, float exposure) {
 	c *= exposure;
@@ -112,6 +132,11 @@ void vertex() {
 }
 
 void fragment() {
+#if $MIRROR
+	// Floor-reflection pass (the scene upside down about y = 0): only glowing things, and nothing
+	// lying on the floor itself.
+	if (v_extra.x <= 0.0 || v_world.y > -2.0) discard;
+#endif
 	vec4 t = texture(tex, UV);
 	float alpha = t.a * COLOR.a;
 	float cut = $BLEND == 0 ? 0.5 : 0.003;
@@ -124,8 +149,13 @@ void fragment() {
 	vec4 g_fog = texelFetch(data_tex, ivec2(4, 2), 0);   // fog near, far, floor, hdr
 	vec4 g_grid = texelFetch(data_tex, ivec2(5, 2), 0);  // grid x0, z0, 1/cell, -
 	vec4 g_size = texelFetch(data_tex, ivec2(6, 2), 0);  // grid w, h, refl streak, -
-	vec4 g_refl = texelFetch(data_tex, ivec2(7, 2), 0);  // refl 1/w, 1/h, gloss amount, matte amount
+	vec4 g_refl = texelFetch(data_tex, ivec2(7, 2), 0);  // refl on (1/0), -, gloss amount, matte amount
+#if $MIRROR
+	// The mirror is a display-referred picture: always the LDR shading, and no floor reflections.
+	bool hdr = false;
+#else
 	bool hdr = g_fog.w > 0.5;
+#endif
 	float exposure = g_dcol.w;
 	float glass = $BLEND == 1 ? 1.0 : 0.0;
 	vec3 col;
@@ -141,7 +171,7 @@ void fragment() {
 		vec3 L = g_amb.rgb * (0.8 + 0.4 * n.y);
 		vec3 P = vec3(0.0);
 		float dd = dot(n, g_dir.xyz);
-		// Gloss sets both the highlight's strength and its tightness.
+		// Gloss sets both the highlight's strength and its tightness (glossier = sharper).
 		float gloss = v_extra.z;
 		float spec_pow = 16.0 + 64.0 * gloss * gloss;
 		float spec_k = gloss * sqrt((spec_pow + 8.0) / 56.0);
@@ -194,12 +224,15 @@ void fragment() {
 		float fr = 1.0 - nv;
 		float env_amount = g_eye.w;
 		if (gloss > 0.0 && env_amount > 0.0) {
-			// The room reflected, sharper for glossier surfaces; chrome reflects strongly, tinted by its colour.
+			// The room reflected (added on top): sharper for glossier surfaces; very glossy opaque
+			// things (chrome, balls) reflect strongly, tinted by their colour. Downward reflections
+			// are bent toward the horizon, where the room's glow is.
 			vec3 R = reflect(-V, n);
 			if (R.y < 0.0) R.y *= 0.4;
 			vec4 es = textureLod(env_tex, R, (1.0 - gloss) * 5.0);
 			vec3 e = es.rgb * es.rgb * 4.0;
 			float metal = smoothstep(0.72, 0.9, gloss) * (1.0 - glass);
+			// Glass keeps a physically faint face-on sheen that climbs toward grazing angles.
 			float f0 = mix(0.04, 0.35, metal);
 			float fp = fr * fr * fr * mix(1.0, fr, glass);
 			float F = (f0 + (1.0 - f0) * fp) * gloss * gloss * env_amount * (1.0 - 0.4 * glass);
@@ -208,8 +241,12 @@ void fragment() {
 			vec3 hue = mix(vec3(1.0), base / max(mx, 0.001), metal * sat);
 			refl += e * hue * F;
 		}
+#if $MIRROR == 0
 		if (g_refl.z + g_refl.w > 0.0 && n.y > 0.85 && v_world.y < 3.0 && v_world.y > -4.0) {
-			// Glowing things reflected in the floor (streaks from last frame's glow up the screen).
+			// Glowing things reflected in the floor; the floor's own texture ripples them a little.
+			// Either the mirror pass at this pixel, or (streak > 0) last frame's glow gathered from
+			// up the screen, where whatever stands behind this spot is. (GL's y ran up the screen;
+			// Godot's SCREEN_UV runs down it, hence the flips.)
 			vec2 ruv = SCREEN_UV;
 			ruv.y = 1.0 - ruv.y;
 			ruv.y += (dot(base, vec3(0.333)) - 0.3) * 0.012 * gloss;
@@ -219,14 +256,22 @@ void fragment() {
 				rc = texture(refl_tex, vec2(ruv.x, 1.0 - (ruv.y + 0.2 * streak))).rgb * 0.5
 					+ texture(refl_tex, vec2(ruv.x, 1.0 - (ruv.y + 0.55 * streak))).rgb * 0.35
 					+ texture(refl_tex, vec2(ruv.x, 1.0 - (ruv.y + streak))).rgb * 0.25;
+				// The streaks are read from the bloom chain, which holds linear light in the HDR
+				// picture; the mirror image is already a display-referred picture.
+				if (hdr) rc = aces(rc);
 			} else {
 				rc = texture(refl_tex, vec2(ruv.x, 1.0 - ruv.y)).rgb;
 			}
+			// A light floor's own glow is in that buffer too; left alone it would feed on itself
+			// frame after frame until pale tiles burn white. A bright floor washes out a reflection
+			// anyway, so fade the reflection out on light paint and cap what it adds.
 			float lum = dot(base, vec3(0.3, 0.59, 0.11));
 			float dark = 1.0 - clamp((lum - 0.25) * 2.0, 0.0, 1.0);
 			refl += min(rc, vec3(1.2)) * (dark * (gloss * (0.3 + 0.7 * fr * fr * fr) * g_refl.z + g_refl.w));
 		}
-		// Rim light: a Fresnel sheen tinted by the lights nearby.
+#endif
+		// Rim light: a Fresnel sheen tinted by the lights nearby, so figures and cabinets stand out
+		// from the dark room.
 		float fres = 1.0 - max(dot(n, V), 0.0);
 		fres *= fres;
 		fres *= fres;
@@ -238,9 +283,7 @@ void fragment() {
 			col += base * (sat2 * floor_glow);
 		}
 		if (hdr) {
-			// Lit paint may not climb past a ceiling, so a pale surface under many lamps never blooms.
-			float m = max3(col) * exposure;
-			col = (m > LIT_START ? col * (soft_cap(m, LIT_CEILING, LIT_START) / m) : col) + glint;
+			col = limit_lit(col, exposure) + glint;
 		}
 	}
 	if (v_extra.w > 0.5 && v_depth > g_fog.x) {
@@ -251,7 +294,8 @@ void fragment() {
 	vec3 out_rgb;
 	float out_a = alpha;
 	if (glass > 0.5) {
-		// See-through glass: the reflection is its own layer on top.
+		// See-through glass: the reflection is its own layer on top, so it shows even where the pane
+		// is nearly clear (it covers a little more of what's behind as it brightens).
 		if (hdr) {
 			float k = aces_s(max3(refl) * exposure);
 			float a = clamp(alpha + (1.0 - alpha) * k, 0.0, 1.0);
@@ -268,7 +312,7 @@ void fragment() {
 	} else {
 		out_rgb = hdr ? hdr_encode(col + refl) : tonemap(col + refl, exposure);
 	}
-	ALBEDO = out_rgb;
+	ALBEDO = pa_out(out_rgb);
 #if $BLEND != 0
 	ALPHA = out_a;
 #endif

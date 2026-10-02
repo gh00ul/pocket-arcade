@@ -8,6 +8,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the APK as a GitHub Release (off to only build and test)
+        type: boolean
+        default: true
+      preview:
+        description: Publish as a pre-release (not marked Latest), for a build that is still being ported
+        type: boolean
+        default: false
 
 concurrency:
   group: build-apk-${{ github.ref }}
@@ -144,12 +153,21 @@ jobs:
             releases/SHA256SUMS.txt
 
       - name: Publish GitHub Release
+        if: github.event_name == 'push' || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v${VERSION_NAME}"
-          gh release create "$TAG" releases/PocketArcade.apk releases/SHA256SUMS.txt \
-            --target "$GITHUB_SHA" \
-            --title "Pocket Arcade ${VERSION_NAME}" \
-            --latest \
-            --notes-file docs/GODOT_RELEASE.md
+          if [ "${{ inputs.preview }}" = "true" ]; then
+            gh release create "$TAG" releases/PocketArcade.apk releases/SHA256SUMS.txt \
+              --target "$GITHUB_SHA" \
+              --title "Pocket Arcade ${VERSION_NAME} (preview)" \
+              --prerelease --latest=false \
+              --notes-file docs/GODOT_PREVIEW.md
+          else
+            gh release create "$TAG" releases/PocketArcade.apk releases/SHA256SUMS.txt \
+              --target "$GITHUB_SHA" \
+              --title "Pocket Arcade ${VERSION_NAME}" \
+              --latest \
+              --notes-file docs/GODOT_RELEASE.md
+          fi
