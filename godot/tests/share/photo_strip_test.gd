@@ -8,15 +8,27 @@ func _inside(r: PxRect, w: int, h: int) -> bool:
 	return r.left >= 0 and r.top >= 0 and r.right <= w and r.bottom <= h
 
 
-## Instant.parse("yyyy-MM-ddTHH:mm:ss[.SSS]Z").toEpochMilli().
+## Instant.parse("yyyy-MM-ddTHH:mm:ss[.SSS]Z").toEpochMilli(), worked out from the calendar
+## (days from 1970-01-01 by the proleptic Gregorian rules, as java.time counts them).
 static func _instant(iso: String) -> int:
-	var date_time := iso.trim_suffix("Z")
-	var ms := 0
-	var dot := date_time.find(".")
-	if dot >= 0:
-		ms = int(date_time.substr(dot + 1))
-		date_time = date_time.substr(0, dot)
-	return Time.get_unix_time_from_datetime_string(date_time) * 1000 + ms
+	var y := int(iso.substr(0, 4))
+	var mo := int(iso.substr(5, 2))
+	var d := int(iso.substr(8, 2))
+	var secs := int(iso.substr(11, 2)) * 3600 + int(iso.substr(14, 2)) * 60 + int(iso.substr(17, 2))
+	var ms := int(iso.substr(20, 3)) if iso.length() > 20 and iso[19] == "." else 0
+	return (_days_from_civil(y, mo, d) * 86400 + secs) * 1000 + ms
+
+
+## Days since 1970-01-01 of a calendar date (H. Hinnant's days_from_civil).
+static func _days_from_civil(y: int, m: int, d: int) -> int:
+	if m <= 2:
+		y -= 1
+	var era := (y if y >= 0 else y - 399) / 400
+	var yoe := y - era * 400
+	var mp := m - 3 if m > 2 else m + 9
+	var doy := (153 * mp + 2) / 5 + d - 1
+	var doe := yoe * 365 + yoe / 4 - yoe / 100 + doy
+	return era * 146097 + doe - 719468
 
 
 ## kotlin.random.Random.nextLong(from, until): the same bits drawn the same way (KRandom has
@@ -211,13 +223,12 @@ func test_times_before_1970_and_small_values_are_named_like_build_13() -> void:
 	assert_false(PhotoStrip.is_strip_name("strip-20260928-213045-123.png\n"))
 
 
-## Godot-only: the phone's zone is read from the system, east of UTC positive.
+## Godot-only: with no zone given the label is on the phone's calendar (its offset east of UTC).
 func test_the_system_zone_is_used_by_default() -> void:
-	var now := int(Time.get_unix_time_from_system() * 1000.0)
-	assert_eq(PhotoStrip.date_label(now, PhotoStrip.system_zone_minutes()), PhotoStrip.date_label(now))
-	var local := Time.get_date_dict_from_system(false)
-	var months := ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
-	var expected := "%s %d %d" % [months[int(local["month"]) - 1], local["day"], local["year"]]
-	# The system's local date and ours agree (unless midnight passed between the two reads).
-	var again := PhotoStrip.date_label(int(Time.get_unix_time_from_system() * 1000.0))
-	assert_true(expected == PhotoStrip.date_label(now) or expected == again, expected + " vs " + again)
+	assert_eq(int(Time.get_time_zone_from_system()["bias"]), PhotoStrip.system_zone_minutes())
+	for millis: int in [0, _instant("2026-09-28T23:30:00Z"), _instant("2031-12-05T00:10:00Z")]:
+		assert_eq(PhotoStrip.date_label(millis, PhotoStrip.system_zone_minutes()), PhotoStrip.date_label(millis))
+	# The helper agrees with the calendar's own anchors.
+	assert_eq(0, _instant("1970-01-01T00:00:00Z"))
+	assert_eq(1_790_000_000_000, _instant("2026-09-21T14:13:20Z"))
+	assert_eq(1_790_000_000_123, _instant("2026-09-21T14:13:20.123Z"))

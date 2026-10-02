@@ -39,6 +39,16 @@ static func k(rate: float, dt: float) -> float:
 	return 1.0 - exp(-rate * dt)
 
 
+static var _f32 := PackedFloat32Array([0.0])
+
+
+## [param x] rounded to a 32-bit float, as Kotlin's Float arithmetic leaves it (for the few values
+## that are truncated to whole numbers afterwards, such as a kid's animation seed).
+static func f32(x: float) -> float:
+	_f32[0] = x
+	return _f32[0]
+
+
 ## A repeatable number in [0, 1) from a figure's [param seed], a running [param n] and a
 ## [param salt] for what it's for (Kotlin's 32-bit Int arithmetic, so the same numbers as build-13).
 static func unit(seed_value: int, n: int, salt: int) -> float:
