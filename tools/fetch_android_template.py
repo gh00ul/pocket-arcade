@@ -9,6 +9,7 @@ into godot/android/build and writes godot/android/.build_version, as the editor'
 """
 import argparse
 import io
+import os
 import shutil
 import sys
 import urllib.request
@@ -90,6 +91,14 @@ def main() -> int:
     build.mkdir(parents=True)
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         z.extractall(build)
+        # zipfile drops Unix modes; restore them (Gradle's wrapper must stay executable).
+        for info in z.infolist():
+            mode = (info.external_attr >> 16) & 0o777
+            if mode and not info.is_dir():
+                os.chmod(build / info.filename, mode)
+    gradlew = build / "gradlew"
+    if gradlew.exists():
+        gradlew.chmod(gradlew.stat().st_mode | 0o755)
     (dest / ".build_version").write_text(version, encoding="utf-8")
     # Keep Godot from importing the template's files as project resources.
     (build / ".gdignore").write_text("", encoding="utf-8")
