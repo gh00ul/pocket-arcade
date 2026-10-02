@@ -400,7 +400,8 @@ func draw_backdrop(r: Renderer3D, t: float, streak: int, mult_pop: float) -> voi
 		white, 0.0, 0.0, 1.0, 0.0, 0.0, NAN, NAN, Blend.OPAQUE, led_level, 1.0, true, accent)
 	var w := HoopsGeo.CAGE_HALF_W * S
 	var post_z := HoopsGeo.WALL_Z + 11.2
-	for sx: float in [-w, w]:
+	for side in 2:
+		var sx := -w if side == 0 else w
 		r.quad(sx - 0.8, 408.0, post_z, sx + 0.8, 408.0, post_z, sx + 0.8, 24.0, post_z, sx - 0.8, 24.0, post_z,
 			white, 0.0, 0.0, 1.0, 0.0, 0.0, NAN, NAN, Blend.OPAQUE, led_level, 1.0, true, accent)
 
@@ -433,7 +434,8 @@ func draw_backdrop(r: Renderer3D, t: float, streak: int, mult_pop: float) -> voi
 		var tx := sx * 0.4
 		r.beam(sx, HoopsLook.LAMP_Y - 4.0, HoopsLook.LAMP_Z + 5.0, tx, 0.0, -196.0, 64.0, shaft, Blend.ADD, 1.0, shaft_a * breathe, 0xFFFFE0B8)
 	# Light spilling down the back posts.
-	for sx: float in [-w, w]:
+	for side in 2:
+		var sx := -w if side == 0 else w
 		r.beam(sx, 24.0, post_z + 1.0, sx, 408.0, post_z + 1.0, 22.0, glow, Blend.ADD, 1.0, 0.14 * (0.85 + 0.3 * _flash), accent)
 	# A sweep along the ad boards, brighter on every make.
 	var sweep := -ad - 60.0 + fmod(t * 70.0, ad * 2.0 + 120.0)
@@ -616,7 +618,8 @@ func draw_cage(r: Renderer3D) -> void:
 	var tw := float(net.w)
 	var len_u := (-100.0 - back) / cell * tw
 	var h_u := 420.0 / cell * tw
-	for x: float in [-w, w]:
+	for side in 2:
+		var x := -w if side == 0 else w
 		r.quad(x, 420.0, back, x, 420.0, -100.0, x, 0.0, -100.0, x, 0.0, back, net, 1.0 if x < 0.0 else -1.0, 0.0, 0.0,
 			0.0, 0.0, len_u, h_u, Blend.ALPHA, 0.0, 0.7, false)
 	r.quad(-w, 420.0, -100.0, w, 420.0, -100.0, w, 420.0, back, -w, 420.0, back, net, 0.0, -1.0, 0.0,

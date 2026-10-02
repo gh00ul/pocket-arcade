@@ -5,18 +5,11 @@ extends RefCounted
 ## hold before the strip prints. Pure functions of the time since SNAP, so the screen only has to
 ## draw them and the tests can check the timing.
 
-## hub/Figures.kt Pose ordinals (STAND, WALK, PLAY, CHEER, SIT, WIPE, CARRY, HOLD, ...).
-const _STAND := 0
-const _CHEER := 3
-const _SIT := 4
-const _HOLD := 7
-
-
 ## How one shot of the strip is posed: what the kid does, which way they turn, and what the booth
 ## calls out.
 class PhotoPose:
 	extends RefCounted
-	## A hub/Figures.kt Pose.
+	## A [Pose].
 	var pose: int
 	## Radians the kid is turned from facing the camera.
 	var yaw: float
@@ -67,10 +60,10 @@ const HOLD := 0.7
 
 ## One pose per shot: idle, cheer, sit down, cheers with a drink.
 static var poses: Array[PhotoPose] = [
-	PhotoPose.new(_STAND, 0.0, 0.0, "SMILE!"),
-	PhotoPose.new(_CHEER, 0.2, 0.42, "HANDS UP!"),
-	PhotoPose.new(_SIT, -0.28, 0.0, "TAKE A SEAT!"),
-	PhotoPose.new(_HOLD, 0.3, 0.0, "CHEERS!"),
+	PhotoPose.new(Pose.STAND, 0.0, 0.0, "SMILE!"),
+	PhotoPose.new(Pose.CHEER, 0.2, 0.42, "HANDS UP!"),
+	PhotoPose.new(Pose.SIT, -0.28, 0.0, "TAKE A SEAT!"),
+	PhotoPose.new(Pose.HOLD, 0.3, 0.0, "CHEERS!"),
 ]
 
 ## When the strip is done.

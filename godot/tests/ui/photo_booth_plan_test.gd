@@ -2,11 +2,6 @@ extends PaTest
 ## ui/PhotoBoothPlanTest.kt: the photo booth's poses and its timeline: a 3-2-1 countdown, then four
 ## shots with a flash each.
 
-const STAND := PhotoBoothPlan._STAND
-const CHEER := PhotoBoothPlan._CHEER
-const SIT := PhotoBoothPlan._SIT
-
-
 func test_there_is_one_pose_for_every_shot_and_they_all_look_different() -> void:
 	var plan := PhotoBoothPlan.poses
 	assert_eq(PhotoStrip.SHOTS, plan.size())
@@ -14,8 +9,8 @@ func test_there_is_one_pose_for_every_shot_and_they_all_look_different() -> void
 	for p in plan:
 		poses.append(p.pose)
 	# Idle, a cheer and a seat, at least.
-	for p: int in [STAND, CHEER, SIT]:
-		assert_true(poses.has(p), "no %d shot" % p)
+	for p: int in [Pose.STAND, Pose.CHEER, Pose.SIT]:
+		assert_true(poses.has(p), "no %s shot" % Pose.name_of(p))
 	# No two shots alike, in pose and in the way the kid is turned.
 	for i in plan.size():
 		for j in range(i + 1, plan.size()):
@@ -127,3 +122,7 @@ func test_the_timeline_is_build_13s_and_a_reused_step_matches() -> void:
 	for p in PhotoBoothPlan.poses:
 		cries.append(p.cry)
 	assert_eq(PackedStringArray(["SMILE!", "HANDS UP!", "TAKE A SEAT!", "CHEERS!"]), cries)
+	var kinds: Array[int] = []
+	for p in PhotoBoothPlan.poses:
+		kinds.append(p.pose)
+	assert_eq([Pose.STAND, Pose.CHEER, Pose.SIT, Pose.HOLD], kinds)

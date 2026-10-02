@@ -19,11 +19,12 @@ var target: int = Pose.STAND
 ## True once the target has fully taken over (its weight is 1).
 var settled: bool:
 	get:
-		return _progress >= 1.0
+		return progress >= 1.0
+## How far the current blend has got (0..1; 1 once settled). Read only.
+var progress := 1.0
 
 ## The weights when the current blend began (a snapshot, so an interruption starts clean).
 var _from := PackedFloat64Array()
-var _progress := 1.0
 var _duration := 0.2
 
 
@@ -54,14 +55,14 @@ func set_pose(pose: int) -> void:
 	for i in Pose.COUNT:
 		_from[i] = weights[i] * inv
 	target = pose
-	_progress = 0.0
+	progress = 0.0
 	_duration = blend_time(pose)
 
 
 ## Jumps straight to [param pose] with no blend (a photo, a respawn).
 func snap(pose: int) -> void:
 	target = pose
-	_progress = 1.0
+	progress = 1.0
 	_duration = blend_time(pose)
 	for i in Pose.COUNT:
 		weights[i] = 1.0 if i == pose else 0.0
@@ -70,10 +71,10 @@ func snap(pose: int) -> void:
 
 ## Advances the blend by [param dt] seconds.
 func update(dt: float) -> void:
-	if _progress >= 1.0 or not (dt > 0.0):
+	if progress >= 1.0 or not (dt > 0.0):
 		return
-	_progress = minf(1.0, _progress + dt / _duration)
-	var s := AnimMath.smooth(_progress)
+	progress = minf(1.0, progress + dt / _duration)
+	var s := AnimMath.smooth(progress)
 	var t := target
 	for i in Pose.COUNT:
 		weights[i] = _from[i] * (1.0 - s) + (s if i == t else 0.0)
