@@ -160,13 +160,13 @@ Sound effects: `BLIP` `SELECT` `ERROR` `COIN` `TOKEN` `TICKET` `PRINT` `WIN` `JA
 
 | Item | Kotlin | Godot | Status |
 |---|---|---|---|
-| Multi-touch DOWN/MOVE/UP in field units, pointer ids, `cancelInput` on pause/end | `GameHostScreen.kt` | `scripts/ui/game_host_screen.gd` | todo |
-| Every batched (historical) touch sample delivered with its own time; unbuffered dispatch while playing | `GameHostScreen.kt` | `android-plugin/.../TouchRecorder.kt` + `scripts/engine/touch_input.gd` | done: the plugin records every MotionEvent sample (history first, each at its event time, only moved pointers) and the host reads them in order on Godot's clock; desktop uses Godot's touch events (`tests/engine/touch_input_test.gd`); exercised in a round on the emulator: todo |
+| Multi-touch DOWN/MOVE/UP in field units, pointer ids, `cancelInput` on pause/end | `GameHostScreen.kt` | `scripts/ui/game_host_screen.gd`, `scripts/ui/game_round.gd` | done: touches mapped to field units by the round, pointer ids kept, `cancel_input` on pause and at the end (`tests/ui/game_round_test.gd`) |
+| Every batched (historical) touch sample delivered with its own time; unbuffered dispatch while playing | `GameHostScreen.kt` | `android-plugin/.../TouchRecorder.kt` + `scripts/engine/touch_input.gd` | done: the plugin records every MotionEvent sample (history first, each at its event time, only moved pointers) and the host reads them in order on Godot's clock; desktop uses Godot's touch events; the plugin's window pixels are mapped to the host's dp by the window's content scale (`tests/engine/touch_input_test.gd`); exercised in a round on the emulator: todo |
 | `FlickTracker` (90 ms window) | `engine/Touch.kt` | `scripts/engine/flick_tracker.gd` | done (`tests/engine/flick_tracker_test.gd`, 5) |
-| Back-gesture exclusion: 80 × 200 dp at the bottom of each side, game screen only | `engine/Touch.kt` | `TouchInput.thumb_zones` + plugin `setGestureExclusion` (API 29+) | done: zones match build-13's (`touch_input_test.gd`); the host sets them: todo |
+| Back-gesture exclusion: 80 × 200 dp at the bottom of each side, game screen only | `engine/Touch.kt` | `TouchInput.thumb_zones` + plugin `setGestureExclusion` (API 29+) | done: zones match build-13's (`touch_input_test.gd`); the host sets them while it is open and clears them when it leaves |
 | Haptics: tick, hit, heavy, soft, bump, rumble, win, jackpot; primitives (API 30+) or waveforms; strength scaling; rate limits | `engine/Haptics.kt` | `scripts/engine/haptics.gd` + `android-plugin/` | done: every pattern, fallback, strength and gap as build-13 (`tests/engine/haptics_test.gd`, 11); on the emulator a hit played `Primitive=CLICK(scale=0.70)` with usage TOUCH (`dumpsys vibrator_manager`) |
 | Tilt steering: game rotation vector or accelerometer, dead zone, curve | `engine/TiltSteer.kt` | `scripts/engine/tilt_steer.gd`, `tilt_math.gd` + plugin `TiltReader.kt` | done (`tests/engine/tilt_math_test.gd`, 6); on a real phone: todo |
-| Safe area (cutouts) and edge-to-edge 16:9 … 21:9 | Compose insets | `scripts/app/display.gd` | todo |
+| Safe area (cutouts) and edge-to-edge 16:9 … 21:9 | Compose insets | `scripts/engine/display.gd` | done (`tests/bugs/edge_to_edge_test.gd`); other screens follow the safe area as they land |
 
 ## 9. Accessibility
 
@@ -471,14 +471,14 @@ Every Kotlin test file and its @Test count: (107 files, 911 @Test)
 | # | Bug in 2.0.0 | Regression test | Status |
 |---|---|---|---|
 | 1 | Android Back quit the app (`quit_on_go_back` left true; the test called the handler directly) | `tests/bugs/back_button_test.gd`: asserts the project setting, drives Back through the root window's `go_back_requested`, a screen claims it or the app goes to the background | done; on the emulator Back sent the app to the background (same process, audio paused) and it resumed |
-| 2 | Numbers came back as decimals ("0.0 tickets", "BEST 450.0") | `tests/data/repository_robustness_test.gd::test_every_number_comes_back_as_an_int`, `tests/data/save_migration_test.gd::test_a_2_0_0_save_comes_back_with_whole_numbers`, `tests/bugs/numbers_test.gd` (UI strings) | partly done |
+| 2 | Numbers came back as decimals ("0.0 tickets", "BEST 450.0") | `tests/data/repository_robustness_test.gd::test_every_number_comes_back_as_an_int`, `tests/data/save_migration_test.gd::test_a_2_0_0_save_comes_back_with_whole_numbers`, `tests/bugs/numbers_test.gd` (a 2.0.0 save with float numbers is migrated, then every string the game host draws through a whole round is checked: no decimal point) | done |
 | 3 | Black bars on tall phones (540×960, aspect `keep`) | `tests/bugs/edge_to_edge_test.gd`: 16:9 … 21:9 fill the window, touch UI inside the safe area | done (UI in dp at full resolution with aspect expand; the host's field and bar inside the safe area at every aspect); the emulator with a cutout showed no bars |
 | 4 | Hall cabinet high scores stale after a round | `tests/bugs/hall_labels_test.gd` | todo |
 | 5 | 76 MB APK (three ABIs) | CI: arm64-v8a only (fails on any other ABI's code), size reported in the job summary | done: 26.1 MB (Godot's engine library is 67.6 MB uncompressed, 22 MB compressed; build-13 was 7.6 MB) |
 | 6 | One material and mesh per object (583 hall / 1,201 racer draw calls) | `tests/bugs/draw_call_budget_test.gd` + measured budgets per scene | todo |
 | 7 | Fixed version numbers | CI patches `version/code = 20000 + run`, `version/name = 2.1.<run>`, release named from them | done in `.github/workflows/build.yml`; first run: todo |
 | 8 | All audio was one sine beep | `tests/engine/audio_synth_test.gd`, `tests/engine/audio/*` | done: 63 sounds synthesized from build-13's recipes, the pool, reverb and ambience; build-13's music in the plugin with its tests |
-| 9 | Flaky GUI test tied to frame timing | Deterministic tests: seeded `KRandom`, fixed steps, no wall clock, `frames()` waits for layout | wip |
+| 9 | Flaky GUI test tied to frame timing | `tests/bugs/frame_timing_test.gd`: the loop gives the same steps at 60/90/120/144 Hz and with jittery frames; a whole round through the host plays out identically at each (phases, score, tickets, best); no test reads the wall clock (profiling lives in `tests/perf/`) | done |
 | 10 | Broken image links in `docs/KOTLIN_VERSION.md` | `tools/check_doc_links.py` in CI | done: `docs/KOTLIN_VERSION.md` is build-13's README with its images at `screenshots/`; the checker passes |
 
 ## Deviations and decisions
