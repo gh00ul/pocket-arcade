@@ -29,6 +29,8 @@ static func width(s: String, font: Font, size: float, spacing_em: float) -> floa
 static func draw(ci: CanvasItem, xf: Transform2D, s: String, pos: Vector2, p: PaPaint) -> void:
 	if s.is_empty():
 		return
+	if TextLog.lines != null:
+		TextLog.note(s)
 	var font: Font = p.typeface if p.typeface != null else Fonts.display()
 	var size := p.text_size
 	var w := width(s, font, size, p.letter_spacing)

@@ -132,6 +132,8 @@ static func _argb(c: Variant) -> int:
 static func draw_to(ci: CanvasItem, xf: Transform2D, text: String, x: float, y: float, unit: float, color: int, alpha: float, tiny: bool, shadow: int) -> void:
 	if text.is_empty() or alpha <= 0.004:
 		return
+	if TextLog.lines != null:
+		TextLog.note(text)
 	var s := _caps(text)
 	var cap := (TINY_CAP if tiny else CAP) * unit
 	var size := _text_size(cap)
