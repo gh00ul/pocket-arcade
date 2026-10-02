@@ -100,7 +100,7 @@ func _process(delta: float) -> void:
 		round.frame(GameLoop.FIXED_DT)
 	tilt.poll()
 	touch_input.set_unbuffered(round.playing())
-	for s: Array in touch_input.poll():
+	for s: Array in touch_input.poll(TouchInput.window_to_local(self)):
 		_route_touch(s[0], s[1], s[2], s[3], s[4])
 	if round.phase == GameRound.Phase.INTRO:
 		_intro_t += delta

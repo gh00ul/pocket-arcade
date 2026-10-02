@@ -58,3 +58,35 @@ func test_thumb_zones_are_build_13s_strips() -> void:
 	# A short, narrow area: the zone is no taller than the area and no wider than half of it.
 	var s := TouchInput.thumb_zones(Rect2(10, 20, 300, 400), 3.0)
 	assert_eq(PackedInt32Array([10, 20, 160, 420, 160, 20, 310, 420]), s)
+
+
+func test_the_plugins_window_pixels_are_mapped_to_the_callers_dp() -> void:
+	# At 2.625 px/dp a sample at (262.5, 525) px is (100, 200) dp.
+	var raw := PackedInt32Array([0, AndroidBridge.TOUCH_DOWN, 3, 4200, 8400, 0])
+	var out := TouchInput.decode(raw, 0, Transform2D.IDENTITY.scaled(Vector2.ONE / 2.625))
+	assert_near(100.0, out[0][2], 0.001)
+	assert_near(200.0, out[0][3], 0.001)
+
+
+func test_window_to_local_undoes_the_windows_content_scale() -> void:
+	var w := tree.root
+	var saved := [w.content_scale_mode, w.content_scale_aspect, w.content_scale_size, w.content_scale_factor, Display.density, Display.forced_density]
+	Display.forced_density = 2.625
+	Display.configure(w)
+	var c := Control.new()
+	c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.add_child(c)
+	await frames(1)
+	var xf := TouchInput.window_to_local(c)
+	# The window's far corner is the control's far corner, in dp.
+	var corner := xf * Vector2(w.size)
+	assert_near(c.size.x, corner.x, 0.01)
+	assert_near(c.size.y, corner.y, 0.01)
+	assert_near(1.0 / 2.625, xf.get_scale().x, 0.01, "about a pixel per 2.625 dp")
+	assert_eq(Vector2.ZERO, xf * Vector2.ZERO)
+	w.content_scale_mode = saved[0]
+	w.content_scale_aspect = saved[1]
+	w.content_scale_size = saved[2]
+	w.content_scale_factor = saved[3]
+	Display.density = saved[4]
+	Display.forced_density = saved[5]
