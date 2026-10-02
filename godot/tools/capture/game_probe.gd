@@ -42,13 +42,13 @@ func _ready() -> void:
 		elif a == "--ldr":
 			GfxQuality.rung = 2
 	Display.configure(get_window())
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_gfx_layer = Control.new()
-	_gfx_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_gfx_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_gfx_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_gfx_layer)
 	_field = Control.new()
-	_field.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_field.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_field.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_field.draw.connect(_draw_field)
 	add_child(_field)
