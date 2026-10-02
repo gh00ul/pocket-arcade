@@ -23,9 +23,9 @@ that can't be matched is recorded under [Deviations](#deviations-and-decisions).
 
 | Item | Kotlin | Godot | Status |
 |---|---|---|---|
-| App shell: immersive full screen, keep screen on, portrait, `Pal.NIGHT` window, launch extra `play=<id>` (pays a token, skips the title) | `MainActivity.kt`, `AndroidManifest.xml` | `scripts/app/main.gd`, `android-plugin/` | todo |
+| App shell: immersive full screen, keep screen on, portrait, `Pal.NIGHT` window, launch extra `play=<id>` (pays a token, skips the title) | `MainActivity.kt`, `AndroidManifest.xml` | `scripts/app/main.gd`, `scripts/app/arcade_services.gd`, `android-plugin/` | done: shell, services, migration on start, Back routing, pause/resume, `play` extra read (walking into the machine: app flow), the 3D layer under the UI; verified on the emulator |
 | Top-level flow TITLE → HUB ↔ GAME, overlays (prizes, tokens, profile, photo, map, settings), banner (3.2 s), layer order, `busy` guards | `ArcadeApp.kt` | `scripts/app/arcade_app.gd` | todo |
-| Back: overlay → close + BLIP; game → host `onExitPressed` (intro: exit + refund, results: leave, paused: resume, playing/countdown/ending: pause); title/hall with nothing open → app to background (Android default) | `ArcadeApp.kt`, `GameHostScreen.kt` | `scripts/app/arcade_app.gd`, `scripts/ui/game_host_screen.gd` | todo |
+| Back: overlay → close + BLIP; game → host `onExitPressed` (intro: exit + refund, results: leave, paused: resume, playing/countdown/ending: pause); title/hall with nothing open → app to background (Android default) | `ArcadeApp.kt`, `GameHostScreen.kt` | `scripts/app/main.gd` (root window's go_back_requested), `scripts/ui/game_round.gd`, `scripts/app/arcade_app.gd` | host and shell done (`tests/bugs/back_button_test.gd`, `tests/ui/game_round_test.gd`), app to background verified on the emulator; overlays: app flow |
 | Loading screen: synthwave sky, stars, grid, neon POCKET ARCADE sign, spinning coin, progress bar + shimmer, labels with dots, 7 rotating tips, fade-out | `ui/LoadingScreen.kt` | `scripts/ui/loading_screen.gd` | todo |
 | Load plans and GPU warm-up: boot plan (paint showroom, wheel in, warm GPU 8 s), hall plan (carpet → walls → neon → hall → machines → furniture → crowd → prize wall → warm GPU 15 s), frame budgets | `startup/*`, `hub/TitleUnits.kt`, `hub/HallStage.kt`, `engine/gl/Warmup.kt` | `scripts/startup/*` | todo |
 | Title: 3D showroom of every cabinet on a spline camera path, neon sign ignition timeline (letters, flicker, breath, sweep, buzz), tagline, stars, dust, save line, welcome copy, version, TAP TO START | `ui/TitleScreen.kt`, `ui/TitleTimeline.kt`, `hub/TitleShowcase.kt`, `hub/ShowroomPath.kt` | `scripts/ui/title_screen.gd`, `scripts/ui/title_timeline.gd`, `scripts/hub/title_showcase.gd` | todo |
@@ -39,7 +39,7 @@ that can't be matched is recorded under [Deviations](#deviations-and-decisions).
 | Prize counter: tabs HATS/STYLE/DECOR/PLUSH, turntable preview, rarity, item states, buy/equip, plush collection grid | `ui/PrizeCounterScreen.kt` | `scripts/ui/prize_counter_screen.gd` | todo |
 | Settings: every row (controls, racer, comfort, sound, graphics, help, reset), steppers, cycles | `ui/SettingsScreen.kt` | `scripts/ui/settings_screen.gd` | todo |
 | Photo booth: 4 poses, countdown, flash, studio renders, strip composition, save (keep newest 4), photo wall, share sheet | `ui/PhotoBoothScreen.kt`, `ui/PhotoBoothPlan.kt`, `share/*`, `hub/PhotoWall.kt` | `scripts/ui/photo_booth_screen.gd`, `scripts/share/*`, `scripts/hub/photo_wall.gd`, `android-plugin/` | todo |
-| Game host: intro card, countdown + GO, round clock, last-5 ticks, time up, ENDING (≥1.2 s and 144 steps), pause card, results (score count-up, best line / NEW HIGH SCORE slam, grade stamp S/A/B/C, ticket printer, flights into the counter, tap to skip), play again (token gate), bezel bulbs, top bar | `ui/GameHostScreen.kt`, `ui/ResultsPlan.kt` | `scripts/ui/game_host_screen.gd`, `scripts/ui/results_plan.gd` | todo |
+| Game host: intro card, countdown + GO, round clock, last-5 ticks, time up, ENDING (≥1.2 s and 144 steps), pause card, results (score count-up, best line / NEW HIGH SCORE slam, grade stamp S/A/B/C, ticket printer, flights into the counter, tap to skip), play again (token gate), bezel bulbs, top bar | `ui/GameHostScreen.kt`, `ui/ResultsPlan.kt` | `scripts/ui/game_round.gd` (the round), `scripts/ui/game_host_screen.gd` (drawing, input), `scripts/ui/results_plan.gd` | round and drawing done (`tests/ui/game_round_test.gd` 11, `results_plan_test.gd` 10; captured at every phase); the cards' buttons and the currency flights move to the UI kit's widgets when it lands |
 | Rolling numbers (odometer), currency flights (token/ticket arcs), banner | `ui/RollingNumber.kt`, `ui/CurrencyFx.kt`, `ui/Widgets.kt` | `scripts/ui/rolling_number.gd`, `scripts/ui/currency_fx.gd`, `scripts/ui/widgets.gd` | todo |
 | Theme and widgets: palette, UiColors/Space/Radius/Edge/Text/Glow, panel texture, ArcadePanel, GlassBox, ArcadeButton (lip, gloss, press spring), RoundButton, chips, progress bar, countdown ring, toggle, entrances, token/ticket art, 14 vector icons | `ui/UiTheme.kt`, `ui/Widgets.kt`, `ui/UiParts.kt`, `ui/UiIcons.kt` | `scripts/ui/ui_theme.gd`, `scripts/ui/widgets.gd`, `scripts/ui/ui_parts.gd`, `scripts/ui/ui_icons.gd` | todo |
 | Thumbnails / studio renders (figures, plushies, decor) | `ui/Thumbs.kt` | `scripts/ui/thumbs.gd` | todo |
@@ -160,13 +160,13 @@ Sound effects: `BLIP` `SELECT` `ERROR` `COIN` `TOKEN` `TICKET` `PRINT` `WIN` `JA
 
 | Item | Kotlin | Godot | Status |
 |---|---|---|---|
-| Multi-touch DOWN/MOVE/UP in field units, pointer ids, `cancelInput` on pause/end | `GameHostScreen.kt` | `scripts/ui/game_host_screen.gd` | todo |
-| Every batched (historical) touch sample delivered with its own time; unbuffered dispatch while playing | `GameHostScreen.kt` | `android-plugin/.../TouchRecorder.kt` + `scripts/engine/touch_input.gd` | done: the plugin records every MotionEvent sample (history first, each at its event time, only moved pointers) and the host reads them in order on Godot's clock; desktop uses Godot's touch events (`tests/engine/touch_input_test.gd`); exercised in a round on the emulator: todo |
+| Multi-touch DOWN/MOVE/UP in field units, pointer ids, `cancelInput` on pause/end | `GameHostScreen.kt` | `scripts/ui/game_host_screen.gd`, `scripts/ui/game_round.gd` | done: touches mapped to field units by the round, pointer ids kept, `cancel_input` on pause and at the end (`tests/ui/game_round_test.gd`) |
+| Every batched (historical) touch sample delivered with its own time; unbuffered dispatch while playing | `GameHostScreen.kt` | `android-plugin/.../TouchRecorder.kt` + `scripts/engine/touch_input.gd` | done: the plugin records every MotionEvent sample (history first, each at its event time, only moved pointers) and the host reads them in order on Godot's clock; desktop uses Godot's touch events; the plugin's window pixels are mapped to the host's dp by the window's content scale (`tests/engine/touch_input_test.gd`); exercised in a round on the emulator: todo |
 | `FlickTracker` (90 ms window) | `engine/Touch.kt` | `scripts/engine/flick_tracker.gd` | done (`tests/engine/flick_tracker_test.gd`, 5) |
-| Back-gesture exclusion: 80 × 200 dp at the bottom of each side, game screen only | `engine/Touch.kt` | `TouchInput.thumb_zones` + plugin `setGestureExclusion` (API 29+) | done: zones match build-13's (`touch_input_test.gd`); the host sets them: todo |
+| Back-gesture exclusion: 80 × 200 dp at the bottom of each side, game screen only | `engine/Touch.kt` | `TouchInput.thumb_zones` + plugin `setGestureExclusion` (API 29+) | done: zones match build-13's (`touch_input_test.gd`); the host sets them while it is open and clears them when it leaves |
 | Haptics: tick, hit, heavy, soft, bump, rumble, win, jackpot; primitives (API 30+) or waveforms; strength scaling; rate limits | `engine/Haptics.kt` | `scripts/engine/haptics.gd` + `android-plugin/` | done: every pattern, fallback, strength and gap as build-13 (`tests/engine/haptics_test.gd`, 11); on the emulator a hit played `Primitive=CLICK(scale=0.70)` with usage TOUCH (`dumpsys vibrator_manager`) |
 | Tilt steering: game rotation vector or accelerometer, dead zone, curve | `engine/TiltSteer.kt` | `scripts/engine/tilt_steer.gd`, `tilt_math.gd` + plugin `TiltReader.kt` | done (`tests/engine/tilt_math_test.gd`, 6); on a real phone: todo |
-| Safe area (cutouts) and edge-to-edge 16:9 … 21:9 | Compose insets | `scripts/app/display.gd` | todo |
+| Safe area (cutouts) and edge-to-edge 16:9 … 21:9 | Compose insets | `scripts/engine/display.gd` | done (`tests/bugs/edge_to_edge_test.gd`); other screens follow the safe area as they land |
 
 ## 9. Accessibility
 
@@ -203,7 +203,7 @@ Every Kotlin source file (the map is checked by `tools/parity_inventory.py`): (1
 | `engine/audio/Spatial.kt` | 129 | `scripts/engine/audio/spatial.gd, placement.gd` | done |
 | `engine/audio/Tracks.kt` | 481 | `android-plugin: build-13's Tracks.kt unchanged; control in scripts/engine/audio/music_control.gd` | kept in Kotlin (plugin) |
 | `engine/AudioSynth.kt` | 254 | `scripts/engine/audio_synth.gd` | done |
-| `engine/GameLoop.kt` | 85 | `scripts/engine/game_loop.gd` | todo |
+| `engine/GameLoop.kt` | 85 | `scripts/engine/game_loop.gd, sim_clock.gd` | done |
 | `engine/gl/FrameStats.kt` | 205 | `scripts/engine/gl/frame_stats.gd` | todo |
 | `engine/gl/Gfx.kt` | 121 | `scripts/engine/gl/gfx.gd` | todo |
 | `engine/gl/GfxFailureNotice.kt` | 46 | `scripts/engine/gl/gfx_failure_notice.gd` | todo |
@@ -221,10 +221,10 @@ Every Kotlin source file (the map is checked by `tools/parity_inventory.py`): (1
 | `engine/Haptics.kt` | 256 | `scripts/engine/haptics.gd` | done |
 | `engine/Juice.kt` | 339 | `scripts/engine/juice.gd` | todo |
 | `engine/MathUtil.kt` | 59 | `scripts/engine/math_util.gd` | wip: `math_util.gd`, `k_random.gd`, `k_parse.gd` |
-| `engine/Painter.kt` | 26 | `scripts/engine/painter.gd` | todo |
+| `engine/Painter.kt` | 26 | `scripts/engine/painter.gd` | done |
 | `engine/Palette.kt` | 68 | `scripts/engine/pal.gd` | done |
 | `engine/Particles.kt` | 222 | `scripts/engine/particles.gd` | todo |
-| `engine/Physics.kt` | 188 | `scripts/engine/physics.gd` | todo |
+| `engine/Physics.kt` | 188 | `scripts/engine/physics.gd (CircleWorld, CircleWorld.Body, CircleWorld.Segment)` | done |
 | `engine/r3d/Camera3D.kt` | 103 | `scripts/engine/r3d/camera3_d.gd` | todo |
 | `engine/r3d/EnvMap.kt` | 203 | `scripts/engine/r3d/env_map.gd` | todo |
 | `engine/r3d/Frustum.kt` | 147 | `scripts/engine/r3d/frustum.gd` | todo |
@@ -241,7 +241,7 @@ Every Kotlin source file (the map is checked by `tools/parity_inventory.py`): (1
 | `games/airhockey/AirHockeyGame.kt` | 561 | `scripts/games/airhockey/air_hockey_game.gd` | todo |
 | `games/airhockey/HockeyArt.kt` | 219 | `scripts/games/airhockey/hockey_art.gd` | todo |
 | `games/airhockey/HockeyScene.kt` | 513 | `scripts/games/airhockey/hockey_scene.gd` | todo |
-| `games/BaseMiniGame.kt` | 158 | `scripts/games/base_mini_game.gd` | todo |
+| `games/BaseMiniGame.kt` | 158 | `scripts/games/base_mini_game.gd` | done |
 | `games/claw/ClawArt.kt` | 184 | `scripts/games/claw/claw_art.gd` | todo |
 | `games/claw/ClawMachineGame.kt` | 1124 | `scripts/games/claw/claw_machine_game.gd` | todo |
 | `games/claw/Plush3D.kt` | 214 | `scripts/games/claw/plush3_d.gd` | todo |
@@ -250,11 +250,11 @@ Every Kotlin source file (the map is checked by `tools/parity_inventory.py`): (1
 | `games/fishing/FishingArt.kt` | 421 | `scripts/games/fishing/fishing_art.gd` | todo |
 | `games/fishing/FishingCabinet.kt` | 139 | `scripts/games/fishing/fishing_cabinet.gd` | todo |
 | `games/fishing/FishingGame.kt` | 2167 | `scripts/games/fishing/fishing_game.gd` | todo |
-| `games/GameRegistry.kt` | 35 | `scripts/games/game_registry.gd` | todo |
+| `games/GameRegistry.kt` | 35 | `scripts/games/game_registry.gd` | done (loads machines by path) |
 | `games/hoops/HoopsArt.kt` | 345 | `scripts/games/hoops/hoops_art.gd` | todo |
 | `games/hoops/HoopsGame.kt` | 613 | `scripts/games/hoops/hoops_game.gd` | todo |
 | `games/hoops/HoopsScene.kt` | 734 | `scripts/games/hoops/hoops_scene.gd` | todo |
-| `games/MiniGame.kt` | 175 | `scripts/games/mini_game.gd` | todo |
+| `games/MiniGame.kt` | 175 | `scripts/games/mini_game.gd, game_fx.gd` | done (contract; CabinetDesign comes with the hall) |
 | `games/pinball/PinballArt.kt` | 737 | `scripts/games/pinball/pinball_art.gd` | todo |
 | `games/pinball/PinballCabinet.kt` | 143 | `scripts/games/pinball/pinball_cabinet.gd` | todo |
 | `games/pinball/PinballDisplay.kt` | 374 | `scripts/games/pinball/pinball_display.gd` | todo |
@@ -264,7 +264,7 @@ Every Kotlin source file (the map is checked by `tools/parity_inventory.py`): (1
 | `games/racer/RacerCabinet.kt` | 157 | `scripts/games/racer/racer_cabinet.gd` | todo |
 | `games/racer/RacerGame.kt` | 1416 | `scripts/games/racer/racer_game.gd` | todo |
 | `games/racer/RacerScene.kt` | 294 | `scripts/games/racer/racer_scene.gd` | todo |
-| `games/scenea/SceneFx.kt` | 147 | `scripts/games/scenea/scene_fx.gd` | todo |
+| `games/scenea/SceneFx.kt` | 147 | `scripts/games/scenea/scene_fx.gd` | done |
 | `games/shooter/ShooterArt.kt` | 626 | `scripts/games/shooter/shooter_art.gd` | todo |
 | `games/shooter/ShooterCabinet.kt` | 220 | `scripts/games/shooter/shooter_cabinet.gd` | todo |
 | `games/shooter/ShooterGame.kt` | 1966 | `scripts/games/shooter/shooter_game.gd` | todo |
@@ -329,7 +329,7 @@ Every Kotlin source file (the map is checked by `tools/parity_inventory.py`): (1
 | `startup/WarmRun.kt` | 68 | `scripts/startup/warm_run.gd` | todo |
 | `ui/CurrencyFx.kt` | 232 | `scripts/ui/currency_fx.gd` | todo |
 | `ui/DailyBonus.kt` | 266 | `scripts/ui/daily_bonus.gd` | todo |
-| `ui/GameHostScreen.kt` | 1051 | `scripts/ui/game_host_screen.gd` | todo |
+| `ui/GameHostScreen.kt` | 1051 | `scripts/ui/game_round.gd, game_host_screen.gd` | done (round, drawing, input); cards use stand-in buttons until the UI kit |
 | `ui/Handoff.kt` | 142 | `scripts/ui/handoff.gd` | todo |
 | `ui/Hud.kt` | 185 | `scripts/ui/hud.gd` | todo |
 | `ui/LoadingScreen.kt` | 300 | `scripts/ui/loading_screen.gd` | todo |
@@ -339,7 +339,7 @@ Every Kotlin source file (the map is checked by `tools/parity_inventory.py`): (1
 | `ui/PhotoBoothScreen.kt` | 381 | `scripts/ui/photo_booth_screen.gd` | todo |
 | `ui/PrizeCounterScreen.kt` | 605 | `scripts/ui/prize_counter_screen.gd` | todo |
 | `ui/ProfileScreen.kt` | 194 | `scripts/ui/profile_screen.gd` | todo |
-| `ui/ResultsPlan.kt` | 106 | `scripts/ui/results_plan.gd` | todo |
+| `ui/ResultsPlan.kt` | 106 | `scripts/ui/results_plan.gd` | done |
 | `ui/RollingNumber.kt` | 190 | `scripts/ui/rolling_number.gd` | todo |
 | `ui/SettingsScreen.kt` | 189 | `scripts/ui/settings_screen.gd` | todo |
 | `ui/Thumbs.kt` | 188 | `scripts/ui/thumbs.gd` | todo |
@@ -412,7 +412,7 @@ Every Kotlin test file and its @Test count: (107 files, 911 @Test)
 | `games/racer/RacerSimulationTest.kt` | 9 | `tests/games/racer/racer_simulation_test.gd` | todo |
 | `games/ReplayResetTest.kt` | 2 | `tests/games/replay_reset_test.gd` | todo |
 | `games/scenea/AttractScreensTest.kt` | 4 | `tests/games/scenea/attract_screens_test.gd` | todo |
-| `games/scenea/SceneFxTest.kt` | 7 | `tests/games/scenea/scene_fx_test.gd` | todo |
+| `games/scenea/SceneFxTest.kt` | 7 | `tests/games/scenea/scene_fx_test.gd` | SceneFx half done (4); plush half with the claw |
 | `games/shooter/ShooterRulesTest.kt` | 19 | `tests/games/shooter/shooter_rules_test.gd` | todo |
 | `games/shooter/ShooterSimulationTest.kt` | 1 | `tests/games/shooter/shooter_simulation_test.gd` | todo |
 | `games/SimHarness.kt` | 0 | `tests/games/sim_harness.gd` | todo |
@@ -458,7 +458,7 @@ Every Kotlin test file and its @Test count: (107 files, 911 @Test)
 | `ui/MapScreenTest.kt` | 10 | `tests/ui/map_screen_test.gd` | todo |
 | `ui/PhotoBoothPlanTest.kt` | 6 | `tests/ui/photo_booth_plan_test.gd` | todo |
 | `ui/PrizeCounterTest.kt` | 4 | `tests/ui/prize_counter_test.gd` | todo |
-| `ui/ResultsPlanTest.kt` | 10 | `tests/ui/results_plan_test.gd` | todo |
+| `ui/ResultsPlanTest.kt` | 10 | `tests/ui/results_plan_test.gd` | done (10) |
 | `ui/RollingNumberTest.kt` | 11 | `tests/ui/rolling_number_test.gd` | todo |
 | `ui/SpokenTextTest.kt` | 4 | `tests/ui/spoken_text_test.gd` | todo |
 | `ui/TitleTimelineTest.kt` | 23 | `tests/ui/title_timeline_test.gd` | todo |
@@ -471,15 +471,15 @@ Every Kotlin test file and its @Test count: (107 files, 911 @Test)
 | # | Bug in 2.0.0 | Regression test | Status |
 |---|---|---|---|
 | 1 | Android Back quit the app (`quit_on_go_back` left true; the test called the handler directly) | `tests/bugs/back_button_test.gd`: asserts the project setting, drives Back through the root window's `go_back_requested`, a screen claims it or the app goes to the background | done; on the emulator Back sent the app to the background (same process, audio paused) and it resumed |
-| 2 | Numbers came back as decimals ("0.0 tickets", "BEST 450.0") | `tests/data/repository_robustness_test.gd::test_every_number_comes_back_as_an_int`, `tests/data/save_migration_test.gd::test_a_2_0_0_save_comes_back_with_whole_numbers`, `tests/bugs/numbers_test.gd` (UI strings) | partly done |
-| 3 | Black bars on tall phones (540×960, aspect `keep`) | `tests/bugs/edge_to_edge_test.gd`: 16:9 … 21:9 fill the window, touch UI inside the safe area | todo |
+| 2 | Numbers came back as decimals ("0.0 tickets", "BEST 450.0") | `tests/data/repository_robustness_test.gd::test_every_number_comes_back_as_an_int`, `tests/data/save_migration_test.gd::test_a_2_0_0_save_comes_back_with_whole_numbers`, `tests/bugs/numbers_test.gd` (a 2.0.0 save with float numbers is migrated, then every string the game host draws through a whole round is checked: no decimal point) | done |
+| 3 | Black bars on tall phones (540×960, aspect `keep`) | `tests/bugs/edge_to_edge_test.gd`: 16:9 … 21:9 fill the window, touch UI inside the safe area | done (UI in dp at full resolution with aspect expand; the host's field and bar inside the safe area at every aspect); the emulator with a cutout showed no bars |
 | 4 | Hall cabinet high scores stale after a round | `tests/bugs/hall_labels_test.gd` | todo |
 | 5 | 76 MB APK (three ABIs) | CI: arm64-v8a only (fails on any other ABI's code), size reported in the job summary | done: 26.1 MB (Godot's engine library is 67.6 MB uncompressed, 22 MB compressed; build-13 was 7.6 MB) |
 | 6 | One material and mesh per object (583 hall / 1,201 racer draw calls) | `tests/bugs/draw_call_budget_test.gd` + measured budgets per scene | todo |
 | 7 | Fixed version numbers | CI patches `version/code = 20000 + run`, `version/name = 2.1.<run>`, release named from them | done in `.github/workflows/build.yml`; first run: todo |
 | 8 | All audio was one sine beep | `tests/engine/audio_synth_test.gd`, `tests/engine/audio/*` | done: 63 sounds synthesized from build-13's recipes, the pool, reverb and ambience; build-13's music in the plugin with its tests |
-| 9 | Flaky GUI test tied to frame timing | Deterministic tests: seeded `KRandom`, fixed steps, no wall clock, `frames()` waits for layout | wip |
-| 10 | Broken image links in `docs/KOTLIN_VERSION.md` | `tools/check_doc_links.py` in CI | checker done and in CI; the fixed Kotlin doc: todo |
+| 9 | Flaky GUI test tied to frame timing | `tests/bugs/frame_timing_test.gd`: the loop gives the same steps at 60/90/120/144 Hz and with jittery frames; a whole round through the host plays out identically at each (phases, score, tickets, best); no test reads the wall clock (profiling lives in `tests/perf/`) | done |
+| 10 | Broken image links in `docs/KOTLIN_VERSION.md` | `tools/check_doc_links.py` in CI | done: `docs/KOTLIN_VERSION.md` is build-13's README with its images at `screenshots/`; the checker passes |
 
 ## Deviations and decisions
 
@@ -504,4 +504,5 @@ Decisions made without stopping to ask, and anything that could not be matched e
 | Platform | The plugin's FileProvider is a subclass (`com.pocketarcade.godot.PhotoProvider`) with build-13's authority `<package>.photos` and folder `files/photos`. | Godot's library already declares androidx's FileProvider; the manifest merger allows one element per provider class. |
 | Platform | The launcher activity is Godot's (`com.godot.game.GodotAppLauncher`), not `com.pocketarcade.MainActivity`; the "play" extra is read from whichever intent started or resumed the app. | Godot owns the activity. Launchers re-resolve the app's launcher activity after an update. |
 | Platform | The APK is 26.1 MB (arm64-v8a only, native libraries compressed): Godot's engine library alone is 67.6 MB uncompressed, 22 MB compressed. build-13 was 7.6 MB. A smaller APK would need a custom-built engine with unused modules removed. | Not attempted yet (see the final report). |
+| Preview builds | Until the title screen and the hall are ported, the app opens on a plain list of the machines ported so far (`scripts/app/preview_lobby.gd`, not in build-13): a machine costs a token as in the hall, opens in the game host, and leaving comes back to the list. It is deleted when the hall lands; the final release has no trace of it. | The user asked for a playable build before the hall is finished. |
 | Build | Exports run Gradle with `-Dorg.gradle.daemon=false`. | A Gradle daemon keeps Godot's output open after the build, so the export never returns. |

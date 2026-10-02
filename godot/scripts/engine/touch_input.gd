@@ -5,7 +5,9 @@ extends RefCounted
 ## on all of them). On Android the plugin records the raw stream, history included; elsewhere
 ## Godot's screen touch and drag events stand in, timed as they are handled.
 ##
-## A sample is [type (TouchType), pointer id, x, y (window pixels), time (ms on Godot's clock)].
+## A sample is [type (TouchType), pointer id, x, y, time (ms on Godot's clock)], x and y in the
+## coordinates of the control that polls (dp in this app): Godot's events arrive there already, and
+## the plugin's samples (window pixels) are mapped with [method window_to_local].
 
 ## Feed Godot's own touch events through [method handle_event] (no plugin).
 var _from_events := true
@@ -56,18 +58,25 @@ func handle_event(event: InputEvent) -> bool:
 	return false
 
 
-## Every sample since the last call, oldest first.
-func poll() -> Array:
+## Every sample since the last call, oldest first. [param to_local] maps the plugin's window
+## pixels to the caller's coordinates (see [method window_to_local]).
+func poll(to_local: Transform2D = Transform2D.IDENTITY) -> Array:
 	if _from_events:
 		var out := _queue
 		_queue = []
 		return out
-	return decode(AndroidBridge.touch_take(), Time.get_ticks_msec())
+	return decode(AndroidBridge.touch_take(), Time.get_ticks_msec(), to_local)
+
+
+## The transform from window pixels (the plugin's samples) to [param item]'s own coordinates: it
+## undoes the window's content scale (pixels to dp) and the item's place on the canvas.
+static func window_to_local(item: CanvasItem) -> Transform2D:
+	return (item.get_viewport().get_final_transform() * item.get_global_transform_with_canvas()).affine_inverse()
 
 
 ## The plugin's record ([param raw]: its clock at the call, then the samples) as samples on Godot's
-## clock, [param now_ms] being Godot's clock at the call.
-static func decode(raw: PackedInt32Array, now_ms: int) -> Array:
+## clock, [param now_ms] being Godot's clock at the call, with positions mapped by [param to_local].
+static func decode(raw: PackedInt32Array, now_ms: int, to_local: Transform2D = Transform2D.IDENTITY) -> Array:
 	var out: Array = []
 	if raw.is_empty():
 		return out
@@ -80,7 +89,8 @@ static func decode(raw: PackedInt32Array, now_ms: int) -> Array:
 			kind = TouchType.DOWN
 		elif action == AndroidBridge.TOUCH_UP or action == AndroidBridge.TOUCH_CANCEL:
 			kind = TouchType.UP
-		out.append([kind, raw[i + 1], raw[i + 2] / AndroidBridge.TOUCH_FIXED, raw[i + 3] / AndroidBridge.TOUCH_FIXED, raw[i + 4] + offset])
+		var at := to_local * Vector2(raw[i + 2] / AndroidBridge.TOUCH_FIXED, raw[i + 3] / AndroidBridge.TOUCH_FIXED)
+		out.append([kind, raw[i + 1], at.x, at.y, raw[i + 4] + offset])
 		i += AndroidBridge.TOUCH_STRIDE
 	return out
 

@@ -13,6 +13,9 @@ const DESKTOP_DP_WIDTH := 1080.0 / 2.625
 static var density := 1.0
 ## Overrides the computed density (tests, captures); 0 = computed.
 static var forced_density := 0.0
+## Overrides the safe-area insets (left, top, right, bottom, dp) for tests and captures of phones
+## with cutouts; negative x = use the display's own.
+static var forced_insets := Vector4(-1.0, 0.0, 0.0, 0.0)
 
 
 ## The density for a window [param px_size] in physical pixels.
@@ -56,6 +59,8 @@ static func safe_area_dp(window: Window) -> Rect2:
 
 ## Insets (left, top, right, bottom) in dp from the safe area: Compose's safeDrawing.
 static func insets_dp(window: Window) -> Vector4:
+	if forced_insets.x >= 0.0:
+		return forced_insets
 	var safe := safe_area_dp(window)
 	var full := size_dp(window)
 	return Vector4(safe.position.x, safe.position.y, full.x - safe.end.x, full.y - safe.end.y)
