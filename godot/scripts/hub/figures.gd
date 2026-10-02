@@ -44,7 +44,6 @@ const SLUSH_COLORS: Array[int] = [0xFF2FB8FF, 0xFFFF3D6E, 0xFF7CF25A, 0xFFB070FF
 const _EYE_R := HEAD_R + 0.05
 
 static var _paints := {}
-static var _solids := {}
 static var _hat_models := {}
 static var _propeller: Model = null
 static var _cups: Array[Model] = []
@@ -118,49 +117,9 @@ static func paint(color: int) -> Region:
 	var c := color & 0xFFFFFFFF
 	var t: PaTexture = _paints.get(c)
 	if t == null:
-		t = hall_paint(c, 0.2, 0.72)
+		t = HallArt.paint(c, 0.2, 0.72)
 		_paints[c] = t
 	return t.full()
-
-
-## HallArt.paint's recipe: a soft vertical gradient with fine grain (64 × 64), cached by colour and
-## shading. The hall's HallArt is the hall's own file; this is the same texture for the figures'
-## colours (see the porting notes).
-static func hall_paint(color: int, top: float = 0.12, bottom: float = 0.8) -> PaTexture:
-	var key := "%x|%d|%d" % [color & 0xFFFFFFFF, int(top * 1000.0), int(bottom * 1000.0)]
-	var t: PaTexture = _paints.get(key)
-	if t != null:
-		return t
-	var tp := TexPaint.new(64, 64)
-	tp.vgrad(0.0, 0.0, 64.0, 64.0, [lift(color, top), dim(color, bottom)])
-	tp.grain(0.03, MathUtil.i32(color))
-	t = tp.to_texture()
-	_paints[key] = t
-	return t
-
-
-## HallArt.solid: a flat 4 × 4 texture of [param color].
-static func hall_solid(color: int) -> PaTexture:
-	var c := color & 0xFFFFFFFF
-	var t: PaTexture = _solids.get(c)
-	if t == null:
-		t = PaTexture.solid(4, 4, c)
-		_solids[c] = t
-	return t
-
-
-## HallArt's colour helpers: [param c] darkened to [param f] of itself, lifted toward white by
-## [param f], and given alpha [param a].
-static func dim(c: int, f: float) -> int:
-	return Pal.mix_argb(c, 0xFF000000, 1.0 - f)
-
-
-static func lift(c: int, f: float) -> int:
-	return Pal.mix_argb(c, 0xFFFFFFFF, f)
-
-
-static func alpha(c: int, a: float) -> int:
-	return (clampi(int(a * 255.0), 0, 255) << 24) | (c & 0xFFFFFF)
 
 
 ## What [param p_look] always buys at the café: most kids a slushie, some a cone.
@@ -186,8 +145,8 @@ static func item_model(item: int, seed_value: int) -> Model:
 static func _cup(color: int) -> Model:
 	var b := ModelBuilder.new()
 	b.lathe(0.0, -3.2, 0.0, PackedFloat32Array([1.35, 0.0, 1.6, 2.4, 1.9, 6.4]), 12, paint(color), -1, 0.5)
-	b.cylinder(0.0, 0.0, -1.1, 1.3, 1.72, 12, hall_solid(0xFFFFFFFF).full(), null, 0.0, -1, null, false, NAN, true, 0.3)
-	b.sphere(0.0, 3.2, 0.0, 1.95, hall_solid(0xFFE8F4FF).full(), 12, 4, 0.45, -1, 0.9, 0.0, 0.0, 1.0)
+	b.cylinder(0.0, 0.0, -1.1, 1.3, 1.72, 12, HallArt.solid(0xFFFFFFFF).full(), null, 0.0, -1, null, false, NAN, true, 0.3)
+	b.sphere(0.0, 3.2, 0.0, 1.95, HallArt.solid(0xFFE8F4FF).full(), 12, 4, 0.45, -1, 0.9, 0.0, 0.0, 1.0)
 	b.capsule(0.3, 3.6, 0.0, 0.9, 7.2, -0.3, 0.3, paint(0xFFFF4FA8), 5)
 	return b.build()
 
@@ -202,10 +161,11 @@ static func _build_cone() -> Model:
 		tp.line(k + 32.0, 0.0, float(k), 32.0, 1.4, 0xFFA8692A)
 		k += 8
 	var waffle := tp.to_texture()
+	tp.recycle()
 	b.lathe(0.0, -4.5, 0.0, PackedFloat32Array([0.1, 0.0, 1.3, 3.5, 2.1, 6.0]), 12, waffle.full(), -1, 0.1)
-	var cream := hall_paint(0xFFFFF4E4, 0.3, 0.85).full()
+	var cream := HallArt.paint(0xFFFFF4E4, 0.3, 0.85).full()
 	b.sphere(0.0, 2.1, 0.0, 2.2, cream, 12, 6, 0.7, -1, 0.5)
-	b.sphere(0.0, 3.6, 0.0, 1.6, hall_paint(0xFFFF9EC8, 0.3, 0.85).full(), 10, 5, 0.8, -1, 0.5)
+	b.sphere(0.0, 3.6, 0.0, 1.6, HallArt.paint(0xFFFF9EC8, 0.3, 0.85).full(), 10, 5, 0.8, -1, 0.5)
 	b.cylinder(0.0, 0.0, 4.6, 6.0, 0.9, 8, cream, null, 0.0, -1, null, false, 0.05)
 	return b.build()
 
@@ -251,6 +211,7 @@ static func _build_hat(style: int) -> Model:
 			y += 12
 		tp.grain(0.12, 5)
 		var stripes := tp.to_texture()
+		tp.recycle()
 		b.sphere(0.0, 0.5, 0.0, r + 0.8, stripes.full(), 18, 8, 1.08, -1, 0.0, 0.0, 0.18, 1.0)
 		b.cylinder(0.0, 0.0, 1.0, 3.6, r + 0.9, 18, paint(0xFF3DDC84))
 		b.sphere(0.0, r + 2.6, 0.0, 2.4, paint(0xFFFFE14D))
@@ -264,6 +225,7 @@ static func _build_hat(style: int) -> Model:
 		for k in 20:
 			tp.circle(float(k * 37 % 128), float(k * 23 % 64), 2.0, 0xFFFFE14D)
 		var tex := tp.to_texture()
+		tp.recycle()
 		b.cylinder(0.0, 0.0, 5.5, 17.0, 4.8, 14, tex.full(), null, 0.0, -1, null, false, 0.2, true, 0.3)
 		b.sphere(0.0, 17.2, 0.0, 1.8, paint(0xFFFFE14D))
 	elif style == Catalog.HatStyle.HEADPHONES:
@@ -285,6 +247,7 @@ static func _build_hat(style: int) -> Model:
 		for k in 8:
 			tp.rect(k * 16.0, 0.0, 16.0, 32.0, cs[k % 4])
 		var tex := tp.to_texture()
+		tp.recycle()
 		b.sphere(0.0, 0.0, 0.0, r + 0.6, tex.full(), 16, 8, 1.0, -1, 0.3, 0.0, 0.3, 1.0)
 		b.capsule(0.0, r + 0.3, 0.0, 0.0, r + 3.0, 0.0, 0.4, paint(0xFF888888))
 	elif style == Catalog.HatStyle.WIZARD:
@@ -295,6 +258,7 @@ static func _build_hat(style: int) -> Model:
 			var y := float(k * 29 % 128)
 			tp.text("★", x, y, 16.0, 0xFFFFE14D, Fonts.heavy())
 		var tex := tp.to_texture()
+		tp.recycle()
 		b.cylinder(0.0, 0.0, 3.5, 22.0, r - 0.5, 16, tex.full(), null, 0.0, -1, null, false, 0.3, true, 0.2)
 		b.lathe(0.0, 3.4, 0.0, PackedFloat32Array([r + 5.0, 0.3, r + 4.5, 0.0, r - 1.0, 0.2]), 18, tex.full())
 	elif style == Catalog.HatStyle.TOPHAT:
@@ -303,7 +267,7 @@ static func _build_hat(style: int) -> Model:
 		b.cylinder(0.0, 0.0, 3.5, 5.0, r - 1.4, 18, paint(0xFFE8323C))
 		b.lathe(0.0, 3.3, 0.0, PackedFloat32Array([r + 3.0, 0.5, r + 3.0, 0.0, r - 1.5, 0.1]), 18, c, -1, 0.5)
 	elif style == Catalog.HatStyle.CROWN:
-		var gold := hall_paint(0xFFFFC83D, 0.35, 0.7).full()
+		var gold := HallArt.paint(0xFFFFC83D, 0.35, 0.7).full()
 		b.cylinder(0.0, 0.0, 4.0, 7.5, r - 1.0, 18, gold, null, 0.0, -1, null, false, r - 0.6, true, 0.9)
 		for k in 6:
 			var a := k * PI / 3.0
@@ -313,7 +277,7 @@ static func _build_hat(style: int) -> Model:
 			b.sphere(x, 11.3, z, 0.6, gold, 6, 4, 1.0, -1, 0.9)
 		b.sphere(0.0, 5.8, r - 0.2, 1.2, paint(0xFFE8323C), 16, 10, 1.0, -1, 1.0)
 	elif style == Catalog.HatStyle.HALO:
-		var halo_gold := hall_solid(0xFFFFE99A).full()
+		var halo_gold := HallArt.solid(0xFFFFE99A).full()
 		b.torus(0.0, 13.5, 0.0, 6.0, 0.7, halo_gold, 22, 6, -1, 0.0, 1.6)
 	return b.build()
 
@@ -345,7 +309,7 @@ static func _build_neck(skin: int) -> Model:
 static func _build_apron(apron_color: int) -> Model:
 	var b := ModelBuilder.new()
 	var apron := paint(apron_color)
-	var trim := paint(lift(apron_color, 0.45))
+	var trim := paint(HallArt.lift(apron_color, 0.45))
 	b.box(-5.2, 7.5 - HIP_Y, 4.1, 5.2, 20.5 - HIP_Y, 5.5, BoxFaces.new(apron, apron, apron, null, null, 0.0, 0.0, 0.0, 0.1))
 	b.box(-3.4, 20.5 - HIP_Y, 3.9, 3.4, 25.2 - HIP_Y, 5.2, BoxFaces.new(apron, apron, apron, apron, null, 0.0, 0.0, 0.0, 0.1))
 	b.box(-2.6, 12.5 - HIP_Y, 5.5, 2.6, 15.8 - HIP_Y, 5.8, BoxFaces.new(trim, trim, trim, trim))
@@ -507,7 +471,7 @@ static func _paint_face(skin: int, hair_color: int) -> PaTexture:
 	var w := 256
 	var h := 128
 	var tp := TexPaint.new(w, h)
-	tp.vgrad(0.0, 0.0, float(w), float(h), [lift(skin, 0.08), dim(skin, 0.88)])
+	tp.vgrad(0.0, 0.0, float(w), float(h), [HallArt.lift(skin, 0.08), HallArt.dim(skin, 0.88)])
 	var cx := w * 0.25
 	var cy := h * 0.5
 	var ink := 0xFF1C140E
@@ -516,7 +480,7 @@ static func _paint_face(skin: int, hair_color: int) -> PaTexture:
 		tp.oval(ex, cy + 2.0, 5.2, 7.0, 0xFFFFFFFF)
 		tp.oval(ex, cy + 3.0, 4.2, 5.6, ink)
 		tp.circle(ex - 1.5, cy + 0.5, 1.6, 0xFFFFFFFF)
-		tp.line(ex - 5.0, cy - 8.0, ex + 5.0, cy - 9.5 - s * 0.5, 2.2, dim(hair_color, 0.8))
+		tp.line(ex - 5.0, cy - 8.0, ex + 5.0, cy - 9.5 - s * 0.5, 2.2, HallArt.dim(hair_color, 0.8))
 		tp.oval(cx + s * 21.0, cy + 14.0, 5.0, 3.0, 0x55FF5A7A)
 	var p := tp.paint
 	p.reset()
@@ -525,8 +489,10 @@ static func _paint_face(skin: int, hair_color: int) -> PaTexture:
 	p.round_cap = true
 	p.color = 0xFF7A2A20
 	tp.c_draw_arc(cx - 7.0, cy + 10.0, cx + 7.0, cy + 21.0, 20.0, 140.0, false, p)
-	tp.oval(cx, cy + 9.0, 2.0, 1.4, dim(skin, 0.8))
-	return tp.to_texture()
+	tp.oval(cx, cy + 9.0, 2.0, 1.4, HallArt.dim(skin, 0.8))
+	var t := tp.to_texture()
+	tp.recycle()
+	return t
 
 
 ## Hair colour with soft strands; the face area is left clear (cut out).
@@ -543,8 +509,8 @@ static func _paint_hair(hair_color: int, style: int) -> PaTexture:
 	var w := 256
 	var h := 128
 	var tp := TexPaint.new(w, h)
-	tp.vgrad(0.0, 0.0, float(w), float(h), [lift(hair_color, 0.12), dim(hair_color, 0.75)])
-	var strand := alpha(lift(hair_color, 0.25), 0.35)
+	tp.vgrad(0.0, 0.0, float(w), float(h), [HallArt.lift(hair_color, 0.12), HallArt.dim(hair_color, 0.75)])
+	var strand := HallArt.alpha(HallArt.lift(hair_color, 0.25), 0.35)
 	for k in 90:
 		var x := float(k * 53 % w)
 		tp.line(x, 0.0, x + 6.0, h * 0.9, 1.2, strand)
@@ -557,4 +523,6 @@ static func _paint_hair(hair_color: int, style: int) -> PaTexture:
 	p.xfer = PaPaint.Xfer.CLEAR
 	tp.c_draw_round_rect(cx - half_w, fringe, cx + half_w, h + 20.0, 16.0, 16.0, p)
 	p.xfer = PaPaint.Xfer.NONE
-	return tp.to_texture()
+	var t := tp.to_texture()
+	tp.recycle()
+	return t
