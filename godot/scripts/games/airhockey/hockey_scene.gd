@@ -191,12 +191,6 @@ var _cpu_mallet: Model = null
 var _xf := Xform.new()
 
 
-## hub/CabinetForm.kt ModelBuilder.beveledBox (chamfered edges, floor occlusion). [param bevel] and
-## [param floor_ao] NAN mean the hall's defaults. Until the hall's port is merged this builds the
-## plain box (see docs/parity/notes/games-b.md).
-static func _beveled_box(b: ModelBuilder, x0: float, y0: float, z0: float, x1: float, y1: float, z1: float,
-		f: BoxFaces, tint: int = -1, _bevel: float = NAN, _floor_ao: float = NAN) -> void:
-	b.box(x0, y0, z0, x1, y1, z1, f, tint)
 
 
 func _build_room() -> Model:
@@ -232,13 +226,13 @@ func _build_table() -> Model:
 		0.0, 0.0, NAN, NAN, Blend.OPAQUE, 0.0, true, -1, HockeyLook.SURFACE_GLOSS)
 	var g := HockeyLook.RAIL_GLOSS
 	# Side rails and the end rails either side of each goal slot, chamfered so the edges catch the lamp.
-	_beveled_box(b, rl - 16.0, 0.0, rt - 16.0, rl, rh, rb + 16.0, BoxFaces.new(rail, null, rail, rail, null, 0.0, 0.0, 0.0, g), -1, 1.4, 0.0)
-	_beveled_box(b, rr, 0.0, rt - 16.0, rr + 16.0, rh, rb + 16.0, BoxFaces.new(rail, rail, null, rail, null, 0.0, 0.0, 0.0, g), -1, 1.4, 0.0)
+	CabinetForm.beveled_box(b, rl - 16.0, 0.0, rt - 16.0, rl, rh, rb + 16.0, BoxFaces.new(rail, null, rail, rail, null, 0.0, 0.0, 0.0, g), -1, 1.4, 0.0)
+	CabinetForm.beveled_box(b, rr, 0.0, rt - 16.0, rr + 16.0, rh, rb + 16.0, BoxFaces.new(rail, rail, null, rail, null, 0.0, 0.0, 0.0, g), -1, 1.4, 0.0)
 	for end in 2:
 		var z0 := rt - 16.0 if end == 0 else rb
 		var z1 := z0 + 16.0
-		_beveled_box(b, rl, 0.0, z0, cx - gh, rh, z1, BoxFaces.new(rail, null, rail, rail, null, 0.0, 0.0, 0.0, g), -1, 1.2, 0.0)
-		_beveled_box(b, cx + gh, 0.0, z0, rr, rh, z1, BoxFaces.new(rail, rail, null, rail, null, 0.0, 0.0, 0.0, g), -1, 1.2, 0.0)
+		CabinetForm.beveled_box(b, rl, 0.0, z0, cx - gh, rh, z1, BoxFaces.new(rail, null, rail, rail, null, 0.0, 0.0, 0.0, g), -1, 1.2, 0.0)
+		CabinetForm.beveled_box(b, cx + gh, 0.0, z0, rr, rh, z1, BoxFaces.new(rail, rail, null, rail, null, 0.0, 0.0, 0.0, g), -1, 1.2, 0.0)
 		# The goal slot: a dark pocket below the rail, and a plate over its mouth.
 		b.quad(cx - gh, -30.0, z0, cx + gh, -30.0, z0, cx + gh, -30.0, z1, cx - gh, -30.0, z1, HockeyArt.slot().full(), 0.0, 1.0, 0.0)
 		b.box(cx - gh, rh - 4.0, z0, cx + gh, rh, z1, BoxFaces.new(rail, null, null, rail, null, 0.0, 0.0, 0.0, g))
@@ -266,11 +260,11 @@ func _build_table() -> Model:
 				b.quad(ax, rh, az, bx, rh, bz, bx, 0.0, bz, ax, 0.0, az, rail, -sx * cos(tm), 0.0, -sz * sin(tm),
 					0.0, 0.0, NAN, NAN, Blend.OPAQUE, 0.0, false, -1, g)
 	# Table body under the rink.
-	_beveled_box(b, rl - 16.0, HockeyGeo.FLOOR_Y, rt - 16.0, rr + 16.0, 0.0, rb + 16.0, BoxFaces.new(body, body, body), -1, 1.2)
+	CabinetForm.beveled_box(b, rl - 16.0, HockeyGeo.FLOOR_Y, rt - 16.0, rr + 16.0, 0.0, rb + 16.0, BoxFaces.new(body, body, body), -1, 1.2)
 	# The scoreboard on two posts behind the far goal, in a housing.
 	for px: float in [cx - 80.0, cx + 80.0]:
-		_beveled_box(b, px - 5.0, HockeyGeo.FLOOR_Y, rt - 42.0, px + 5.0, 150.0, rt - 32.0, BoxFaces.new(post, post, post, null, null, 0.0, 0.0, 0.0, 0.4), -1, 1.0)
-	_beveled_box(b, cx - 104.0, 148.0, rt - 46.0, cx + 104.0, 222.0, rt - 32.0, BoxFaces.new(post, post, post, post, null, 0.0, 0.0, 0.0, 0.5), -1, 2.5, 0.0)
+		CabinetForm.beveled_box(b, px - 5.0, HockeyGeo.FLOOR_Y, rt - 42.0, px + 5.0, 150.0, rt - 32.0, BoxFaces.new(post, post, post, null, null, 0.0, 0.0, 0.0, 0.4), -1, 1.0)
+	CabinetForm.beveled_box(b, cx - 104.0, 148.0, rt - 46.0, cx + 104.0, 222.0, rt - 32.0, BoxFaces.new(post, post, post, post, null, 0.0, 0.0, 0.0, 0.5), -1, 2.5, 0.0)
 	return b.build()
 
 
