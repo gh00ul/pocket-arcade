@@ -66,7 +66,8 @@ func _ready() -> void:
 	_start_app()
 
 
-## Builds the first screen. Until the app's screens are ported this shows the foundation check.
+## Builds the first screen. Until the title screen and the hall are ported, preview builds open
+## on [PreviewLobby].
 func _start_app() -> void:
 	var path := "res://scripts/app/arcade_app.gd"
 	if ResourceLoader.exists(path):
@@ -75,10 +76,9 @@ func _start_app() -> void:
 		if app.has_method("start"):
 			app.call("start", self)
 		return
-	var check := FoundationCheck.new()
-	check.main = self
-	check.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	app_root.add_child(check)
+	var lobby := PreviewLobby.new()
+	lobby.main = self
+	app_root.add_child(lobby)
 
 
 func _on_back() -> void:
@@ -107,48 +107,3 @@ func take_launch_game() -> String:
 	var id := launch_game
 	launch_game = ""
 	return id
-
-
-## A plain screen that exercises the platform pieces (sound, music, haptics, plugin) until the app
-## itself is ported. Tap: a coin and a knock; the music plays the title theme.
-class FoundationCheck:
-	extends Control
-	var main: Main
-	var _label: Label
-	var _taps := 0
-
-	func _ready() -> void:
-		var bg := ColorRect.new()
-		bg.color = Pal.c(Pal.NIGHT)
-		bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		add_child(bg)
-		_label = Label.new()
-		_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		_label.add_theme_font_size_override("font_size", 16)
-		add_child(_label)
-		main.audio.enter_scene(MusicScene.TITLE)
-		main.audio.music.set_intensity(0.8)
-		main.audio.ambient_target = 0.0
-
-	func _gui_input(event: InputEvent) -> void:
-		if event is InputEventScreenTouch and (event as InputEventScreenTouch).pressed:
-			_taps += 1
-			main.audio.play(Sfx.COIN)
-			main.services.haptics.hit()
-
-	func _process(_delta: float) -> void:
-		var d := main.services.haptics.device()
-		var vib := "none"
-		if d != null:
-			vib = "amplitude %s, primitives %s, thud %s, low tick %s" % [d.amplitude_control, d.primitives, d.thud, d.low_tick]
-		var s := main.services.repo.state()
-		var g := main.services.settings_store.settings()
-		var photos := DirAccess.get_files_at("user://photos") if DirAccess.dir_exists_absolute("user://photos") else PackedStringArray()
-		_label.text = "POCKET ARCADE\nGodot port foundation\n\nplugin: %s\nvibrator: %s\nsounds ready: %s\nmigrated from: %s\ntokens %d  tickets %d  plays %d\nfov %d  look %d%%  reduce motion %s\nhaptics %s %d%%\nsfx %d%%  ambience %d%%  music %d%%\nphotos %d\ntaps %d\ndp %s  density %.3f" % [
-			AndroidBridge.available(), vib, main.audio.is_ready(), ",".join(main.services.migration.sources),
-			s.tokens, s.tickets, s.total_plays, g.fov_deg, g.look_percent, g.reduce_motion, g.haptics, g.haptics_percent,
-			g.sfx_percent, g.ambience_percent, g.music_percent, photos.size(), _taps, Display.size_dp(get_window()), Display.density]

@@ -95,13 +95,22 @@ func test_a_round_plays_out_the_same_at_any_frame_rate() -> void:
 		assert_eq(first, outcomes[name], "%s plays out like 60 Hz" % name)
 
 
+## Test files allowed to read the clock, and why: none of them times anything.
+const CLOCK_OK := {
+	"run_tests.gd": "the runner reports how long the run took",
+	"data/repo_fixture.gd": "a unique scratch folder name",
+	"bugs/frame_timing_test.gd": "this check",
+	"share/photo_store_test.gd": "a unique scratch folder name",
+	"share/photo_strip_test.gd": "checks the date label against the phone's own date and zone (midnight handled)",
+}
+
+
 func test_no_test_reads_the_wall_clock() -> void:
-	# Tests drive time by steps. The runner times the run, the fixture names scratch folders, and
-	# profiling (tests/perf) measures hot loops; nothing else may look at the clock.
-	var clock := RegEx.create_from_string("Time[.]get_ticks|OS[.]delay|create_timer|get_unix_time")
+	# Tests drive time by steps; profiling (tests/perf) is the one place that times things.
+	var clock := RegEx.create_from_string("Time[.]get_ticks_[mu]sec|_from_system[(]|OS[.]delay_|create_timer[(]")
 	var found: Array = []
 	for path: String in _scripts("res://tests"):
-		if path.ends_with("run_tests.gd") or path.ends_with("repo_fixture.gd") or path.ends_with("frame_timing_test.gd") or path.contains("/perf/"):
+		if CLOCK_OK.has(path.trim_prefix("res://tests/")) or path.contains("/perf/"):
 			continue
 		if clock.search(FileAccess.get_file_as_string(path)) != null:
 			found.append(path)
