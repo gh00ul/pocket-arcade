@@ -162,12 +162,6 @@ func light(r: Renderer3D, cam_y: float, top_y: float, top_level: int, flash: flo
 var _roof_model: Model = null
 
 
-## hub/CabinetForm.kt ModelBuilder.beveledBox (chamfered edges, floor occlusion). [param bevel] and
-## [param floor_ao] NAN mean the hall's defaults. Until the hall's port is merged this builds the
-## plain box (see docs/parity/notes/games-b.md).
-static func _beveled_box(b: ModelBuilder, x0: float, y0: float, z0: float, x1: float, y1: float, z1: float,
-		f: BoxFaces, tint: int = -1, _bevel: float = NAN, _floor_ao: float = NAN) -> void:
-	b.box(x0, y0, z0, x1, y1, z1, f, tint)
 
 
 func _build_roof() -> Model:
@@ -181,10 +175,10 @@ func _build_roof() -> Model:
 	var f := BoxFaces.new(steel, steel, steel, steel, null, 0.0, 0.0, 0.0, 0.4)
 	var t := 26.0
 	var up := y + 28.0
-	_beveled_box(b, -h - t, y, -h - t, h + t, up, -h, f, -1, 3.0, 0.0)
-	_beveled_box(b, -h - t, y, h, h + t, up, h + t, f, -1, 3.0, 0.0)
-	_beveled_box(b, -h - t, y, -h, -h, up, h, f, -1, 3.0, 0.0)
-	_beveled_box(b, h, y, -h, h + t, up, h, f, -1, 3.0, 0.0)
+	CabinetForm.beveled_box(b, -h - t, y, -h - t, h + t, up, -h, f, -1, 3.0, 0.0)
+	CabinetForm.beveled_box(b, -h - t, y, h, h + t, up, h + t, f, -1, 3.0, 0.0)
+	CabinetForm.beveled_box(b, -h - t, y, -h, -h, up, h, f, -1, 3.0, 0.0)
+	CabinetForm.beveled_box(b, h, y, -h, h + t, up, h, f, -1, 3.0, 0.0)
 	return b.build()
 
 

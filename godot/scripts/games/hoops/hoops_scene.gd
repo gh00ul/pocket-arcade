@@ -252,12 +252,6 @@ func _steel_faces(gloss: float = HoopsLook.FRAME_GLOSS) -> BoxFaces:
 	return BoxFaces.new(s, s, s, s, null, 0.0, 0.0, 0.0, gloss)
 
 
-## hub/CabinetForm.kt ModelBuilder.beveledBox (chamfered edges, floor occlusion). [param bevel] and
-## [param floor_ao] NAN mean the hall's defaults. Until the hall's port is merged this builds the
-## plain box (see docs/parity/notes/games-b.md).
-static func _beveled_box(b: ModelBuilder, x0: float, y0: float, z0: float, x1: float, y1: float, z1: float,
-		f: BoxFaces, tint: int = -1, _bevel: float = NAN, _floor_ao: float = NAN) -> void:
-	b.box(x0, y0, z0, x1, y1, z1, f, tint)
 
 
 func _build_room() -> Model:
@@ -280,22 +274,22 @@ func _build_room() -> Model:
 	var ad := HoopsLook.AD_HW
 	b.quad(-ad, HoopsLook.AD_H, HoopsLook.AD_Z, ad, HoopsLook.AD_H, HoopsLook.AD_Z, ad, 0.0, HoopsLook.AD_Z, -ad, 0.0, HoopsLook.AD_Z,
 		HoopsArt.ad_board().full(), 0.0, 0.0, 1.0, 0.0, 0.0, NAN, NAN, Blend.OPAQUE, HoopsLook.AD_EMISSIVE)
-	_beveled_box(b, -ad - 1.0, HoopsLook.AD_H, HoopsLook.AD_Z - 1.5, ad + 1.0, HoopsLook.AD_H + 3.5, HoopsLook.AD_Z + 2.5, _steel_faces(), -1, 0.6, 0.0)
+	CabinetForm.beveled_box(b, -ad - 1.0, HoopsLook.AD_H, HoopsLook.AD_Z - 1.5, ad + 1.0, HoopsLook.AD_H + 3.5, HoopsLook.AD_Z + 2.5, _steel_faces(), -1, 0.6, 0.0)
 	# The cage's back posts and top rail.
 	for sx: float in [-w, w]:
-		_beveled_box(b, sx - 4.0, 0.0, back + 3.0, sx + 4.0, 424.0, back + 11.0, _steel_faces(), -1, NAN, 0.4)
-	_beveled_box(b, -w, 414.0, back + 3.0, w, 424.0, back + 11.0, _steel_faces(), -1, NAN, 0.0)
+		CabinetForm.beveled_box(b, sx - 4.0, 0.0, back + 3.0, sx + 4.0, 424.0, back + 11.0, _steel_faces(), -1, CabinetForm.BEVEL, 0.4)
+	CabinetForm.beveled_box(b, -w, 414.0, back + 3.0, w, 424.0, back + 11.0, _steel_faces(), -1, CabinetForm.BEVEL, 0.0)
 	# Floodlight housings in the top corners.
 	for sx: float in [-HoopsLook.LAMP_X, HoopsLook.LAMP_X]:
-		_beveled_box(b, sx - 22.0, HoopsLook.LAMP_Y - 9.0, HoopsLook.LAMP_Z - 6.0, sx + 22.0, HoopsLook.LAMP_Y + 7.0, HoopsLook.LAMP_Z + 4.0, _steel_faces(0.4), -1, 0.7, 0.0)
+		CabinetForm.beveled_box(b, sx - 22.0, HoopsLook.LAMP_Y - 9.0, HoopsLook.LAMP_Z - 6.0, sx + 22.0, HoopsLook.LAMP_Y + 7.0, HoopsLook.LAMP_Z + 4.0, _steel_faces(0.4), -1, 0.7, 0.0)
 	# The backboard's rail, high on the wall, and its brackets.
-	_beveled_box(b, -HoopsLook.WALL_HALF_W * 0.6, HoopsLook.RAIL_Y - 6.0, HoopsLook.RAIL_Z - 3.0, HoopsLook.WALL_HALF_W * 0.6, HoopsLook.RAIL_Y + 6.0, HoopsLook.RAIL_Z + 3.0, _steel_faces(), -1, 0.7, 0.0)
+	CabinetForm.beveled_box(b, -HoopsLook.WALL_HALF_W * 0.6, HoopsLook.RAIL_Y - 6.0, HoopsLook.RAIL_Z - 3.0, HoopsLook.WALL_HALF_W * 0.6, HoopsLook.RAIL_Y + 6.0, HoopsLook.RAIL_Z + 3.0, _steel_faces(), -1, 0.7, 0.0)
 	for bx: float in [-140.0, -70.0, 70.0, 140.0]:
 		b.box(bx - 3.0, HoopsLook.RAIL_Y - 5.0, back + 1.0, bx + 3.0, HoopsLook.RAIL_Y + 5.0, HoopsLook.RAIL_Z - 3.0, BoxFaces.new(steel, steel, steel, steel))
 	# Dark plates behind the sign and the two readouts.
-	_beveled_box(b, -HoopsLook.SIGN_HW - 6.0, HoopsLook.SIGN_Y - HoopsLook.SIGN_HH - 5.0, back + 0.5, HoopsLook.SIGN_HW + 6.0, HoopsLook.SIGN_Y + HoopsLook.SIGN_HH + 5.0, HoopsLook.SIGN_Z - 1.5, _steel_faces(0.3), 0xFF444458, 0.8, 0.0)
+	CabinetForm.beveled_box(b, -HoopsLook.SIGN_HW - 6.0, HoopsLook.SIGN_Y - HoopsLook.SIGN_HH - 5.0, back + 0.5, HoopsLook.SIGN_HW + 6.0, HoopsLook.SIGN_Y + HoopsLook.SIGN_HH + 5.0, HoopsLook.SIGN_Z - 1.5, _steel_faces(0.3), 0xFF444458, 0.8, 0.0)
 	for sx: float in [-HoopsLook.PANEL_X, HoopsLook.PANEL_X]:
-		_beveled_box(b, sx - HoopsLook.PANEL_HW - 3.0, HoopsLook.SIGN_Y - HoopsLook.PANEL_HH - 3.0, back + 0.5, sx + HoopsLook.PANEL_HW + 3.0, HoopsLook.SIGN_Y + HoopsLook.PANEL_HH + 3.0, HoopsLook.PANEL_Z - 0.4, _steel_faces(0.4), -1, 0.8, 0.0)
+		CabinetForm.beveled_box(b, sx - HoopsLook.PANEL_HW - 3.0, HoopsLook.SIGN_Y - HoopsLook.PANEL_HH - 3.0, back + 0.5, sx + HoopsLook.PANEL_HW + 3.0, HoopsLook.SIGN_Y + HoopsLook.PANEL_HH + 3.0, HoopsLook.PANEL_Z - 0.4, _steel_faces(0.4), -1, 0.8, 0.0)
 	return b.build()
 
 
@@ -311,13 +305,13 @@ func _build_board() -> Model:
 	b.quad(-hw, top, bz, hw, top, bz, hw, bottom, bz, -hw, bottom, bz, HoopsArt.board_face().full(), 0.0, 0.0, 1.0,
 		0.0, 0.0, NAN, NAN, Blend.OPAQUE, 0.0, true, -1, HoopsLook.BOARD_GLOSS)
 	var f := _steel_faces()
-	_beveled_box(b, -hw - t, top, bz - 5.0, hw + t, top + t, bz + 3.0, f, -1, 0.7, 0.0)
-	_beveled_box(b, -hw - t, bottom - t, bz - 5.0, hw + t, bottom, bz + 3.0, f, -1, 0.7, 0.0)
-	_beveled_box(b, -hw - t, bottom, bz - 5.0, -hw, top, bz + 3.0, f, -1, 0.7, 0.0)
-	_beveled_box(b, hw, bottom, bz - 5.0, hw + t, top, bz + 3.0, f, -1, 0.7, 0.0)
+	CabinetForm.beveled_box(b, -hw - t, top, bz - 5.0, hw + t, top + t, bz + 3.0, f, -1, 0.7, 0.0)
+	CabinetForm.beveled_box(b, -hw - t, bottom - t, bz - 5.0, hw + t, bottom, bz + 3.0, f, -1, 0.7, 0.0)
+	CabinetForm.beveled_box(b, -hw - t, bottom, bz - 5.0, -hw, top, bz + 3.0, f, -1, 0.7, 0.0)
+	CabinetForm.beveled_box(b, hw, bottom, bz - 5.0, hw + t, top, bz + 3.0, f, -1, 0.7, 0.0)
 	b.box(-hw, bottom, bz - 5.0, hw, top, bz - 0.5, BoxFaces.new(null, steel, steel, steel))
 	# The carriage: from the back of the board to the rail.
-	_beveled_box(b, -22.0, HoopsLook.RAIL_Y - 12.0, HoopsLook.RAIL_Z + 3.0, 22.0, HoopsLook.RAIL_Y + 12.0, bz - 5.0, f, -1, 0.7, 0.0)
+	CabinetForm.beveled_box(b, -22.0, HoopsLook.RAIL_Y - 12.0, HoopsLook.RAIL_Z + 3.0, 22.0, HoopsLook.RAIL_Y + 12.0, bz - 5.0, f, -1, 0.7, 0.0)
 	return b.build()
 
 
@@ -349,8 +343,8 @@ func _build_rim() -> Model:
 	# Mounting plate on the glass and the arm out to the rim.
 	var gap := (HoopsGeo.BOARD_Z - HoopsGeo.HOOP_Z) * S
 	var faces := BoxFaces.new(steel, steel, steel, steel, null, 0.0, 0.0, 0.0, 0.6)
-	_beveled_box(b, -11.0, -9.0, -gap - 0.5, 11.0, 7.0, -gap + 2.5, faces, -1, 0.6, 0.0)
-	_beveled_box(b, -3.0, -2.5, -gap + 2.0, 3.0, 1.5, -r + 2.0, faces, -1, 0.5, 0.0)
+	CabinetForm.beveled_box(b, -11.0, -9.0, -gap - 0.5, 11.0, 7.0, -gap + 2.5, faces, -1, 0.6, 0.0)
+	CabinetForm.beveled_box(b, -3.0, -2.5, -gap + 2.0, 3.0, 1.5, -r + 2.0, faces, -1, 0.5, 0.0)
 	return b.build()
 
 

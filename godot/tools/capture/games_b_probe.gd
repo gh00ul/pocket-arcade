@@ -167,70 +167,31 @@ func _draw_field() -> void:
 	ds.pop()
 
 
-## A contact sheet of the attract loop: the screen painted at eight moments of its cycle with a
-## TexPaint-backed painter at the hall's scale (10 texels a pixel; 24 × 18 pixels, 16 × 24 for the
-## tower cabinet, as hub/MachineArt.kt screenUnits), two to a row.
+## A contact sheet of the attract loop as the hall shows it: the machine's LiveScreen (hub,
+## through MachineArt and CanvasPainter, screen size from MachineArt.screen_units) painted at
+## eight moments; past 7 s of its 9 s cycle the screen shows the HIGH SCORE card instead.
 const ATTRACT_TIMES := [0.2, 0.9, 1.6, 2.3, 3.0, 4.2, 5.8, 6.4]
 var _attract_texs: Array[PaTexture] = []
-var _attract_tps: Array[TexPaint] = []
+var _attract_units := Vector2i(24, 18)
 
 
 func _draw_attract(ds: DrawScope) -> void:
-	var w := 16 if game is StackerGame else 24
-	var h := 24 if game is StackerGame else 18
-	var scale := 10
-	var base := 9.6 * 3.0 if game is StackerGame else (3.4 * 3.0 if game is HoopsGame else 7.0 * 3.0)
-	if _attract_tps.is_empty():
+	if _attract_texs.is_empty():
+		var art := MachineArt.new(game)
+		var base := 9.6 * 3.0 if game is StackerGame else (3.4 * 3.0 if game is HoopsGame else 7.0 * 3.0)
 		for i in ATTRACT_TIMES.size():
-			var tp := TexPaint.new(w * scale, h * scale)
-			tp.fill(0xFF000000)
-			game.draw_attract(_TexPainter.new(tp, float(scale)), w, h, base + ATTRACT_TIMES[i])
-			var tex := PaTexture.new(w * scale, h * scale)
-			tp.update(tex)
-			_attract_tps.append(tp)
-			_attract_texs.append(tex)
+			var ls := LiveScreen.new(art, 0)
+			# Screens repaint on alternate frames: one of the two calls paints.
+			ls.paint(1234, base + ATTRACT_TIMES[i])
+			ls.paint(1234, base + ATTRACT_TIMES[i])
+			_attract_units = ls.units
+			_attract_texs.append(ls.texture)
 	var cell_w := MiniGame.GAME_W / 2.0
-	var cell_h := cell_w * h / w
+	var cell_h := cell_w * _attract_units.y / _attract_units.x
+	if cell_h * 4.0 > MiniGame.GAME_H:
+		cell_h = MiniGame.GAME_H / 4.0 - 4.0
+		cell_w = cell_h * _attract_units.x / _attract_units.y
 	for i in _attract_texs.size():
 		var g := _attract_texs[i].gpu()
 		if g != null:
-			ds.draw_image(g, Vector2((i % 2) * cell_w + 2.0, (i / 2) * (cell_h + 4.0) + 2.0), Vector2(cell_w - 4.0, cell_h))
-
-
-## Kotlin's CanvasPainter (engine/r3d/TexPaint.kt), for this tool only: attract drawings in art
-## pixels painted as clean shapes and real text at [member scale] texels per pixel.
-class _TexPainter:
-	extends Painter
-	var tp: TexPaint
-	var scale: float
-
-	func _init(p_tp: TexPaint, p_scale: float) -> void:
-		tp = p_tp
-		scale = p_scale
-
-	static func _with_alpha(c: Variant, alpha: float) -> int:
-		var argb := Pal.to_argb(c) if c is Color else int(c) & 0xFFFFFFFF
-		var a := clampi(int(((argb >> 24) & 0xFF) * alpha), 0, 255)
-		return (a << 24) | (argb & 0xFFFFFF)
-
-	func fill(x: float, y: float, w: float, h: float, color: Variant, alpha: float = 1.0) -> void:
-		tp.rect(x * scale, y * scale, w * scale, h * scale, _with_alpha(color, alpha))
-
-	func disc(cx: float, cy: float, r: float, color: Variant, alpha: float = 1.0) -> void:
-		tp.circle(cx * scale, cy * scale, r * scale, _with_alpha(color, alpha))
-
-	func frame(x: float, y: float, w: float, h: float, color: Variant, alpha: float = 1.0) -> void:
-		var s := scale * 0.6
-		var p := tp.paint.reset()
-		p.style = PaPaint.Style.STROKE
-		p.stroke_width = s
-		p.color = _with_alpha(color, alpha)
-		tp.c_draw_rect(x * scale + s / 2.0, y * scale + s / 2.0, (x + w) * scale - s / 2.0, (y + h) * scale - s / 2.0, p)
-
-	func text(s: String, x: float, y: float, color: Variant, tiny: bool = false, alpha: float = 1.0, size: float = 1.0) -> void:
-		var px := (6.2 if tiny else 8.5) * size * scale
-		tp.text(s, x * scale, y * scale + px * 0.78, px, _with_alpha(color, alpha), Fonts.heavy(), TexPaint.ALIGN_LEFT)
-
-	func text_centered(s: String, cx: float, y: float, color: Variant, tiny: bool = false, alpha: float = 1.0, size: float = 1.0) -> void:
-		var px := (6.2 if tiny else 8.5) * size * scale
-		tp.text(s, cx * scale, y * scale + px * 0.78, px, _with_alpha(color, alpha), Fonts.heavy(), TexPaint.ALIGN_CENTER)
+			ds.draw_image(g, Vector2((i % 2) * (cell_w + 4.0) + 2.0, (i / 2) * (cell_h + 4.0) + 2.0), Vector2(cell_w, cell_h))
