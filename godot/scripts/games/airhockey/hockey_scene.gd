@@ -351,7 +351,8 @@ func draw_table(r: Renderer3D, t: float, goal_flash: float, goal_by_player: bool
 	_strip(r, white, cx + gh, rb + 2.0, rr, rb + 3.4, y, CYAN, level)
 	# Neon skirts under the side rails, split by team colour, with a soft halo.
 	var pulse := HockeyLook.NEON_GLOW_ALPHA + 0.08 * sin(t * 3.0)
-	for x: float in [rl - 17.0, rr + 17.0]:
+	for side in 2:
+		var x := rl - 17.0 if side == 0 else rr + 17.0
 		r.beam(x, -2.0, rt - 16.0, x, -2.0, cy, 3.0, white, Blend.OPAQUE, 1.3, 1.0, PINK)
 		r.beam(x, -2.0, cy, x, -2.0, rb + 16.0, 3.0, white, Blend.OPAQUE, 1.3, 1.0, CYAN)
 		r.beam(x, -2.0, rt - 16.0, x, -2.0, cy, 20.0, glow, Blend.ADD, 1.0, pulse, PINK)
