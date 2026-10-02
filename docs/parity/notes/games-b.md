@@ -123,7 +123,7 @@ build-13's score and the other 6 differ by one or two baskets; every step count 
 Captures (non-headless, 1080 × 2400 requested; this desktop clamps the window to 1080 × 2119,
 which still shows the whole 1080 × 1920 field) with `godot/tools/capture/games_b_probe.tscn`
 (plays a machine with build-13's good bot; `--attract` draws an eight-frame contact sheet of the
-attract loop at the hall's 10 texels a pixel, 24 × 18 and 16 × 24 for the tower) and
+attract loop through the hall's LiveScreen, 24 × 18 pixels and 16 × 24 for the tower) and
 `games_b_art_probe.tscn` (every painted texture of the three machines on a checkerboard):
 
 - Hoops at 7.3 s (on fire, ×5, "ON FIRE! X5", balls returning), at 26 s (the hoop moving, 20/26),
@@ -150,7 +150,14 @@ pictures were checked against the scene code and those older shots for framing (
 layout); a build-13 capture of each round on the emulator would allow a side-by-side.
 
 Draw calls (planned / measured by `GfxSlot`): hoops 31-38 (34/31 typical), air hockey 22-25,
-stacker 11-24 (it grows with the tower: 26 courses drawn).
+stacker 11-24 (it grows with the tower: 26 courses drawn). The lead's `game_probe.tscn` with
+`--seconds=6 --taps` reports hoops 31/30, air hockey 23/23, stacker 13/10 (its random taps topple
+the tower at once).
+
+The attract loops were also drawn through the hall's own `LiveScreen` (MachineArt, CanvasPainter,
+scanline glass, the HIGH SCORE card): `games_b_probe --attract` uses it, at the hall's screen sizes.
+On this desktop the system font standing in for Roboto Bold is wider, so "STACK" and the tower's
+HIGH SCORE card overrun the 16-pixel-wide screen by a few texels; on Android (Roboto) they fit.
 
 Costs on this desktop (RTX 3090 machine; a phone is several times slower): a simulation step (with
 the bot) takes 47 µs for hoops, 33 µs for air hockey, 10 µs for the stacker, headless. Recording
